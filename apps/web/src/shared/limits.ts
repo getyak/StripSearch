@@ -65,7 +65,18 @@ export const LIMITS = {
   researchTaskLookForMax: 1000,
   researchTaskObservationMax: 1000,
   researchTaskFailureMax: 1000,
-  researchTaskMaxPerUser: 50
+  researchTaskMaxPerUser: 50,
+
+  /** Platform discovery and post tracking. */
+  discoverySubjectMax: 254,
+  discoverySeedUrlMax: 2048,
+  discoveryImportBytes: 256 * 1024,
+  discoveryImportReportMax: 4000,
+  discoveryCorrectionsMax: 50,
+  discoveryNoteMax: 600,
+  discoveryCounterevidenceMax: 600,
+  discoveryMaxTasksPerUser: 200,
+  discoveryQueueLimit: 200
 } as const;
 
 export const SESSION_EXPIRES_SECONDS = 60 * 60 * 24 * 7;

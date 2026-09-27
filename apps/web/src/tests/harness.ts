@@ -179,6 +179,7 @@ export async function startTestServer(
     boot,
     async close() {
       boot.runner.stopAll();
+      boot.discoveryRunner.stopAll();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       if (!options.preserveData) rmSync(boot.config.dataDir, { recursive: true, force: true });
     }

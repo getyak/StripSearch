@@ -17,14 +17,21 @@ import {
 } from './http/middleware.js';
 import { registerRunRoutes } from './routes/runs.js';
 import { registerReviewRoutes } from './routes/review.js';
+import { registerDiscoveryRoutes } from './routes/discovery.js';
 import type { Runner } from './services/runner.js';
+import type { DiscoveryRunner } from './services/discovery-runner.js';
+import type { PlatformRegistry } from '../shared/platform-discovery.js';
 import type { ReviewStore } from './review-store.js';
+import type { DiscoveryStore } from './discovery-store.js';
 import type { Store } from './store.js';
 
 export interface AppDeps {
   config: AppConfig;
   store: Store;
   reviewStore: ReviewStore;
+  discoveryStore: DiscoveryStore;
+  discoveryRunner: DiscoveryRunner;
+  discoveryRegistry: PlatformRegistry;
   auth: Auth;
   runner: Runner;
   clientDir: string;
@@ -67,6 +74,10 @@ export function createApp(deps: AppDeps): Express {
   });
   app.use('/api', publicRouter);
 
+  // Discovery imports carry whole external tool reports, so this subtree gets
+  // its own bounded JSON parser before the smaller global one. Body-parser
+  // skips an already-parsed body, so the global limit stays in force elsewhere.
+  app.use('/api/discovery', express.json({ limit: LIMITS.discoveryImportBytes }));
   app.use(express.json({ limit: LIMITS.jsonBodyBytes }));
 
   const apiRouter = Router();
@@ -79,6 +90,11 @@ export function createApp(deps: AppDeps): Express {
     exaConfigured: Boolean(deps.config.exaApiKey)
   });
   registerReviewRoutes(apiRouter, { reviewStore: deps.reviewStore });
+  registerDiscoveryRoutes(apiRouter, {
+    store: deps.discoveryStore,
+    runner: deps.discoveryRunner,
+    registry: deps.discoveryRegistry
+  });
   app.use('/api', apiRouter);
 
   const clientIndex = path.join(deps.clientDir, 'index.html');
