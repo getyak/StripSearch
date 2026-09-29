@@ -37,7 +37,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 | 平台发现、身份校正与帖子追踪（holehe / maigret 接入） | [平台发现提案](docs/design/platform-discovery-2026-09-27/README.md) |
 | 分阶段交付与验收 | [开发 brief / 路线](docs/roadmap.md) |
 
-下一阶段：[人物研究 Agent 设计稿](docs/superpowers/specs/2026-09-29-person-research-agent-design.md) · [交互与架构阅读页](design/explorations/agent-research-2026-09-29/README.md)。覆盖身份发现、X / Reddit / GitHub / 个人网站研究、平台 Skills 与证据修订；这是待实施设计，不代表新增能力已上线。
+下一阶段（未实施提案）：[人物研究 Agent 设计稿](docs/superpowers/specs/2026-09-29-person-research-agent-design.md) · [交互与架构阅读页](design/explorations/agent-research-2026-09-29/README.md)。2026-09-30 已按用户批准的 Search / Fetch 长研究设计同步：Search / Fetch 两个 Agent 角色 + 持久程序控制器、首次发现冻结 PlatformRegistry 的目录级平台发现、分批深读与默认评论覆盖、总额 + 分批两级预算、范围撤回传播。X / Reddit / GitHub / 个人网站只是首批深读验证样本，不是发现上限；目录条目（TikHub 多平台、替代工具、公开长尾规则）是文档目标，不代表已验证运行时支持。以上能力均未上线，当前代码仍是上文的预算受限 Web alpha。
 
 先看一份[合成报告](examples/report.md)，再对照[同一份 JSON](examples/report.json)和[请求配置](examples/request.json)。样例域名 `example.org` 是占位标识，不应抓取。
 
