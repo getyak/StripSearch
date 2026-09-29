@@ -607,6 +607,12 @@ export class Store {
       : source);
     const excluded = excludedSourceKeys(sources);
     const anchorRevoked = Boolean(checkpoint?.anchorUrl && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
+    // Legacy Person Object IDs are checkpoint ordinals. Assign them before
+    // filtering so withdrawing one source cannot rename unrelated references.
+    const personClaims = (checkpoint?.claims ?? [])
+      .map((claim, index) => ({ claim, ordinal: index + 1 }))
+      .filter(({ claim }) => sources.some(source =>
+        source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote)));
     if (anchorRevoked) sources.forEach(source => excluded.add(source.sourceKey));
     const observations = this.listObservations(run.id).map(observation => ({ ...observation,
       validity: validityFor(observation.sourceKeys, excluded), reviewReason: reviewReason(observation.sourceKeys, excluded)
@@ -660,8 +666,13 @@ export class Store {
           personObject: {
             schemaVersion: 'stripsearch/person/v1' as const,
             person: { id: 'person_' + createHash('sha256').update(run.ownerId + '\0' + checkpoint.anchorUrl).digest('hex').slice(0,24), displayName: identity.displayName, profileUrl: checkpoint.anchorUrl },
-            claims: checkpoint.claims.filter(claim => sources.some(source => source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote))).map((claim,index) => ({id:`C${index+1}`,statement:claim.statement,kind:claim.kind,sourceKeys:[claim.sourceKey],evidenceIds:[`E${index+1}`]})),
-            evidence: checkpoint.claims.filter(claim => sources.some(source => source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote))).map((claim,index) => ({id:`E${index+1}`,sourceKey:claim.sourceKey,quote:claim.quote})),
+            claims: personClaims.map(({ claim, ordinal }) => ({
+              id: `C${ordinal}`, statement: claim.statement, kind: claim.kind,
+              sourceKeys: [claim.sourceKey], evidenceIds: [`E${ordinal}`]
+            })),
+            evidence: personClaims.map(({ claim, ordinal }) => ({
+              id: `E${ordinal}`, sourceKey: claim.sourceKey, quote: claim.quote
+            })),
             unknowns: checkpoint.unknowns,
             report: { runId: run.id, revision: run.revision, asOf: run.updatedAt }
           }
