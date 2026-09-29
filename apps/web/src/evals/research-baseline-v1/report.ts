@@ -69,6 +69,9 @@ export interface BaselineCaseReport {
 export interface BaselineSummary {
   /** All cases declared by the dataset; the only pass-rate denominator. */
   scheduled: number;
+  /** Started cases whose final usage record was lost; not_run consumes nothing. */
+  unknownUsageCases: number;
+  observedCountsMeasurement: 'exact' | 'lower_bound';
   caseProgress: { started: number; finished: number; unfinished: number; notRun: number };
   structural: { passed: number; failed: number };
   passRate: { value: number | null; denominator: number };
@@ -178,6 +181,7 @@ const STATES: BaselineState[] = ['completed', 'partial', 'needs_input', 'runner_
 
 export function buildReport(caseReports: BaselineCaseReport[], input: BuildReportInput): BaselineReport {
   const scheduled = caseReports.length;
+  const unknownUsageCases = caseReports.filter((entry) => entry.actual.completion === 'unfinished').length;
   const passed = caseReports.filter((entry) => entry.structural === 'pass').length;
   const states: Record<BaselineState, number> = { completed: 0, partial: 0, needs_input: 0, runner_error: 0 };
   for (const entry of caseReports) states[entry.actual.state] += 1;
@@ -214,6 +218,8 @@ export function buildReport(caseReports: BaselineCaseReport[], input: BuildRepor
     runCommands: input.runCommands,
     summary: {
       scheduled,
+      unknownUsageCases,
+      observedCountsMeasurement: unknownUsageCases > 0 ? 'lower_bound' : 'exact',
       caseProgress: {
         started: caseReports.filter((entry) => entry.actual.completion !== 'not_run').length,
         finished: caseReports.filter((entry) => entry.actual.completion === 'finished').length,
@@ -239,7 +245,7 @@ export function buildReport(caseReports: BaselineCaseReport[], input: BuildRepor
         measurement: 'simulated',
         knownSimulatedSubtotal: hasKnownFee ? knownSimulatedSubtotal : null,
         // Any unknown fee makes a complete total unknowable; never add one up.
-        simulatedTotal: unknownFees > 0 ? null : hasKnownFee ? knownSimulatedSubtotal : null,
+        simulatedTotal: unknownFees > 0 || unknownUsageCases > 0 ? null : hasKnownFee ? knownSimulatedSubtotal : null,
         casesWithUnknownFee
       }
     },
@@ -264,6 +270,14 @@ export function verifyReportConsistency(report: BaselineReport): string[] {
   if (report.summary.structural.failed !== scheduled - passed) failures.push('summary.structural.failed contradicts case verdicts');
   if (report.summary.passRate.denominator !== scheduled) failures.push('summary.passRate.denominator must be all scheduled cases');
   if (scheduled > 0 && report.summary.passRate.value !== passed / scheduled) failures.push('summary.passRate.value contradicts case verdicts');
+  const unknownUsageCases = report.cases.filter((entry) => entry.actual.completion === 'unfinished').length;
+  if (report.summary.unknownUsageCases !== unknownUsageCases) {
+    failures.push('summary.unknownUsageCases contradicts unfinished case records');
+  }
+  const measurement = unknownUsageCases > 0 ? 'lower_bound' : 'exact';
+  if (report.summary.observedCountsMeasurement !== measurement) {
+    failures.push('summary.observedCountsMeasurement must reflect missing usage records');
+  }
   const progress = report.summary.caseProgress;
   if (progress.started !== progress.finished + progress.unfinished) failures.push('summary.caseProgress.started must equal finished + unfinished');
   if (progress.finished + progress.notRun + progress.unfinished !== scheduled) {
@@ -282,8 +296,12 @@ export function verifyReportConsistency(report: BaselineReport): string[] {
     failures.push('model token/cost must be not_measured, never a fabricated zero');
   }
   if (report.summary.actualPaidCostUsd !== null) failures.push('actualPaidCostUsd must stay null (no paid call ran)');
-  if (report.summary.fixtureFees.casesWithUnknownFee > 0 && report.summary.fixtureFees.simulatedTotal !== null) {
-    failures.push('fixtureFees.simulatedTotal must be null while any fee is unknown');
+  const casesWithUnknownFee = report.cases.filter((entry) => entry.actual.fixtureUsage.unknownFeeReceipts > 0).length;
+  if (report.summary.fixtureFees.casesWithUnknownFee !== casesWithUnknownFee) {
+    failures.push('fixtureFees.casesWithUnknownFee contradicts case receipts');
+  }
+  if ((casesWithUnknownFee > 0 || unknownUsageCases > 0 || report.summary.fixtureFees.casesWithUnknownFee > 0 || report.summary.unknownUsageCases > 0) && report.summary.fixtureFees.simulatedTotal !== null) {
+    failures.push('fixtureFees.simulatedTotal must be null while any fee or case usage is unknown');
   }
   return failures;
 }
@@ -322,12 +340,13 @@ function renderReportMarkdown(report: BaselineReport): string {
   lines.push('');
   lines.push('## 调用与费用记账');
   lines.push('');
+  lines.push(`- 观测调用与回执计数：\`${report.summary.observedCountsMeasurement}\`；用量记录缺失案例：${report.summary.unknownUsageCases}（未启动案例不计入未知用量）。${report.summary.observedCountsMeasurement === 'lower_bound' ? '以下计数仅为已保存记录的下界。' : '以下计数来自完整的执行记录。'}`);
   lines.push(`- 脚本化规划决策（plannerDecisionCalls）：${report.summary.plannerDecisionCalls}`);
   lines.push(`- 实际模型调用（modelInvocations）：${report.summary.modelInvocations}；同一次运行账本中的模型回执（modelReceipts）：${report.summary.modelReceipts}（可含历史恢复证据，不是本次调用）`);
   lines.push(`- 模型 token / 费用：\`${report.summary.modelTokens}\` / \`${report.summary.modelCostUsd}\`；实际支付费用：\`${String(report.summary.actualPaidCostUsd)}\``);
   lines.push(`- fixture 工具调用：${report.summary.fixtureProviderCalls}（注入的 \`${report.config.execution.fixtureProvider}\`）`);
   const fees = report.summary.fixtureFees;
-  lines.push(`- fixture 声明费用（measurement=\`${fees.measurement}\`）：已知小计 ${fees.knownSimulatedSubtotal === null ? '无' : fees.knownSimulatedSubtotal}；完整模拟合计 ${fees.simulatedTotal === null ? 'null（存在未知费用，不给出误导性合计）' : fees.simulatedTotal}；含未知费用的案例 ${fees.casesWithUnknownFee}`);
+  lines.push(`- fixture 声明费用（measurement=\`${fees.measurement}\`）：已知小计 ${fees.knownSimulatedSubtotal === null ? '无' : fees.knownSimulatedSubtotal}；完整模拟合计 ${fees.simulatedTotal === null ? 'null（费用或用量未知，或无可合计记录）' : fees.simulatedTotal}；含未知费用的案例 ${fees.casesWithUnknownFee}`);
   lines.push('');
   lines.push('## 逐案结构断言');
   lines.push('');

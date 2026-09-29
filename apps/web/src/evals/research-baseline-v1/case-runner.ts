@@ -300,8 +300,8 @@ export async function executeCase(entry: BaselineCase): Promise<CaseExecution> {
   };
 }
 
-/** A crash record keeps the error and continues the replay; nothing is swallowed. */
-export function crashRecord(entry: BaselineCase, thrown: unknown, monotonicElapsedMs: number, completion: CaseCompletion = 'finished'): CaseExecution {
+/** A crash record retains the error, but cannot certify completion or usage. */
+export function crashRecord(entry: BaselineCase, thrown: unknown, monotonicElapsedMs: number, completion: CaseCompletion = 'unfinished'): CaseExecution {
   return {
     caseId: entry.caseId,
     scenario: entry.scenario,

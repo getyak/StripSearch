@@ -5,8 +5,9 @@
  * outbound path (fetch, http, https, net, tls, child_process, worker_threads)
  * against a listener owned by the parent test process plus two marker files.
  * If any underlying connector actually ran, the parent would observe a TCP
- * connection or a marker file. The probe writes a JSON verdict and exits 0 only
- * when every attempt was denied by the guard.
+ * connection or a marker file. The probe writes a JSON verdict and exits 1
+ * when every attempt was denied: a guard violation must make the process fail
+ * even when the probe catches it. A failed probe verdict exits 2.
  *
  * Env: PROBE_HOST, PROBE_PORT, MARKER_SPAWN, MARKER_WORKER, PROBE_RESULT.
  */
@@ -89,4 +90,4 @@ await attempt('worker_threads.Worker', async () => {
 
 const verdict = { host, port, attempts, allDenied: attempts.every((entry) => entry.denied) };
 if (resultPath) writeFileSync(resultPath, JSON.stringify(verdict, null, 2), 'utf8');
-process.exit(verdict.allDenied ? 0 : 1);
+process.exit(verdict.allDenied ? 1 : 2);

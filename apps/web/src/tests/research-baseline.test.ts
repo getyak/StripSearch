@@ -13,7 +13,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createServer, type Server } from 'node:net';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,6 +44,19 @@ function tempBase(): string {
 
 function tempDir(prefix: string): string {
   return mkdtempSync(path.join(tempBase(), prefix));
+}
+
+/** Keep the event loop live so the parent can observe real TCP connections. */
+function runNodeProbe(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 15_000 });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+    child.on('error', reject);
+    child.on('close', status => resolve({ status, stdout, stderr }));
+  });
 }
 
 function loadCases(): BaselineCase[] {
@@ -195,12 +208,21 @@ test('network guard denies fetch/http/https/net/tls/subprocess without reaching 
   const resultPath = path.join(dir, 'probe.json');
   const guardLog = path.join(dir, 'guard-violations.jsonl');
   try {
-    const probe = spawnSync(process.execPath, [
+    // Positive control: the same listener must see an actual loopback
+    // connection before its zero count can prove anything about the guard.
+    const positive = await runNodeProbe(['-e', `
+      const socket = require('node:net').connect(${address.port}, '127.0.0.1');
+      socket.on('error', () => { process.exitCode = 1; });
+      socket.on('connect', () => socket.end());
+    `]);
+    assert.equal(positive.status, 0, positive.stderr);
+    assert.equal(connections.length, 1, 'positive control must reach the TCP listener');
+    connections.length = 0;
+
+    const probe = await runNodeProbe([
       '--import', pathToFileURL(path.join(harnessDir, 'network-guard.mjs')).href,
       path.join(harnessDir, 'network-probe.mjs')
     ], {
-      encoding: 'utf8',
-      env: {
         ...process.env,
         STRIPSEARCH_GUARD_LOG: guardLog,
         PROBE_HOST: '127.0.0.1',
@@ -208,9 +230,8 @@ test('network guard denies fetch/http/https/net/tls/subprocess without reaching 
         MARKER_SPAWN: markerSpawn,
         MARKER_WORKER: markerWorker,
         PROBE_RESULT: resultPath
-      }
     });
-    assert.equal(probe.status, 0, `probe must find every attempt denied: ${probe.stdout}\n${probe.stderr}`);
+    assert.equal(probe.status, 1, `denied attempts must force a nonzero exit: ${probe.stdout}\n${probe.stderr}`);
     const verdict = JSON.parse(readFileSync(resultPath, 'utf8')) as { attempts: { api: string; denied: boolean }[]; allDenied: boolean };
     assert.equal(verdict.allDenied, true);
     for (const api of ['fetch', 'http.request', 'https.request', 'net.connect', 'net.Socket.prototype.connect', 'tls.connect', 'child_process.execFile', 'worker_threads.Worker']) {
@@ -226,7 +247,39 @@ test('network guard denies fetch/http/https/net/tls/subprocess without reaching 
       assert.ok(logged.some((line) => line.api === entry.api), `guard log misses ${entry.api}`);
     }
   } finally {
-    server.close();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('guard violations force failure even when caught and the caller requests exit zero', async () => {
+  const dir = tempDir('rb-guard-exit-');
+  const guardLog = path.join(dir, 'violations.jsonl');
+  try {
+    const probe = await runNodeProbe([
+      '--import', pathToFileURL(path.join(harnessDir, 'network-guard.mjs')).href,
+      '-e', "try { fetch('https://must-never-connect.invalid'); } catch {} process.exit(0);"
+    ], { ...process.env, STRIPSEARCH_GUARD_LOG: guardLog });
+    assert.equal(probe.status, 1, probe.stderr);
+    assert.equal(readFileSync(guardLog, 'utf8').trim().split('\n').length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a guard log write failure terminates before a caller can swallow it', async () => {
+  const dir = tempDir('rb-guard-log-failure-');
+  try {
+    // An existing directory is an unwritable append target even under root;
+    // this avoids platform/user-dependent chmod behavior in the regression.
+    const probe = await runNodeProbe([
+      '--import', pathToFileURL(path.join(harnessDir, 'network-guard.mjs')).href,
+      '-e', "try { fetch('https://must-never-connect.invalid'); } catch {} console.log('continued-after-log-failure'); process.exit(0);"
+    ], { ...process.env, STRIPSEARCH_GUARD_LOG: dir });
+    assert.equal(probe.status, 1, probe.stderr);
+    assert.match(probe.stderr, /could not persist a violation/);
+    assert.equal(probe.stdout.includes('continued-after-log-failure'), false);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -351,7 +404,8 @@ test('a guarded network attempt cannot be swallowed by the controller', async ()
     const faultSteps = fault.tools as { networkAttempt?: string }[];
     const faultStep = faultSteps[0];
     assert.ok(faultStep);
-    faultStep.networkAttempt = 'https://must-never-connect.invalid/escape';
+    const privateLocalPath = path.join(dir, 'synthetic-private-helper');
+    faultStep.networkAttempt = `file://${privateLocalPath}`;
     const subset = writeRawSubsetDataset(dir, 'netfault.jsonl', [fault]);
     const result = await runResearchBaseline({ datasetPath: subset, datasetDisplayPath: 'netfault.jsonl', outputDir: path.join(dir, 'out'), repoRoot });
     assert.equal(result.exitCode, 1);
@@ -366,7 +420,11 @@ test('a guarded network attempt cannot be swallowed by the controller', async ()
     assert.equal(entry.actual.state, 'partial');
     assert.equal(entry.actual.stopReason, 'research_error');
     const guardLog = readFileSync(path.join(dir, 'out', 'guard-violations.jsonl'), 'utf8');
-    assert.ok(guardLog.includes('must-never-connect.invalid'));
+    assert.ok(guardLog.includes('"api":"fetch"'));
+    assert.equal(guardLog.includes(privateLocalPath), false, 'published guard logs must redact local paths');
+    assert.ok(guardLog.includes('<path>') || guardLog.includes('<abs-path>'));
+    const artifactManifest = JSON.parse(readFileSync(path.join(dir, 'out', 'manifest.json'), 'utf8')) as { files: { path: string; sha256: string }[] };
+    assert.equal(artifactManifest.files.find(file => file.path === 'guard-violations.jsonl')?.sha256, sha256Hex(guardLog));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -405,6 +463,9 @@ test('a mid-run process crash preserves prior results and keeps every case in th
     const report = result.report;
     assert.equal(report.summary.scheduled, 3);
     assert.deepEqual(report.summary.caseProgress, { started: 2, finished: 1, unfinished: 1, notRun: 1 });
+    assert.equal(report.summary.unknownUsageCases, 1);
+    assert.equal(report.summary.observedCountsMeasurement, 'lower_bound');
+    assert.equal(report.summary.fixtureFees.simulatedTotal, null);
     assert.equal(report.summary.passRate.denominator, 3);
     assert.ok(report.run.failures.some((failure) => failure.includes('worker_signal')), report.run.failures.join('; '));
 
@@ -456,6 +517,8 @@ test('report consistency verification catches tampering without losing reports',
       fixtureViolations: 0,
       networkAttempts: 0,
       executionErrors: 0,
+      unknownUsageCases: 0,
+      observedCountsMeasurement: 'exact',
       runLevelFailures: 0,
       plannerDecisionCalls: 1,
       modelInvocations: 0,

@@ -602,7 +602,7 @@ export async function runResearchBaseline(options: RunResearchBaselineOptions): 
   for (const artifact of artifactFiles) {
     writeFileSync(path.join(options.outputDir, artifact.name), artifact.bytes, 'utf8');
   }
-  writeFileSync(path.join(options.outputDir, 'guard-violations.jsonl'), guard.lines.join('\n') + (guard.lines.length > 0 ? '\n' : ''), 'utf8');
+  writeFileSync(path.join(options.outputDir, 'guard-violations.jsonl'), sanitizeLocalPaths(guard.lines.join('\n') + (guard.lines.length > 0 ? '\n' : ''), roots), 'utf8');
   writeFileSync(
     path.join(options.outputDir, 'worker.log'),
     sanitizeLocalPaths(`exit=${String(outcome.exitCode)} signal=${String(outcome.signal)}\n--- stdout ---\n${outcome.stdout}\n--- stderr ---\n${outcome.stderr}`, roots),

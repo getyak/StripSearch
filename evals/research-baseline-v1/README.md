@@ -35,6 +35,6 @@ npm --prefix apps/web run eval:research -- --dataset evals/research-baseline-v1/
 
 ## 边界（不能证明什么）
 
-- 网络守卫是**进程级 API 守卫**（fetch/http/https/net/tls + child_process/worker_threads），在生产代码导入前安装于隔离回放进程；**不是 OS 级网络隔离**，未运行在 OS deny-network 下，不作此宣称。
+- 网络守卫是**进程级 API 守卫**（fetch/http/https/net/tls + child_process/worker_threads），在生产代码导入前安装于隔离回放进程；**不自动提供 OS 级网络隔离**；如额外使用系统禁网配置验收，须单独保留该次执行记录。
 - 只证明程序行为（状态、预算、回执、恢复、导出一致性）；语义蕴含、真实检索质量、身份精度与人工核查成本未评估。
 - 2026-09-30 后的基线生成命令与环境记录在 `evidence/report.json` 的 `runCommands` / `source`；CI 结果以外部运行记录为准。

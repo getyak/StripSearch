@@ -38,7 +38,7 @@
 
 `npm --prefix apps/web run eval:research`（`--dataset` / `--output` 可选）：
 
-1. **引导**：先把 worker 及其导入的生产模块用 `tsc` 预编译到临时目录（记录每个执行字节的 SHA256），守卫进程内**没有转译器**，`network-guard.mjs` 在任何生产导入前禁用 fetch / WebSocket / http / https / net / tls / child_process / worker_threads，越界尝试抛错并追加到独立违规日志（控制器吞掉异常也藏不住）。
+1. **引导**：先把 worker 及其导入的生产模块用 `tsc` 预编译到临时目录（记录每个执行字节的 SHA256），守卫进程内**没有转译器**，`network-guard.mjs` 在任何生产导入前禁用 fetch / WebSocket / http / https / net / tls / child_process / worker_threads，越界尝试抛错并追加到独立违规日志（控制器吞掉异常也藏不住）；日志不可写时立即失败，内存中存在违规也使进程非零退出。
 2. **回放**：worker 用真实 `runResearch` + `Store`（同一 run）逐案执行；`case-start` / `case-done` 增量落 JSONL，进程崩溃保留已完成前例。不使用 `persistResult`（它写的是另一个 run）。
 3. **评分**：结构断言 = expect 字段 + fixture 全消费 + 无网络违规 + 无意外执行错误；研究状态分布单独统计。计划（scheduled）案例无论 finished / unfinished / not_run 都留在分母。
 
@@ -54,10 +54,11 @@
 
 - `plannerDecisionCalls` 与 `modelInvocations` 分开；`modelReceipts` 保留账本历史（含历史在途回执）。真实 token / 模型费用 `not_measured`，实际支付费用 `null`。
 - fixture `estimatedUsd` 一律 `simulated`：报告 `knownSimulatedSubtotal` 只含已知项，任一费用未知则 `simulatedTotal` 为 `null`，不做误导性合计。
+- 中断且没有完整用量记录的案例计入 `unknownUsageCases`，`simulatedTotal=null`，观测调用与回执计数标记 `lower_bound`；未启动案例不制造未知用量。
 
 ## 网络守卫边界
 
-进程级 API 守卫，**不是 OS 级网络隔离**；不覆盖原生插件、dgram、dns 或调试器注入。测试用探针在父进程监听端口与标记文件证明被拒路径没有触达底层连接器（TCP 连接数 0、无逃逸标记文件）。
+进程级 API 守卫，**不是 OS 级网络隔离**；不覆盖原生插件、dgram、dns 或调试器注入。测试用异步探针以仅 loopback 的正常连接校验父进程监听器，再用端口与标记文件证明被拒路径没有触达底层连接器（TCP 连接数 0、无逃逸标记文件）。
 
 ## 测试钩子（仅测试用，不可由数据集触发）
 

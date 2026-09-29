@@ -45,6 +45,13 @@ const state = {
   violations: /** @type {{at: string, api: string, target: string, message: string}[]} */ ([])
 };
 
+// The exit verdict is independent of the file sink and of callers catching
+// blocked API errors. Preserve other failures, but never exit successfully
+// after a violation (including an explicit process.exit(0) from a caller).
+process.on('exit', () => {
+  if (state.violations.length > 0 && Number(process.exitCode ?? 0) === 0) process.exitCode = 1;
+});
+
 function logPath() {
   const configured = process.env.STRIPSEARCH_GUARD_LOG;
   return typeof configured === 'string' && configured.trim().length > 0 ? configured.trim() : null;
@@ -55,14 +62,15 @@ function recordViolation(api, target) {
   state.violations.push(entry);
   globalThis.__stripsearchNetworkGuardViolations = state.violations;
   const path = logPath();
-  if (path) {
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(path, `${JSON.stringify(entry)}\n`, 'utf8');
-    } catch {
-      // The in-memory copy still holds the violation; the orchestrator reads
-      // the file, and a missing file is itself treated as a hard failure.
-    }
+  try {
+    if (!path) throw new Error('missing guard log');
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch {
+    // A pre-created empty file is not proof of a clean replay. If the durable
+    // sink fails, stop the process rather than throwing a swallowable error.
+    console.error('network guard could not persist a violation; terminating replay');
+    process.exit(1);
   }
   return new Error(`network guard blocked ${api} ${entry.target}`);
 }
