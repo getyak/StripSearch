@@ -6,7 +6,7 @@
 
 **2026-09-23 方法补充：** [综合人物研究及评估](person-intent-evaluation.md) 以“深度调研某个人”为默认主任务，共同检查人物信息覆盖，并根据公开表达、互动和作品特点设置人物专属观察点。具体用途与多轮修订作为补充。工作台 10 个合成练习保留为教学，不承担产品效果证明；真实研究探索与现有离线回放分轨，尚无模型胜率或人工 gold。
 
-**当前数据：** 原有 12 个设计案例保留；新增 [40 个运行时回放案例](../evals/runtime-v1/README.md)、[8 个行为判断案例](../evals/behavior-v1/README.md)与 [24 个 FRAMES 问题](../evals/external/frames-v1/README.md)。程序回放、语义评审、真实 provider 验收分开记账。Behavior 与 FRAMES 尚未产生候选答案，全部本地期望未经人工裁决，不作为 gold。
+**当前数据：** 原有 12 个设计案例保留；新增 [40 个运行时回放案例](../evals/runtime-v1/README.md)、[11 个控制器回放案例](../evals/research-baseline-v1/README.md)、[8 个行为判断案例](../evals/behavior-v1/README.md)与 [24 个 FRAMES 问题](../evals/external/frames-v1/README.md)。程序回放、语义评审、真实 provider 验收分开记账；Runtime v1 是 provider 契约回放，Research baseline v1 是控制器回放，两者都不冒充研究质量。Behavior 与 FRAMES 尚未产生候选答案，全部本地期望未经人工裁决，不作为 gold。
 
 ## 先过硬门，再比较收益
 

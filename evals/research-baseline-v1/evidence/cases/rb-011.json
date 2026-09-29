@@ -1,0 +1,190 @@
+{
+  "caseId": "rb-011",
+  "scenario": "historical_inflight_model_receipt",
+  "title": "历史在途模型回执：恢复证据不是本次调用",
+  "expected": {
+    "state": "partial",
+    "stopReason": "unknown_inflight",
+    "toolCalls": 0,
+    "plannerCalls": 0,
+    "modelCalls": 0,
+    "receipts": {
+      "total": 1,
+      "completed": 0,
+      "failed": 0,
+      "inflight": 1
+    },
+    "unknownCost": true,
+    "identityStatus": "needs_input",
+    "claimsRetained": 0,
+    "includeText": [
+      "研究已停止：unknown_inflight。"
+    ]
+  },
+  "actual": {
+    "state": "partial",
+    "stopReason": "unknown_inflight",
+    "identityStatus": "needs_input",
+    "completion": "finished",
+    "counts": {
+      "toolCalls": 0,
+      "plannerDecisionCalls": 0,
+      "modelInvocations": 0,
+      "modelReceipts": 1,
+      "fixtureProviderCalls": 0
+    },
+    "receipts": {
+      "total": 1,
+      "completed": 0,
+      "failed": 0,
+      "inflight": 1
+    },
+    "unknownCost": true,
+    "claimsRetained": 0,
+    "candidates": 0,
+    "runnerError": null,
+    "fixtureViolations": [],
+    "executionError": null,
+    "fixtureUsage": {
+      "measurement": "simulated",
+      "knownSimulatedSubtotal": null,
+      "simulatedTotal": null,
+      "unknownFeeReceipts": 1,
+      "bytes": 0
+    },
+    "effectiveLimits": {
+      "toolCalls": 12,
+      "modelCalls": 8,
+      "inputTokens": 150000,
+      "outputTokens": 16000,
+      "elapsedMs": 240000
+    }
+  },
+  "failures": [],
+  "error": null,
+  "raw": {
+    "result": {
+      "state": "partial",
+      "identity": {
+        "displayName": "",
+        "handle": null,
+        "profileUrl": "https://nova-arden.invalid/about",
+        "status": "needs_input",
+        "note": "尚未确认公开主页。",
+        "candidates": []
+      },
+      "sources": [],
+      "observations": [],
+      "answer": [],
+      "limitations": [
+        "研究已停止：unknown_inflight。已有材料保留，未证实的内容不补写。"
+      ],
+      "usage": {
+        "requests": 1,
+        "bytes": 0
+      },
+      "stopReason": "unknown_inflight"
+    },
+    "checkpoint": {
+      "phase": "done",
+      "steps": 0,
+      "startedAt": 1790713028612,
+      "elapsedMs": 0,
+      "anchorUrl": "https://nova-arden.invalid/about",
+      "identity": null,
+      "candidates": [],
+      "pages": [],
+      "claims": [],
+      "unknowns": [],
+      "stopReason": "unknown_inflight"
+    },
+    "receipts": [
+      {
+        "key": "model:0",
+        "kind": "model",
+        "state": "inflight",
+        "request": {
+          "model": "deepseek-flash",
+          "path": "/v1/messages"
+        },
+        "result": null,
+        "usage": null,
+        "reservedInput": 0,
+        "reservedOutput": 0
+      }
+    ],
+    "canonical": {
+      "schemaVersion": "stripsearch/web-alpha/v1",
+      "runId": "run_e466d91ad0a544219cdefc7a",
+      "state": "partial",
+      "revision": 2,
+      "question": "研究 Nova Arden 的公开工作与项目 Atlas",
+      "seedUrl": "https://nova-arden.invalid/about",
+      "provider": "research",
+      "parentRunId": null,
+      "retryOf": null,
+      "followup": false,
+      "createdAt": "2026-09-29T20:17:08.612Z",
+      "updatedAt": "2026-09-29T20:17:08.612Z",
+      "interrupted": false,
+      "stopReason": "unknown_inflight",
+      "identity": {
+        "displayName": "",
+        "handle": null,
+        "profileUrl": "https://nova-arden.invalid/about",
+        "status": "needs_input",
+        "note": "尚未确认公开主页。",
+        "candidates": []
+      },
+      "sources": [],
+      "observations": [],
+      "answer": [],
+      "limitations": [
+        "研究已停止：unknown_inflight。已有材料保留，未证实的内容不补写。"
+      ],
+      "usage": {
+        "provider": "research",
+        "requests": 1,
+        "bytes": 0,
+        "elapsedMs": 3,
+        "measurement": "observed"
+      },
+      "reviewCount": 0,
+      "research": {
+        "phase": "done",
+        "steps": 0,
+        "budget": {
+          "toolCalls": 0,
+          "modelCalls": 1,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "estimatedUsd": 0,
+          "firecrawlCredits": 0,
+          "unknownCost": true,
+          "limits": {
+            "toolCalls": 12,
+            "modelCalls": 8,
+            "inputTokens": 150000,
+            "outputTokens": 16000,
+            "elapsedMs": 240000
+          }
+        },
+        "stopReason": "unknown_inflight",
+        "unresolved": []
+      }
+    },
+    "markdown": "# 研究 Nova Arden 的公开工作与项目 Atlas · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：部分完成\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:17:08.612Z\n- 需要复核：0 处\n- 身份状态：尚未确认公开主页。\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n## 限制与未知\n\n- 研究已停止：unknown\\_inflight。已有材料保留，未证实的内容不补写。\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
+  },
+  "hashes": {
+    "normalizedResult": "d5ad79670a0aecd21e58f57beef2eeb251a231ea2957fb8f312b50cc5cb2ea51",
+    "serialized": {
+      "result": "b9af63876cb002490a05c47027a201c897bf7c67e5e8df5c016bb21f3eda54d5",
+      "checkpoint": "6c267ddb34654bb5a900b774c58b8e9aa0177e3a995e29e4fd72111fd5b4a5af",
+      "receipts": "1100e9b8bd5c95910e35aed78b1f6f67f8f5888948b13efbadff3ea7d359cb9e",
+      "canonical": "2b8625acba3001efc92dee06498caba248c8f6f85abbd974cb6e449043a33f75",
+      "markdown": "f1fb9e781e645cdd6e42a194a271b14c9926f711205a0cfa0c1804b5ed31436a"
+    },
+    "artifact": null
+  },
+  "artifactHashNote": "hashes.artifact is stored in report.json and manifest.json: a file cannot contain its own hash"
+}

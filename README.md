@@ -65,7 +65,7 @@ flowchart LR
 - 提交设计问题或失败案例：[Issue 模板](.github/ISSUE_TEMPLATE/)。请使用合成材料或有明确许可的公开职业资料。
 - 建立研究、比较方案、改变设计：[三种工作模板](templates/README.md)。
 - 校验当前设计材料：`python3 scripts/check_design.py`。它检查链接、样例与数据引用；不测试网络采集或模型效果。
-- 测试 Web：`npm --prefix apps/web test`；运行冻结回放：`npm --prefix apps/web run eval`。数据与评分边界见 [Evaluation 数据集入口](evals/README.md)。
+- 测试 Web：`npm --prefix apps/web test`；运行冻结回放：`npm --prefix apps/web run eval`；运行控制器离线回放：`npm --prefix apps/web run eval:research`。数据与评分边界见 [Evaluation 数据集入口](evals/README.md)。
 - 实现从[第一个里程碑](docs/roadmap.md#m1--最小可审计闭环)开始。
 
 项目代码、文档和原创合成样例采用 [Apache-2.0](LICENSE)。链接到的服务、网页、第三方代码与用户档案不因此获得本仓库许可。当前没有收录第三方网页全文。

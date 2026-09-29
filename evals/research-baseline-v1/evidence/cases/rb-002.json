@@ -1,0 +1,215 @@
+{
+  "caseId": "rb-002",
+  "scenario": "needs_input_one_unconfirmed_candidate",
+  "title": "needs_input：只有一个未确认候选",
+  "expected": {
+    "state": "needs_input",
+    "stopReason": null,
+    "toolCalls": 1,
+    "plannerCalls": 0,
+    "modelCalls": 0,
+    "receipts": {
+      "total": 1,
+      "completed": 1,
+      "failed": 0,
+      "inflight": 0
+    },
+    "unknownCost": true,
+    "identityStatus": "needs_input",
+    "candidates": 1,
+    "includeText": [
+      "请确认你要研究的公开主页。"
+    ]
+  },
+  "actual": {
+    "state": "needs_input",
+    "stopReason": null,
+    "identityStatus": "needs_input",
+    "completion": "finished",
+    "counts": {
+      "toolCalls": 1,
+      "plannerDecisionCalls": 0,
+      "modelInvocations": 0,
+      "modelReceipts": 0,
+      "fixtureProviderCalls": 1
+    },
+    "receipts": {
+      "total": 1,
+      "completed": 1,
+      "failed": 0,
+      "inflight": 0
+    },
+    "unknownCost": true,
+    "claimsRetained": null,
+    "candidates": 1,
+    "runnerError": "NeedsInputError",
+    "fixtureViolations": [],
+    "executionError": {
+      "name": "NeedsInputError",
+      "message": "请确认你要研究的公开主页。",
+      "stack": "NeedsInputError: 请确认你要研究的公开主页。\n    at runResearch (file://<path>/out/server/research/controller.js:218:19)\n    at async executeCase (file://<path>/out/evals/research-baseline-v1/case-runner.js:158:22)\n    at async file://<path>/out/evals/research-baseline-v1/replay-worker.js:61:21"
+    },
+    "fixtureUsage": {
+      "measurement": "simulated",
+      "knownSimulatedSubtotal": null,
+      "simulatedTotal": null,
+      "unknownFeeReceipts": 1,
+      "bytes": 210
+    },
+    "effectiveLimits": {
+      "toolCalls": 12,
+      "modelCalls": 8,
+      "inputTokens": 150000,
+      "outputTokens": 16000,
+      "elapsedMs": 240000
+    }
+  },
+  "failures": [],
+  "error": {
+    "name": "NeedsInputError",
+    "message": "请确认你要研究的公开主页。",
+    "stack": "NeedsInputError: 请确认你要研究的公开主页。\n    at runResearch (file://<path>/out/server/research/controller.js:218:19)\n    at async executeCase (file://<path>/out/evals/research-baseline-v1/case-runner.js:158:22)\n    at async file://<path>/out/evals/research-baseline-v1/replay-worker.js:61:21"
+  },
+  "raw": {
+    "result": null,
+    "checkpoint": {
+      "phase": "needs_input",
+      "steps": 0,
+      "startedAt": 1790713028561,
+      "elapsedMs": 1,
+      "anchorUrl": null,
+      "identity": null,
+      "candidates": [
+        {
+          "candidateId": "candidate_9772ccc8297337eb9ca06c86",
+          "label": "Nova Arden 的公开主页",
+          "detail": "https://nova-arden.invalid/about",
+          "profileUrl": "https://nova-arden.invalid/about"
+        }
+      ],
+      "pages": [],
+      "claims": [],
+      "unknowns": [],
+      "stopReason": null
+    },
+    "receipts": [
+      {
+        "key": "tool:911a57a18b95c235f7fc5781",
+        "kind": "tool",
+        "state": "completed",
+        "request": {
+          "type": "search",
+          "query": "研究一位维护 Atlas 排版工具的独立开发者 public profile biography"
+        },
+        "result": {
+          "pages": [
+            {
+              "url": "https://nova-arden.invalid/about",
+              "title": "Nova Arden 的公开主页",
+              "text": "独立开发者，维护开源排版工具 Atlas。",
+              "kind": "profile",
+              "publishedAt": null,
+              "links": [],
+              "limitations": [
+                "搜索结果不构成身份确认。"
+              ]
+            }
+          ],
+          "requests": 1,
+          "bytes": 210,
+          "estimatedUsd": null,
+          "credits": null,
+          "limitations": [
+            "合成 fixture：未访问任何真实来源。"
+          ]
+        },
+        "usage": {
+          "estimatedUsd": null,
+          "credits": null,
+          "bytes": 210,
+          "unknownCost": true
+        },
+        "reservedInput": 0,
+        "reservedOutput": 0
+      }
+    ],
+    "canonical": {
+      "schemaVersion": "stripsearch/web-alpha/v1",
+      "runId": "run_bcf25df213024e418203499c",
+      "state": "needs_input",
+      "revision": 2,
+      "question": "研究一位维护 Atlas 排版工具的独立开发者",
+      "seedUrl": null,
+      "provider": "research",
+      "parentRunId": null,
+      "retryOf": null,
+      "followup": false,
+      "createdAt": "2026-09-29T20:17:08.561Z",
+      "updatedAt": "2026-09-29T20:17:08.563Z",
+      "interrupted": false,
+      "stopReason": null,
+      "identity": {
+        "displayName": "",
+        "handle": null,
+        "profileUrl": null,
+        "status": "needs_input",
+        "note": "请确认你要研究的公开主页。",
+        "candidates": [
+          {
+            "candidateId": "candidate_9772ccc8297337eb9ca06c86",
+            "label": "Nova Arden 的公开主页",
+            "detail": "https://nova-arden.invalid/about",
+            "profileUrl": "https://nova-arden.invalid/about"
+          }
+        ]
+      },
+      "sources": [],
+      "observations": [],
+      "answer": [],
+      "limitations": [],
+      "usage": {
+        "provider": "research",
+        "requests": 0,
+        "bytes": 0,
+        "elapsedMs": null,
+        "measurement": "not_run"
+      },
+      "reviewCount": 0,
+      "research": {
+        "phase": "needs_input",
+        "steps": 0,
+        "budget": {
+          "toolCalls": 1,
+          "modelCalls": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "estimatedUsd": 0,
+          "firecrawlCredits": 0,
+          "unknownCost": true,
+          "limits": {
+            "toolCalls": 12,
+            "modelCalls": 8,
+            "inputTokens": 150000,
+            "outputTokens": 16000,
+            "elapsedMs": 240000
+          }
+        },
+        "stopReason": null,
+        "unresolved": []
+      }
+    },
+    "markdown": "# 研究一位维护 Atlas 排版工具的独立开发者 · 研究报告\n\n> 研究一位维护 Atlas 排版工具的独立开发者\n\n- 运行状态：等待确认\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:17:08.563Z\n- 需要复核：0 处\n- 身份状态：请确认你要研究的公开主页。\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
+  },
+  "hashes": {
+    "normalizedResult": "7fcce3b0c821512be023e3fa2448ecb8e06f354e15b8d64895dfcd202bdb82c3",
+    "serialized": {
+      "result": null,
+      "checkpoint": "c456c5ccfb468345ae7674296ae2284919e8ab6d71138469b11d0c2554608c63",
+      "receipts": "744128f37c2f5eebc494ed7a987aa9028d513f0868f0dce6c7041913fff79aa2",
+      "canonical": "6d87910895d80cd65b188cdf40c7221729f072041119519da93e273c2249272c",
+      "markdown": "10014b676f088960b0d13b07a7db5414ee9b9c6530afe3fd5270f0d2b7c250bc"
+    },
+    "artifact": null
+  },
+  "artifactHashNote": "hashes.artifact is stored in report.json and manifest.json: a file cannot contain its own hash"
+}

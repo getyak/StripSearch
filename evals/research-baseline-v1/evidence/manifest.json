@@ -1,0 +1,81 @@
+{
+  "type": "research-baseline-v1-artifact-manifest",
+  "note": "sha256 of the exact final bytes of each written artifact; manifest.json excludes itself",
+  "files": [
+    {
+      "path": "cases/rb-001.json",
+      "sha256": "65914cfb82b47fc3bc54e07f6e4fcc6168c9df44b5d2f7caa3710d30ea8f57c4",
+      "bytes": 19145
+    },
+    {
+      "path": "cases/rb-002.json",
+      "sha256": "e291706ea27c965a34def00305904b6916914681413ac174b57fe0a54256d9ec",
+      "bytes": 7170
+    },
+    {
+      "path": "cases/rb-003.json",
+      "sha256": "3ce9040de6a7099c788e45bb1b087bc7556a043fcb2d02238d93129858a4b300",
+      "bytes": 10263
+    },
+    {
+      "path": "cases/rb-004.json",
+      "sha256": "ec1ed588718d50ba1873873eb8e585933edf21d26aeb27eedd6fe2f3297b58d4",
+      "bytes": 17155
+    },
+    {
+      "path": "cases/rb-005.json",
+      "sha256": "b0b606c6bb6a6df548d924de2474527609af3ae96e025c8af2757fd047ccc5a2",
+      "bytes": 19590
+    },
+    {
+      "path": "cases/rb-006.json",
+      "sha256": "c0d0825f47cc4795c7fb37b739eb936e3eb514295fec0af81f135ed859ab87f1",
+      "bytes": 13827
+    },
+    {
+      "path": "cases/rb-007.json",
+      "sha256": "62b76fde40ee58564ec988eda07d8fd06b4da3b3646d3d5fe79347232c48bd86",
+      "bytes": 10542
+    },
+    {
+      "path": "cases/rb-008.json",
+      "sha256": "3c3b13ac9acef30d4bf07511675effe49f2ca98944e30541cbf031d5a30729ad",
+      "bytes": 5906
+    },
+    {
+      "path": "cases/rb-009.json",
+      "sha256": "c85339eb8552af13390293edbf932384e50b3b9c23e4530ec58071dcd761ab70",
+      "bytes": 4656
+    },
+    {
+      "path": "cases/rb-010.json",
+      "sha256": "6de8b2254fd25f58ad7018e0b6bb8fec7f7eaebe68299c88a67d6ff0637bc57f",
+      "bytes": 17900
+    },
+    {
+      "path": "cases/rb-011.json",
+      "sha256": "c0e9f8e0652e42a6a5331c804769d427a551bf0c6166abb9d162bcbcde244c50",
+      "bytes": 5890
+    },
+    {
+      "path": "guard-violations.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "report.json",
+      "sha256": "66f9262d99391dc4637fcd65e38c9e042e3b5a06b479bec3cf139550a346efff",
+      "bytes": 44270
+    },
+    {
+      "path": "report.md",
+      "sha256": "8d551aec0f940f0acce674ff9cb666911e2b34fe67a75c103ef8032adfa3cc33",
+      "bytes": 5266
+    },
+    {
+      "path": "worker.log",
+      "sha256": "7b5ab3c4ee711cd0e840ad02cd5d6ae60a5b1d04603f2715623a419ccea4ca52",
+      "bytes": 89
+    }
+  ]
+}

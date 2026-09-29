@@ -5,11 +5,12 @@
 | 数据 | 数量 | 当前用途 |
 |---|---:|---|
 | [Runtime v1](runtime-v1/README.md) | 40 案例 / 20 对照组 | 生产适配器冻结回放、存储与导出规则 |
+| [Research baseline v1](research-baseline-v1/README.md) | 11 案例 / 11 场景 | 控制器离线回放（`offline_controller_replay`）；unreviewed 合成期望 |
 | [Behavior v1](behavior-v1/README.md) | 8 案例 / 18 来源 | 待评审研究判断 rubric；尚未运行 |
 | [FRAMES 子集](external/frames-v1/README.md) | 24 问题 | 固定版本外部 discovery；尚未运行 |
 | 原有设计种子（本页以下） | 12 案例 / 12 来源 | 设计规格；尚未人工裁决 |
 
-外部选型见 [目录](external/README.md)。默认执行 `npm --prefix apps/web run eval` 只跑 Runtime v1；原有种子、Behavior 与 FRAMES 不计入通过率。
+外部选型见 [目录](external/README.md)。默认执行 `npm --prefix apps/web run eval` 只跑 Runtime v1（provider 契约回放，`offline_provider_contract`）；`npm --prefix apps/web run eval:research` 只跑 Research baseline v1（控制器回放，`offline_controller_replay`）。两条轨道分开报告、互不替代；原有种子、Behavior 与 FRAMES 不计入通过率。
 
 ```bash
 python3 scripts/check_eval_datasets.py
