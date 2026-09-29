@@ -44,3 +44,5 @@ Pi 原地址 `badlogic/pi-mono` 在本次访问重定向到 `earendil-works/pi`�
 - `apps/web/src/server/store.ts`：当前 Person Object 构建、来源继承与撤回。
 
 本地现状、新设计决策和外部项目事实在主设计稿与网页中分别标注。
+
+2026-09-30 增补：[Reddit 路线核对与验收缺项](../../platforms/reddit-routes.md)。TikHub 与官方 OAuth 分别登记，不把文档或匿名入口结果升级为平台整体可用性。
