@@ -5,7 +5,7 @@
 
 export const SCHEMA_VERSION = 'stripsearch/web-alpha/v1';
 
-export type ProviderName = 'github' | 'exa';
+export type ProviderName = 'github' | 'exa' | 'research';
 
 export type RunState =
   | 'queued'
@@ -84,7 +84,7 @@ export interface IdentityDraft {
   profileUrl: string | null;
   status: 'resolved' | 'needs_input' | 'ambiguous';
   note: string | null;
-  candidates: { label: string; detail: string }[];
+  candidates: IdentityCandidate[];
 }
 
 export interface ProviderResult {
@@ -101,9 +101,9 @@ export interface ProviderResult {
 /** Provider asked for more user input before it can make network calls. */
 export class NeedsInputError extends Error {
   readonly prompt: string;
-  readonly candidates: { label: string; detail: string }[];
+  readonly candidates: IdentityCandidate[];
 
-  constructor(prompt: string, candidates: { label: string; detail: string }[] = []) {
+  constructor(prompt: string, candidates: IdentityCandidate[] = []) {
     super(prompt);
     this.name = 'NeedsInputError';
     this.prompt = prompt;
@@ -159,7 +159,7 @@ export interface CanonicalIdentity {
   profileUrl: string | null;
   status: 'resolved' | 'needs_input' | 'ambiguous';
   note: string | null;
-  candidates: { label: string; detail: string }[];
+  candidates: IdentityCandidate[];
 }
 
 export interface CanonicalUsage {
@@ -192,6 +192,8 @@ export interface CanonicalView {
   limitations: string[];
   usage: CanonicalUsage;
   reviewCount: number;
+  personObject?: PersonObject;
+  research?: ResearchMetadata;
 }
 
 export interface RunEventRecord {
@@ -217,4 +219,23 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
+}
+
+
+export interface IdentityCandidate { label: string; detail: string; candidateId?: string; profileUrl?: string }
+export interface ResearchBudgetLimits { toolCalls: number; modelCalls: number; inputTokens: number; outputTokens: number; elapsedMs: number }
+export interface ResearchBudget {
+ toolCalls: number; modelCalls: number; inputTokens: number; outputTokens: number;
+ estimatedUsd: number; firecrawlCredits: number; unknownCost: boolean; limits: ResearchBudgetLimits;
+}
+export interface ResearchMetadata {
+ phase: string; steps: number; budget: ResearchBudget; stopReason: string | null; unresolved: string[];
+}
+export interface PersonObject {
+ schemaVersion: 'stripsearch/person/v1';
+ person: { id: string; displayName: string; profileUrl: string };
+ claims: { id: string; statement: string; kind: ClaimKind; sourceKeys: string[]; evidenceIds: string[] }[];
+ evidence: { id: string; sourceKey: string; quote: string }[];
+ unknowns: string[];
+ report: { runId: string; revision: number; asOf: string };
 }

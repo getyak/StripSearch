@@ -1,7 +1,6 @@
 import {
   KIND_LABELS,
   SOURCE_KIND_LABELS,
-  providerLabel,
   stateLabel
 } from '../shared/canonical.js';
 import type {
@@ -97,7 +96,7 @@ export function renderReport(
     container.appendChild(
       make('div', {
         className: 'empty-state enter',
-        text: '还没有报告。在左侧输入问题并开始研究。'
+        text: '从一个名字或公开主页开始，逐步了解一个人。'
       })
     );
     return;
@@ -109,7 +108,7 @@ export function renderReport(
   header.appendChild(
     make('p', {
       className: 'report-meta',
-      text: `${providerLabel(view.provider)} · ${stateLabel(view.state)} · 修订 v${view.revision} · 更新 ${formatDateTime(view.updatedAt)}`
+      text: `${stateLabel(view.state)} · 更新于 ${formatDateTime(view.updatedAt)} · v${view.revision}`
     })
   );
   if (view.interrupted) {
@@ -117,16 +116,22 @@ export function renderReport(
       make('p', { className: 'review-flag', text: '服务重启，这份报告被标记为中断，可以手动重试。' })
     );
   }
+  if (view.identity.status !== 'resolved' && view.identity.note) {
+    header.appendChild(make('p', { className: 'identity-note', text: view.identity.note }));
+  } else if (view.identity.profileUrl) {
+    header.appendChild(make('p', { className: 'identity-note', text: '基于该账号及本次读取的公开资料。' }));
+  }
   container.appendChild(header);
+  if (view.answer.length === 0 && (view.state === 'queued' || view.state === 'researching')) {
+    container.appendChild(make('p', { className: 'reading-arrival', text: '正在核对人物线索。找到的资料会逐步出现在这里。' }));
+  }
 
   for (const section of view.answer) {
+    if (!section.body.trim() && section.bullets.length === 0) continue;
     const sectionEl = make('section', { className: 'report-section' });
     sectionEl.appendChild(make('h3', { text: section.heading }));
     const copy = make('div', { className: 'report-copy' });
     if (section.body) copy.appendChild(make('p', { text: section.body }));
-    if (section.bullets.length === 0) {
-      copy.appendChild(make('p', { className: 'empty-state', text: '这一栏暂时没有可展示的内容。' }));
-    }
     section.bullets.forEach((bullet, index) => {
       const node = bulletNode(
         bullet.text,
@@ -360,7 +365,8 @@ export function renderActivity(
   activityState: HTMLElement,
   indicator: HTMLElement,
   stages: StageView[],
-  state: RunState
+  state: RunState,
+  openEnded = false
 ): void {
   clear(list);
   const total = stages[0]?.total ?? 0;
@@ -378,13 +384,14 @@ export function renderActivity(
       list.appendChild(item);
     }
   }
+  progressBar.hidden = openEnded;
   const ratio = total > 0 ? done / total : 0;
   progressFill.style.transform = `scaleX(${ratio})`;
   progressBar.setAttribute('aria-valuemax', String(total || 1));
   progressBar.setAttribute('aria-valuenow', String(done));
   progressBar.setAttribute('aria-valuetext', `${done} / ${total || 0} 步已完成`);
-  progressText.textContent = `${done} / ${total || 0}`;
-  activityState.textContent = stateLabel(state);
+  progressText.textContent = openEnded ? `${done} 个步骤已完成` : `${done} / ${total || 0}`;
+  activityState.textContent = [...stages].reverse().find((stage) => stage.status === 'active')?.label ?? stateLabel(state);
   const running = state === 'researching' || state === 'queued';
   indicator.hidden = !running;
 }

@@ -1,3 +1,6 @@
+import { runResearch } from '../research/controller.js';
+import { createDshPlanner, type ResearchPlanner } from '../research/planner.js';
+import type { ResearchTools } from '../research/tool-contracts.js';
 import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState, NeedsInputError } from '../../shared/types.js';
 import type { ProviderName, RunState } from '../../shared/types.js';
@@ -19,6 +22,8 @@ export interface RunnerDeps {
   providerFactory: ProviderFactory;
   transport: HttpTransport;
   now?: () => number;
+  researchTools?: ResearchTools;
+  researchPlanner?: ResearchPlanner;
 }
 
 interface ActiveJob {
@@ -124,8 +129,15 @@ export class Runner {
     const run = this.deps.store.getRunForOwner(runId, ownerId);
     if (!run) return 'not_found';
     if (run.state !== 'needs_input') return 'conflict';
+    if (run.provider === 'research') {
+      const checkpoint = this.deps.store.research.checkpoint(runId);
+      if (!checkpoint) return 'conflict';
+      checkpoint.anchorUrl = seedUrl; checkpoint.identity = null; checkpoint.candidates = []; checkpoint.phase = 'identity';
+      this.deps.store.research.save(runId, checkpoint);
+    }
     this.deps.store.updateRun(runId, {
       seed_url: seedUrl,
+      revision: run.revision + 1,
       state: 'queued',
       cancel_requested: 0,
       error_code: null,
@@ -179,7 +191,7 @@ export class Runner {
     if (initial.cancelRequested || isTerminalState(initial.state)) {
       return;
     }
-    this.deps.store.clearRunContent(runId);
+    if (initial.provider !== 'research') this.deps.store.clearRunContent(runId);
     this.deps.store.updateRunIfActive(runId, {
       state: 'researching',
       started_at: nowIso(),
@@ -191,11 +203,17 @@ export class Runner {
     });
     this.deps.store.addEvent(runId, 'state', { state: 'researching' satisfies RunState });
 
-    const provider = this.createProvider(initial.provider);
+    const provider = initial.provider === 'research' ? null : this.createProvider(initial.provider);
     const reporter = this.makeReporter(runId);
     const startedAt = this.now();
     try {
-      const result = await provider.run(
+      const result = initial.provider === 'research' ? await runResearch({
+        store: this.deps.store, run: initial, signal: controller.signal,
+        tools: this.deps.researchTools ?? { async execute() { throw new ProviderError('provider_unavailable', '研究工具未配置。'); } },
+        planner: this.deps.researchPlanner ?? createDshPlanner(this.deps.config.deepseekModel),
+        transport: this.deps.transport, deepseekApiKey: this.deps.config.deepseekApiKey,
+        socialAvailable: Boolean(this.deps.config.tikhubApiKey), firecrawlAvailable: Boolean(this.deps.config.firecrawlApiKey)
+      }) : await provider!.run(
         {
           question: initial.question,
           seedUrl: initial.seedUrl,
@@ -264,6 +282,7 @@ export class Runner {
     if (error instanceof NeedsInputError) {
       this.deps.store.updateRunIfActive(runId, {
         state: 'needs_input',
+        revision: run.revision + 1,
         identity_json: JSON.stringify({
           displayName: '',
           handle: null,
@@ -277,6 +296,7 @@ export class Runner {
       });
       this.deps.store.addEvent(runId, 'needs_input', {
         prompt: error.prompt,
+        revision: run.revision + 1,
         candidates: error.candidates
       });
       this.deps.store.addEvent(runId, 'state', { state: 'needs_input' satisfies RunState });

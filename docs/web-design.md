@@ -2,7 +2,7 @@
 
 状态：历史交互设计原型。当前 Web alpha 的真实能力见 [Web 运行时契约](web-runtime.md)，本稿不代表完整研究 Agent 已实现。
 
-2026-09-26 新增[人物入口、Person Object 与 DSH 重构提案](design/person-object-2026-09-26/README.md)，系统梳理单输入、条件消歧、低成本研究与三格式输出。该提案尚未替换生产实现；本页保留历史设计依据。
+2026-09-26 新增[人物入口、Person Object 与 DSH 重构提案](design/person-object-2026-09-26/README.md)，系统梳理单输入、条件消歧、低成本研究与多格式输出。部分能力已在 Web alpha 实现，实际范围见[实现说明](person-research-release.md)；本页保留历史设计依据。
 
 2026-09-27 新增[平台发现、身份一次性校正与帖子深度追踪提案](design/platform-discovery-2026-09-27/README.md)：用 holehe / maigret 两类账号枚举能力扩展资料发现面，含已实施的探测引擎、报告导入、检查点续跑与帖子追踪（全部未 live 验证）。
 

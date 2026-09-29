@@ -1,12 +1,11 @@
 import { isTerminalState } from '../shared/types.js';
-import type { CanonicalView, ProviderName, RunEventRecord, RunSummary, SessionUser } from '../shared/types.js';
+import type { CanonicalView, RunEventRecord, RunSummary, SessionUser } from '../shared/types.js';
 import {
-  extractGitHubHandle,
-  normalizeQuestion,
   validateQuestion,
   validateSeedUrl
 } from '../shared/validation.js';
 import { ApiClient, ApiError } from './api.js';
+import type { ExportFormat, ResumeInput } from './api.js';
 import { createAuthController, renderUserNav, showToast } from './auth.js';
 import { byId, clear, make, setText, show } from './dom.js';
 import { createReviewWorkbench } from './review.js';
@@ -27,7 +26,7 @@ type StreamState = 'idle' | 'connecting' | 'open' | 'reconnecting';
 
 interface AppState {
   user: SessionUser | null;
-  capabilities: { github: boolean; exa: boolean } | null;
+  capabilities: { github: boolean; exa: boolean; research?: boolean } | null;
   runs: RunSummary[];
   run: CanonicalView | null;
   events: RunEventRecord[];
@@ -47,6 +46,9 @@ interface AppState {
   copyBusy: boolean;
   copiedRevision: number | null;
   pendingSubmit: boolean;
+  submitBusy: boolean;
+  submitAttempt: { ownerId: string; input: string; key: string } | null;
+  resumeBusy: boolean;
   activeRunId: string | null;
   signOutBusy: boolean;
 }
@@ -72,6 +74,9 @@ const state: AppState = {
   copyBusy: false,
   copiedRevision: null,
   pendingSubmit: false,
+  submitBusy: false,
+  submitAttempt: null,
+  resumeBusy: false,
   activeRunId: null,
   signOutBusy: false
 };
@@ -93,11 +98,12 @@ const els = {
   form: byId<HTMLFormElement>('research-form'),
   question: byId<HTMLTextAreaElement>('research-question'),
   questionError: byId('question-error'),
-  profile: byId<HTMLInputElement>('profile-url'),
-  profileError: byId('profile-error'),
   formStatus: byId('form-status'),
   clearQuestion: byId<HTMLButtonElement>('clear-question'),
-  exaStatus: byId('exa-status'),
+  submit: byId<HTMLButtonElement>('submit-research'),
+  candidates: byId('identity-candidates'),
+  statusSummary: byId('run-status-summary'),
+  researchDetails: byId('research-details'),
   historyRail: byId('history-list'),
   drawerHistory: byId('drawer-history-list'),
   workTitle: byId('work-title-text'),
@@ -107,6 +113,8 @@ const els = {
   copyReport: byId<HTMLButtonElement>('copy-report'),
   downloadMd: byId<HTMLButtonElement>('download-md'),
   downloadJson: byId<HTMLButtonElement>('download-json'),
+  downloadHtml: byId<HTMLButtonElement>('download-html'),
+  downloadPdf: byId<HTMLButtonElement>('download-pdf'),
   retryRun: byId<HTMLButtonElement>('retry-run'),
   deleteRun: byId<HTMLButtonElement>('delete-run'),
   toggleInspector: byId<HTMLButtonElement>('toggle-inspector'),
@@ -170,14 +178,17 @@ function clearPrivateState(): void {
   state.stages = [];
   state.latestSeq = 0;
   state.pendingSubmit = false;
+  state.submitBusy = false;
+  state.submitAttempt = null;
+  state.resumeBusy = false;
+  els.submit.disabled = false;
+  els.form.removeAttribute('aria-busy');
   // Unsent input is private too; renderAll only clears rendered run content.
   els.question.value = '';
-  els.profile.value = '';
   els.chatInput.value = '';
   els.resumeSeed.value = '';
   els.clearQuestion.hidden = true;
   setText(els.questionError, '');
-  setText(els.profileError, '');
   setText(els.resumeError, '');
   setFormStatus('');
   state.runEpoch += 1;
@@ -213,14 +224,15 @@ function isNarrow(): boolean {
 
 function route(): void {
   const hash = window.location.hash;
-  const wantsApp = hash.startsWith('#/app');
+  const appMatch = hash.match(/^#\/app(?:\/([^/?#]+))?$/);
+  const wantsApp = Boolean(appMatch);
   const reviewMatch = hash.match(/^#\/review(?:\/([^/?#]+))?/);
   const wantsReview = Boolean(reviewMatch);
   if ((wantsApp || wantsReview) && !state.user) {
     window.location.hash = '#/';
     auth.open('signin', (user) => {
       handleAuthSuccess(user);
-      window.location.hash = wantsReview ? '#/review' : '#/app';
+      window.location.hash = hash;
     });
     return;
   }
@@ -240,8 +252,16 @@ function route(): void {
     void review.open(caseId);
     return;
   }
-  if (wantsApp && state.user && !state.activeRunId && state.runs.length > 0) {
-    void selectRun(state.runs[0]!.runId);
+  if (wantsApp && state.user) {
+    let requestedRunId: string | null = null;
+    if (appMatch?.[1]) {
+      try { requestedRunId = decodeURIComponent(appMatch[1]); } catch { /* Invalid bookmarks fall back to history. */ }
+    }
+    if (requestedRunId && requestedRunId !== state.activeRunId) {
+      void selectRun(requestedRunId);
+    } else if (!requestedRunId && !state.activeRunId && state.runs.length > 0) {
+      void selectRun(state.runs[0]!.runId);
+    }
   }
 }
 
@@ -251,90 +271,81 @@ function goHome(): void {
 
 /* ---------------- research flow ---------------- */
 
-function readProvider(): ProviderName {
-  const checked = document.querySelector<HTMLInputElement>('input[name="provider"]:checked');
-  return checked?.value === 'exa' ? 'exa' : 'github';
-}
-
 function setFormStatus(message: string): void {
   setText(els.formStatus, message);
 }
 
-function validateForm(): { question: string; seedUrl: string | null } | null {
+function validateForm(): string | null {
   setText(els.questionError, '');
-  setText(els.profileError, '');
-  const question = normalizeQuestion(els.question.value);
-  const questionCheck = validateQuestion(question);
-  if (!questionCheck.ok) {
+  const input = els.question.value.trim();
+  const checked = validateQuestion(input);
+  if (!checked.ok) {
     els.question.setAttribute('aria-invalid', 'true');
-    setText(els.questionError, questionCheck.error ?? '问题无效。');
+    setText(els.questionError, input.length < 2 ? '请输入一个姓名、公开主页或人物线索。' : checked.error ?? '输入内容过长。');
     els.question.focus();
     return null;
   }
   els.question.removeAttribute('aria-invalid');
-  const seedCheck = validateSeedUrl(els.profile.value);
-  if (!seedCheck.ok) {
-    els.profile.setAttribute('aria-invalid', 'true');
-    setText(els.profileError, seedCheck.error ?? '主页链接无效。');
-    byId<HTMLDetailsElement>('more-settings').open = true;
-    els.profile.focus();
-    return null;
-  }
-  els.profile.removeAttribute('aria-invalid');
-  const provider = readProvider();
-  if (provider === 'github' && !seedCheck.url && !extractGitHubHandle(question)) {
-    byId<HTMLDetailsElement>('more-settings').open = true;
-    els.profile.setAttribute('aria-invalid', 'true');
-    setText(els.profileError, 'GitHub 来源需要 https://github.com/<用户名> 的主页链接。');
-    els.profile.focus();
-    return null;
-  }
-  if (provider === 'exa' && state.capabilities && !state.capabilities.exa) {
-    setFormStatus('Exa 未配置，请改用 GitHub 公开账号，或让服务端配置 Exa。');
-    return null;
-  }
-  return { question, seedUrl: seedCheck.url };
+  return input;
 }
 
 async function submitResearch(): Promise<void> {
-  const values = validateForm();
-  if (!values) return;
+  if (state.submitBusy || state.pendingSubmit) return;
+  const input = validateForm();
+  if (!input) return;
   if (!state.user) {
     state.pendingSubmit = true;
     auth.open('signin', (user) => {
+      state.pendingSubmit = false;
       handleAuthSuccess(user);
       void submitResearch();
     });
     return;
   }
   const userId = state.user.id;
-  const provider = readProvider();
-  setFormStatus('正在创建研究…');
-  let created: { run: CanonicalView; idempotent: boolean };
+  const submissionEpoch = state.runEpoch;
+  if (!state.submitAttempt || state.submitAttempt.ownerId !== userId || state.submitAttempt.input !== input) {
+    state.submitAttempt = { ownerId: userId, input, key: `person-${crypto.randomUUID()}` };
+  }
+  const attempt = state.submitAttempt;
+  state.submitBusy = true;
+  els.submit.disabled = true;
+  els.form.setAttribute('aria-busy', 'true');
+  setFormStatus('已收到，正在开始了解…');
   try {
-    created = await api.createRun({ question: values.question, seedUrl: values.seedUrl, provider });
+    const created = await api.createResearch(input, attempt.key);
+    if (!isCurrentUser(userId) || state.runEpoch !== submissionEpoch) return;
+    state.submitAttempt = null;
+    closeStream();
+    const epoch = ++state.runEpoch;
+    state.activeRunId = created.run.runId;
+    state.selectedSourceKey = null;
+    state.messages = [];
+    applySnapshot(created.run, [], 0);
+    window.location.hash = `#/app/${encodeURIComponent(created.run.runId)}`;
+    route();
+    if (!isTerminalState(created.run.state) && created.run.state !== 'needs_input') {
+      openStream(created.run.runId, 0, epoch);
+    }
+    void loadRuns();
+    setFormStatus('');
   } catch (error) {
-    if (!isCurrentUser(userId)) return;
+    if (!isCurrentUser(userId) || state.runEpoch !== submissionEpoch) return;
     if (error instanceof ApiError && error.status === 401) {
-      state.pendingSubmit = true;
       auth.open('signin', (user) => {
         handleAuthSuccess(user);
         void submitResearch();
       });
-      return;
     }
-    setFormStatus(error instanceof ApiError ? error.message : '创建研究失败，请稍后再试。');
-    if (error instanceof ApiError && error.code === 'scope_disallowed') {
-      setText(els.questionError, error.message);
+    setFormStatus(error instanceof ApiError ? error.message : '暂时未能确认请求结果。再次提交同一输入会继续核对，不会重复创建研究。');
+    if (error instanceof ApiError && error.code === 'scope_disallowed') setText(els.questionError, error.message);
+  } finally {
+    if (isCurrentUser(userId) && (state.submitAttempt === attempt || state.submitAttempt === null)) {
+      state.submitBusy = false;
+      els.submit.disabled = false;
+      els.form.removeAttribute('aria-busy');
     }
-    return;
   }
-  if (!isCurrentUser(userId)) return;
-  setFormStatus('');
-  await loadRuns();
-  if (!isCurrentUser(userId)) return;
-  window.location.hash = '#/app';
-  await selectRun(created.run.runId);
 }
 
 function handleAuthSuccess(user: SessionUser): void {
@@ -398,6 +409,7 @@ async function loadRuns(): Promise<void> {
 async function selectRun(runId: string): Promise<void> {
   const epoch = ++state.runEpoch;
   state.activeRunId = runId;
+  state.resumeBusy = false;
   state.selectedSourceKey = null;
   state.filter = 'all';
   state.messages = [];
@@ -414,6 +426,10 @@ async function selectRun(runId: string): Promise<void> {
   }
   if (state.runEpoch !== epoch) return;
   applySnapshot(snapshot.run, snapshot.events, snapshot.latestSeq);
+  if (window.location.hash.startsWith('#/app')) {
+    window.history.replaceState(null, '', `#/app/${encodeURIComponent(runId)}`);
+    lastHash = window.location.hash;
+  }
   if (state.run && !isTerminalState(state.run.state)) {
     openStream(runId, state.latestSeq, epoch);
   }
@@ -442,6 +458,8 @@ function scheduleSnapshotRefresh(runId: string, epoch: number): void {
         return;
       }
       if (!isCurrentRun(runId, epoch)) return;
+      // A request started before a newer SSE event cannot roll identity or evidence back.
+      if (snapshot.latestSeq < state.latestSeq || snapshot.run.revision < (state.run?.revision ?? 0)) return;
       state.run = snapshot.run;
       state.events = mergeEvents(state.events, snapshot.events);
       state.latestSeq = Math.max(state.latestSeq, snapshot.latestSeq);
@@ -481,7 +499,7 @@ function openStream(runId: string, since: number, epoch: number): void {
     state.streamState = 'open';
     state.reconnectAttempts = 0;
   };
-  for (const type of ['state', 'stage', 'source', 'observation', 'answer', 'needs_input', 'error', 'interrupted', 'revision']) {
+  for (const type of ['state', 'stage', 'source', 'observation', 'answer', 'needs_input', 'error', 'interrupted', 'revision', 'identity', 'person', 'usage']) {
     source.addEventListener(type, (event) => {
       if (state.runEpoch !== epoch || state.stream !== source) return;
       const message = event as MessageEvent<string>;
@@ -602,8 +620,10 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       break;
     }
     case 'needs_input': {
-      const prompt = (payload as { prompt?: string } | null)?.prompt ?? '还需要补充信息。';
-      setText(els.needsPrompt, prompt);
+      const data = payload as { prompt?: unknown; candidates?: unknown; revision?: unknown } | null;
+      const prompt = typeof data?.prompt === 'string' ? data.prompt : '还需要一个能区分人物的线索。';
+      state.run.identity = { ...state.run.identity, status: 'needs_input', note: prompt, candidates: parseCandidates(data?.candidates) };
+      if (typeof data?.revision === 'number' && Number.isInteger(data.revision)) state.run.revision = data.revision;
       state.run.state = 'needs_input';
       renderHeader();
       renderNeedsPanel();
@@ -620,6 +640,9 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       scheduleSnapshotRefresh(runId, epoch);
       break;
     }
+    case 'identity':
+    case 'person':
+    case 'usage':
     case 'revision':
       scheduleSnapshotRefresh(runId, epoch);
       break;
@@ -633,6 +656,7 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
 function renderAll(): void {
   renderHeader();
   renderNeedsPanel();
+  renderRunSummary();
   renderActivityPanel();
   renderReportView();
   renderSourcePanels();
@@ -653,7 +677,7 @@ const RUN_STATE_LABELS: Record<CanonicalView['state'], string> = {
 };
 
 function chatSupported(run: CanonicalView | null): boolean {
-  return Boolean(run && run.provider === 'exa');
+  return Boolean(run && String(run.provider) !== 'github');
 }
 
 function renderHeader(): void {
@@ -671,6 +695,8 @@ function renderHeader(): void {
   els.copyReport.disabled = !ready;
   els.downloadMd.disabled = !ready;
   els.downloadJson.disabled = !ready;
+  els.downloadHtml.disabled = !ready;
+  els.downloadPdf.disabled = !ready;
   const chatEnabled = Boolean(run && isTerminalState(run.state) && ready && chatSupported(run));
   els.chatInput.disabled = !chatEnabled;
   els.chatSend.disabled = !chatEnabled;
@@ -680,25 +706,100 @@ function renderHeader(): void {
 function chatHint(run: CanonicalView | null, chatEnabled: boolean): string {
   if (state.streamState === 'reconnecting') return '实时连接中断，正在重连；报告内容不会丢失。';
   if (!run) return '报告完成后可以继续追问。';
-  if (!chatSupported(run)) return 'GitHub 来源只整理账号与仓库元数据；追问需要配置 Exa。';
-  if (chatEnabled) return '追问会创建一份可见的子研究，不会改动这份报告。';
+  if (!chatSupported(run)) return '这份旧资料只包含账号与作品记录。可返回首页开始新的完整研究。';
+  if (chatEnabled) return '继续了解感兴趣的细节；新的研究会单独保存。';
   return '报告完成后可以继续追问。';
+}
+
+type IdentityCandidate = CanonicalView['identity']['candidates'][number] & { candidateId?: string; profileUrl?: string | null };
+
+function parseCandidates(raw: unknown): IdentityCandidate[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is IdentityCandidate => Boolean(item && typeof item === 'object' && typeof item.label === 'string' && typeof item.detail === 'string'));
 }
 
 function renderNeedsPanel(): void {
   const run = state.run;
   const needs = Boolean(run && run.state === 'needs_input');
   show(els.needsPanel, needs);
+  clear(els.candidates);
   if (needs && run) {
-    setText(els.needsPrompt, run.identity.note ?? '还需要补充信息才能继续。');
-    els.resumeSeed.value = run.seedUrl ?? '';
+    setText(els.needsPrompt, run.identity.note ?? '补充一个公开主页，让我们确认你想了解的人。');
+    if (els.resumeSeed.dataset.runId !== run.runId) {
+      els.resumeSeed.dataset.runId = run.runId;
+      els.resumeSeed.value = '';
+    }
+    for (const candidate of parseCandidates(run.identity.candidates)) {
+      const card = make('div', { className: 'identity-candidate' });
+      const content = make('div', {});
+      content.append(make('strong', { text: candidate.label }), make('p', { text: candidate.detail }));
+      if (typeof candidate.profileUrl === 'string') content.appendChild(make('small', { text: candidate.profileUrl }));
+      card.appendChild(content);
+      if (typeof candidate.candidateId === 'string' && candidate.candidateId) {
+        const id = candidate.candidateId;
+        const choose = make('button', { className: 'button', text: '选择此人', attrs: { type: 'button', 'data-candidate-id': id, 'aria-label': `选择 ${candidate.label}，${candidate.detail}` }, on: { click: () => void resumeRun(id) } });
+        choose.disabled = state.resumeBusy;
+        card.appendChild(choose);
+      }
+      els.candidates.appendChild(card);
+    }
   }
-  els.resumeError.textContent = '';
+  els.resumeRun.disabled = state.resumeBusy;
+}
+
+// Optional fields keep historical reports readable while the research contract evolves.
+type ResearchProgress = {
+  phase: string; steps: number; stopReason: string | null;
+  budget: { toolCalls: number; modelCalls: number; estimatedUsd: number; unknownCost: boolean; limits: { toolCalls: number; modelCalls: number } };
+};
+
+function renderRunSummary(): void {
+  const run = state.run;
+  const research = (run as (CanonicalView & { research?: ResearchProgress }) | null)?.research;
+  clear(els.researchDetails);
+  const messages: Record<string, string> = {
+    budget_exhausted: '本次研究已达到预算，已保留目前找到的资料。',
+    budget_limit: '本次研究已达到预算，已保留目前找到的资料。',
+    request_limit: '本次研究已达到读取上限，已保留现有资料。',
+    max_steps: '本次研究已达到步骤上限，部分问题仍待补充。',
+    outcome_unknown: '有一次请求的结果尚未确认，研究已停止，避免重复调用。',
+    identity_ambiguous: '仍无法确定资料是否属于同一个人，需要补充身份线索。',
+    interrupted: '研究曾中断，已保存当时找到的资料。',
+    cancelled: '研究已停止，已有资料仍可查看。'
+  };
+  const stopReason = research?.stopReason ?? run?.stopReason;
+  let message = stopReason ? messages[stopReason] ?? '' : '';
+  if (!message && run?.state === 'partial') message = '已保留目前找到的资料，部分内容尚未完成。';
+  if (!message && run?.state === 'failed') message = '这次研究未能完成。你的输入已保留，可以重试或补充线索。';
+  if (run?.state === 'needs_input') message = '';
+  if (!message && research && (run?.state === 'queued' || run?.state === 'researching')) {
+    const phases: Record<string, string> = { resolving: '正在核对人物身份。', identity: '正在核对人物身份。', identity_resolution: '正在核对人物身份。', researching: '正在阅读公开资料，核对相关证据。', collecting: '正在阅读公开资料，核对相关证据。', synthesizing: '正在整理有出处的发现。', validating: '正在核对报告与出处。' };
+    message = phases[research.phase] ?? '正在阅读与核对公开资料。';
+  }
+  setText(els.statusSummary, message);
+  show(els.statusSummary, Boolean(message));
+  if (research?.budget) {
+    const details = make('details', {});
+    const budget = research.budget;
+    details.appendChild(make('summary', { text: '本次研究用量' }));
+    details.appendChild(make('p', { text: `读取 ${budget.toolCalls} / ${budget.limits.toolCalls} 次 · 分析 ${budget.modelCalls} / ${budget.limits.modelCalls} 轮` }));
+    const estimatedCost = Number.isFinite(budget.estimatedUsd) ? `估算费用 $${budget.estimatedUsd.toFixed(4)}` : '费用暂不可估算';
+    details.appendChild(make('p', { text: `${estimatedCost}。${budget.unknownCost ? '部分费用尚未确认，实际金额可能更高。' : '以服务商的实际账单为准。'}` }));
+    els.researchDetails.appendChild(details);
+  }
+  if (run?.limitations.length) {
+    const details = make('details', {});
+    details.appendChild(make('summary', { text: '本次读取的范围与限制' }));
+    const list = make('ul', {});
+    for (const limit of run.limitations) list.appendChild(make('li', { text: limit }));
+    details.appendChild(list);
+    els.researchDetails.appendChild(details);
+  }
 }
 
 function renderActivityPanel(): void {
   const run = state.run;
-  const hasStages = state.stages.length > 0 || Boolean(run && (run.state === 'queued' || run.state === 'researching'));
+  const hasStages = state.stages.length > 0 || els.researchDetails.childElementCount > 0 || Boolean(run && (run.state === 'queued' || run.state === 'researching'));
   show(els.activityPanel, hasStages);
   if (!hasStages) return;
   renderActivity(
@@ -709,11 +810,9 @@ function renderActivityPanel(): void {
     els.activityState,
     els.runIndicator,
     state.stages,
-    run?.state ?? 'queued'
+    run?.state ?? 'queued',
+    String(run?.provider) === 'research'
   );
-  if (run && (run.state === 'researching' || run.state === 'queued')) {
-    els.activityPanel.open = true;
-  }
 }
 
 function renderReportView(): void {
@@ -790,6 +889,7 @@ function focusSource(sourceKey: string): void {
   if (!narrow) {
     els.appShell.classList.remove('inspector-collapsed');
     els.toggleInspector.setAttribute('aria-pressed', 'true');
+    els.toggleInspector.textContent = '收起出处';
   }
   renderSourcePanels();
   const detail = narrow ? els.drawerSourceDetail : els.inspectorDetail;
@@ -877,13 +977,10 @@ async function sendFollowup(question: string): Promise<void> {
 /* ---------------- actions ---------------- */
 
 function fillExample(): void {
-  els.question.value = 'simonw 做过哪些公开项目？';
-  const seed = 'https://github.com/simonw';
-  els.profile.value = seed;
+  els.question.value = 'https://github.com/simonw';
   els.clearQuestion.hidden = false;
-  const github = document.querySelector<HTMLInputElement>('input[name="provider"][value="github"]');
-  if (github) github.checked = true;
-  setFormStatus('已填入示例，点击「开始研究」。');
+  setText(els.questionError, '');
+  setFormStatus('已填入公开主页；点击「开始了解」后才会开始研究。');
   els.question.focus();
 }
 
@@ -985,54 +1082,67 @@ async function copyReport(): Promise<void> {
   }
 }
 
-async function downloadReport(format: 'markdown' | 'json'): Promise<void> {
+async function downloadReport(format: ExportFormat): Promise<void> {
   const run = state.run;
   if (!run) return;
   const runId = run.runId;
   const epoch = state.runEpoch;
-  let text: string;
+  const revision = run.revision;
   try {
-    text = await api.exportRun(runId, format);
-  } catch {
-    if (isCurrentRun(runId, epoch)) showToast('导出失败。', 'error');
-    return;
+    const blob = await api.exportBlob(runId, format, revision);
+    if (!isCurrentRun(runId, epoch)) return;
+    if (state.run?.revision !== revision) {
+      showToast('资料已更新，请重新下载最新版本。', 'error');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const extension = format === 'markdown' ? 'md' : format;
+    const anchor = make('a', { attrs: { href: url, download: `stripsearch-${runId}-v${revision}.${extension}` } });
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`已发起 ${extension.toUpperCase()} 下载。`);
+  } catch (error) {
+    if (isCurrentRun(runId, epoch)) showToast(error instanceof ApiError ? error.message : '导出失败，请稍后重试。', 'error');
   }
-  if (!isCurrentRun(runId, epoch)) return;
-  const blob = new Blob([text], { type: format === 'json' ? 'application/json' : 'text/markdown' });
-  const url = URL.createObjectURL(blob);
-  const anchor = make('a', {
-    attrs: { href: url, download: `stripsearch-${runId}.${format === 'json' ? 'json' : 'md'}` }
-  });
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-  showToast(format === 'json' ? '已生成 JSON 下载。' : '已生成 Markdown 下载。');
 }
 
-async function resumeRun(): Promise<void> {
+async function resumeRun(candidateId?: string): Promise<void> {
   const run = state.run;
-  if (!run) return;
+  if (!run || state.resumeBusy) return;
   const runId = run.runId;
   const epoch = state.runEpoch;
-  const seedCheck = validateSeedUrl(els.resumeSeed.value);
-  if (!seedCheck.ok || !seedCheck.url) {
-    els.resumeError.textContent = seedCheck.error ?? '请输入有效的主页链接。';
-    els.resumeSeed.focus();
-    return;
+  let resolution: ResumeInput;
+  if (candidateId) {
+    resolution = { candidateId, expectedRevision: run.revision };
+  } else {
+    const seedCheck = validateSeedUrl(els.resumeSeed.value);
+    if (!seedCheck.ok || !seedCheck.url) {
+      els.resumeError.textContent = seedCheck.error ?? '请输入有效的公开主页链接。';
+      els.resumeSeed.focus();
+      return;
+    }
+    resolution = { seedUrl: seedCheck.url };
   }
-  els.resumeRun.disabled = true;
+  state.resumeBusy = true;
+  els.resumeError.textContent = '';
+  renderNeedsPanel();
   try {
-    const updated = await api.resumeRun(runId, seedCheck.url);
+    const updated = await api.resumeRun(runId, resolution);
     if (!isCurrentRun(runId, epoch)) return;
     state.run = updated;
     renderAll();
-    openStream(runId, state.latestSeq, epoch);
+    if (!isTerminalState(updated.state) && updated.state !== 'needs_input') openStream(runId, state.latestSeq, epoch);
   } catch (error) {
     if (!isCurrentRun(runId, epoch)) return;
-    els.resumeError.textContent = error instanceof ApiError ? error.message : '继续失败。';
+    els.resumeError.textContent = error instanceof ApiError ? error.message : '继续失败，请稍后重试。';
+    if (error instanceof ApiError && error.status === 409) scheduleSnapshotRefresh(runId, epoch);
   } finally {
-    if (isCurrentRun(runId, state.runEpoch)) els.resumeRun.disabled = false;
+    if (isCurrentRun(runId, epoch)) {
+      state.resumeBusy = false;
+      renderNeedsPanel();
+    }
   }
 }
 
@@ -1040,6 +1150,7 @@ async function resumeRun(): Promise<void> {
 
 function wire(): void {
   window.addEventListener('hashchange', onHashChange);
+  byId<HTMLDialogElement>('auth-dialog').addEventListener('close', () => { state.pendingSubmit = false; });
 
   els.form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -1059,19 +1170,7 @@ function wire(): void {
     els.clearQuestion.hidden = true;
     els.question.focus();
   });
-  for (const example of document.querySelectorAll<HTMLButtonElement>('.example')) {
-    example.addEventListener('click', () => {
-      els.question.value = example.dataset.question ?? '';
-      els.profile.value = example.dataset.profile ?? '';
-      const github = document.querySelector<HTMLInputElement>('input[name="provider"][value="github"]');
-      if (github) github.checked = true;
-      els.clearQuestion.hidden = false;
-      els.question.focus();
-    });
-  }
   byId<HTMLButtonElement>('open-example').addEventListener('click', fillExample);
-  byId<HTMLButtonElement>('open-example-2').addEventListener('click', fillExample);
-
   byId<HTMLButtonElement>('open-auth').addEventListener('click', () => auth.open('signin', handleAuthSuccess));
   els.openReview.addEventListener('click', () => {
     if (window.location.hash === '#/review') {
@@ -1089,6 +1188,8 @@ function wire(): void {
     closeStream();
     state.run = null;
     state.activeRunId = null;
+    state.submitAttempt = null;
+    state.resumeBusy = false;
     state.events = [];
     state.messages = [];
     renderAll();
@@ -1107,6 +1208,8 @@ function wire(): void {
   els.copyReport.addEventListener('click', () => void copyReport());
   els.downloadMd.addEventListener('click', () => void downloadReport('markdown'));
   els.downloadJson.addEventListener('click', () => void downloadReport('json'));
+  els.downloadHtml.addEventListener('click', () => void downloadReport('html'));
+  els.downloadPdf.addEventListener('click', () => void downloadReport('pdf'));
   els.resumeRun.addEventListener('click', () => void resumeRun());
 
   els.toggleInspector.addEventListener('click', () => {
@@ -1184,15 +1287,8 @@ async function boot(): Promise<void> {
   try {
     const health = await api.health();
     state.capabilities = health.capabilities;
-    setText(els.exaStatus, health.capabilities.exa ? '已配置' : '未配置');
-    const exaRadio = document.querySelector<HTMLInputElement>('input[name="provider"][value="exa"]');
-    const exaSegment = byId('exa-segment');
-    if (!health.capabilities.exa) {
-      if (exaRadio) exaRadio.disabled = true;
-      exaSegment.dataset.unavailable = 'true';
-    }
   } catch {
-    setText(els.exaStatus, '不可用');
+    // Entry stays usable; the actual request returns a recoverable service error.
   }
   const session = await api.session();
   if (session) {

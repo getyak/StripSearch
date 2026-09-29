@@ -1,8 +1,8 @@
 # StripSearch Web Alpha (`apps/web`)
 
 一个可运行的、同源的 StripSearch Web alpha：Express + Better Auth + SQLite + 原生 TypeScript 客户端。
-它实现认证、按账号隔离的研究作业、真实的 GitHub 公开资料读取、可选的 Exa 检索与带引用整理、来源排除 / 恢复、
-Markdown / JSON 导出，以及 Evidence Terminal 风格的界面。
+它实现认证、按账号隔离的研究作业、姓名或链接单输入、DeepSeek / DSH 多步研究、Exa / TikHub / Firecrawl 工具、来源排除 / 恢复、
+同一份 Person Object 的 Markdown / JSON / HTML / PDF 导出。运行边界见[人物研究说明](../../docs/person-research-release.md)。
 
 > 状态：**可运行 alpha**。它不改变仓库既有的 M1–M4 验收，也不代表 Exa 回答质量、MCP 宿主或评测已经通过。
 > 静态设计原稿仍保留在 [design/web](../../design/web/DESIGN.md)，未修改。
@@ -65,7 +65,12 @@ SSE 终态与会话撤销，以及基于 jsdom 的真实控制器回归（迟到
 
 | 变量 | 作用 |
 | --- | --- |
-| `EXA_API_KEY` | 可选。未设置时 UI 显示「未配置」，Exa 来源被禁用且服务端拒绝启动 Exa 研究。 |
+| `EXA_API_KEY` | 人物研究必需；网页搜索与正文读取。 |
+| `DEEPSEEK_API_KEY` | 人物研究必需；仅父进程用于计量后的模型调用。 |
+| `STRIPSEARCH_DEEPSEEK_MODEL` | 默认 `deepseek-flash`；Flash/Pro 使用版本化估价，未知模型费用标未知。 |
+| `TIKHUB_API_KEY` | 可选，启用 X 公开主页及单页本人帖子。 |
+| `FIRECRAWL_API_KEY` | 可选，普通 HTML 网页读取；禁用 X 与 PDF/AI 格式。 |
+| `CHROMIUM_EXECUTABLE_PATH` | PDF 使用本机 Chromium；容器已安装 Chromium 与中文字体。 |
 | `GITHUB_TOKEN` | 可选。GitHub 公开读取无需 token；配置后只提高匿名配额。 |
 | `PORT` | 默认 `4392`。 |
 | `STRIPSEARCH_DATA_DIR` | 默认 `apps/web/.data`（已忽略）。 |
@@ -85,8 +90,9 @@ SSE 终态与会话撤销，以及基于 jsdom 的真实控制器回归（迟到
 | 密码 | 8–128 字符 |
 | 认证请求体 | 实际读取 ≤ 8 KiB（含 chunked）；应用 JSON ≤ 32 KiB |
 | Provider 超时 / 响应上限 | 15 s / 512 KiB |
-| GitHub | 每个账号 2 次请求；一页最多 30 个仓库；最多展示 8 个非 fork 作品 |
-| Exa | 固定 `https://api.exa.ai`；`/search` 6 条结果、每条摘录 ≤ 1200 字符；`/answer` ≤ 4000 字符；引用必须全部有效且映射到来源，否则不采用整理结果 |
+| 人物研究 | 单次最多 12 工具 / 8 模型请求，150k 输入 / 16k 输出 token 预留预算，240 秒；未知用量保留预留额 |
+| GitHub（legacy） | 每个账号 2 次请求；一页最多 30 个仓库；最多展示 8 个非 fork 作品 |
+| Exa（legacy） | 固定 `https://api.exa.ai`；`/search` 6 条结果、每条摘录 ≤ 1200 字符；`/answer` ≤ 4000 字符；引用必须全部有效且映射到来源，否则不采用整理结果 |
 | 并发 | 每用户 1 个运行中作业，全局 3 |
 | 启动限流 | 每用户 60 秒 10 次 |
 | 记录上限 | 每用户 200 份研究 |
@@ -104,11 +110,11 @@ SSE 终态与会话撤销，以及基于 jsdom 的真实控制器回归（迟到
 | GET | `/api/runs/:id` | 规范化视图 + 有序事件（`?since=`）。 |
 | GET | `/api/runs/:id/events` | SSE 事件流，支持 `Last-Event-ID` / `?after=`，终态后发送 `done`。 |
 | POST | `/api/runs/:id/cancel` | 取消并中止后续写入；幂等。 |
-| POST | `/api/runs/:id/resume` | 为 `needs_input` 补充主页后继续。 |
+| POST | `/api/runs/:id/resume` | 以存储的 `candidateId` + `expectedRevision` 确认人物；旧接口仍可补充主页。 |
 | POST | `/api/runs/:id/retry` | 显式重试，创建新的子运行；可带幂等键重复提交。 |
-| POST | `/api/runs/:id/followup` | 追问（仅 Exa 来源），创建关联子研究。 |
+| POST | `/api/runs/:id/followup` | 追问（人物研究或旧 Exa 来源），创建关联子研究。 |
 | DELETE | `/api/runs/:id` | 删除研究、来源与事件。 |
-| GET | `/api/runs/:id/export?format=markdown\|json` | 与界面同一份规范化视图。 |
+| GET | `/api/runs/:id/export?format=markdown\|json\|html\|pdf` | 与界面同一份规范化视图。 |
 | POST | `/api/runs/:id/sources/:key/exclude\|restore` | 需 `expectedRevision`，过期返回 `409 stale_revision`。 |
 
 所有 `/api/*` 应用路由都要求登录并对资源做所有权校验（其他账号得到 `404`），变更请求要求精确匹配的 `Origin`（否则 `403`）。
@@ -150,4 +156,4 @@ SSE 终态与会话撤销，以及基于 jsdom 的真实控制器回归（迟到
 - 2026-09-22 托管验收中 Exa 真实调用返回 5 条来源，但没有采用可用整理结果，状态为 partial；不代表回答质量验收。邮箱验证、密码找回与 OAuth 尚未实现。
 - 仅读取 GitHub 公开元数据，不读取仓库代码；仓库归属不代表个人贡献。GitHub 来源不解释任意问题，追问需要配置 Exa。
 - Exa 的整理结果是供应商生成的摘要，不是独立核实事实；引用不完整时直接不采用。
-- 不含 MCP 宿主、TikHub、本地档案导入或评测；人名不自动合并。
+- 不含 MCP 宿主、本地档案导入或质量 benchmark；TikHub 当前只覆盖已验证的 X 主页 / 单页本人帖子。姓名候选必须确认；明确主页链接直接读取。

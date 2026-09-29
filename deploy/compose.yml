@@ -9,11 +9,11 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    pids_limit: 128
-    mem_limit: 768m
-    cpus: 1.0
+    pids_limit: 256
+    mem_limit: 1536m
+    cpus: 1.5
     tmpfs:
-      - /tmp:size=32m,mode=1777
+      - /tmp:size=128m,mode=1777
     env_file:
       - /etc/stripsearch/runtime.env
     volumes:

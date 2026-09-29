@@ -5,8 +5,12 @@ import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState } from '../../shared/types.js';
 import type { ProviderName } from '../../shared/types.js';
 import { renderJson, renderMarkdown } from '../../shared/canonical.js';
+import { renderReportHtml } from '../../shared/report-html.js';
+import { renderReportPdf } from '../services/pdf.js';
 import {
   extractGitHubHandle,
+  extractResearchUrl,
+  normalizeResearchUrl,
   isPublicHttpsUrl,
   normalizeQuestion,
   screenQuestion,
@@ -25,6 +29,7 @@ export interface RunRouteDeps {
   runner: Runner;
   auth: Auth;
   exaConfigured: boolean;
+  researchConfigured?: boolean;
 }
 
 function readBody(req: Request): Record<string, unknown> {
@@ -72,22 +77,26 @@ function lookupIdempotent(
 }
 
 export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
-  const { store, runner, auth, exaConfigured } = deps;
+  const { store, runner, auth, exaConfigured, researchConfigured } = deps;
 
   router.post('/runs', (req: Request, res: Response) => {
     const user = requireUser(res);
     const body = readBody(req);
-    const question = normalizeQuestion(body.question);
+    const question = normalizeQuestion(body.input ?? body.question);
     const questionCheck = validateQuestion(question);
     if (!questionCheck.ok) {
       throw new HttpError(400, 'invalid_question', questionCheck.error ?? '研究问题无效。');
     }
-    const seedCheck = validateSeedUrl(body.seedUrl ?? null);
+    const seedCheck = validateSeedUrl(body.seedUrl ?? extractResearchUrl(question));
     if (!seedCheck.ok) {
       throw new HttpError(400, 'invalid_seed_url', seedCheck.error ?? '主页链接无效。');
     }
-    const seedUrl = seedCheck.url;
     const provider: ProviderName = normalizeProvider(body.provider);
+    const seedUrl = provider === 'research' ? normalizeResearchUrl(seedCheck.url) : seedCheck.url;
+    if (provider === 'research') {
+      if (!researchConfigured) throw new HttpError(409, 'provider_unavailable', '人物研究需要服务端配置 DeepSeek 与 Exa。');
+      if ((seedCheck.url && !seedUrl) || (/https?:\/\//i.test(question) && !seedUrl)) throw new HttpError(400, 'invalid_seed_url', '请使用可公开访问的 HTTPS 人物主页链接。');
+    }
     const parentRunId = optionalString(body.parentRunId, 120);
     const retryOf = optionalString(body.retryOf, 120);
     const followup = body.followup === true;
@@ -214,9 +223,10 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
       res.end();
     };
 
+    res.write(`event: snapshot\ndata: ${JSON.stringify({run:store.buildCanonicalView(run)})}\n\n`);
     flush();
     const current = store.getRun(runId);
-    if (!current || isTerminalState(current.state)) {
+    if (!current || isTerminalState(current.state) || current.state === 'needs_input') {
       finish(current?.state ?? 'deleted');
       return;
     }
@@ -240,7 +250,7 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
             return;
           }
           flush();
-          if (isTerminalState(latest.state)) finish(latest.state);
+          if (isTerminalState(latest.state) || latest.state === 'needs_input') finish(latest.state);
         } catch {
           finish('error', false);
         } finally {
@@ -270,38 +280,35 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
   router.post('/runs/:id/resume', (req: Request, res: Response) => {
     const user = requireUser(res);
     const body = readBody(req);
-    const seedCheck = validateSeedUrl(body.seedUrl ?? null);
-    if (!seedCheck.ok || !seedCheck.url) {
-      throw new HttpError(400, 'invalid_seed_url', seedCheck.error ?? '请提供主页链接。');
-    }
     const run = store.getRunForOwner(String(req.params.id), user.id);
     if (!run) throw new HttpError(404, 'run_not_found', '未找到该研究。');
-    if (run.state !== 'needs_input') {
-      throw new HttpError(409, 'run_not_waiting', '该研究不在等待补充信息状态。');
+    if (run.state !== 'needs_input') throw new HttpError(409, 'run_not_waiting', '该研究不在等待补充信息状态。');
+    let seedUrl: string | null = null;
+    if (run.provider === 'research') {
+      if (!researchConfigured) throw new HttpError(409, 'provider_unavailable', '人物研究服务尚未配置。');
+      if (!Number.isInteger(body.expectedRevision) || body.expectedRevision !== run.revision) throw new HttpError(409, 'stale_revision', '研究已更新，请刷新后确认。');
+      const candidates = store.research.checkpoint(run.id)?.candidates ?? [];
+      if (typeof body.candidateId === 'string') {
+        seedUrl = candidates.find(candidate => candidate.candidateId === body.candidateId)?.profileUrl ?? null;
+        if (!seedUrl) throw new HttpError(400, 'invalid_candidate', '请选择本次研究中保存的候选人物。');
+      } else {
+        seedUrl = normalizeResearchUrl(body.seedUrl);
+        if (!seedUrl || (candidates.length > 0 && !candidates.some(candidate => candidate.profileUrl === seedUrl))) throw new HttpError(400, 'invalid_seed_url', '请选择已有候选主页，或补充有效公开 HTTPS 主页。');
+      }
+    } else {
+      const checked = validateSeedUrl(body.seedUrl);
+      if (!checked.ok || !checked.url) throw new HttpError(400, 'invalid_seed_url', checked.error ?? '请提供主页链接。');
+      seedUrl = checked.url;
+      if (run.provider === 'github' && !extractGitHubHandle(seedUrl)) throw new HttpError(400, 'invalid_seed_url', 'GitHub 来源需要 https://github.com/<用户名> 形式的主页链接。');
+      if (run.provider === 'exa' && !isPublicHttpsUrl(seedUrl)) throw new HttpError(400, 'invalid_seed_url', 'Exa 的种子主页必须是可公开访问的 HTTPS 链接。');
     }
-    if (run.provider === 'github' && !extractGitHubHandle(seedCheck.url)) {
-      throw new HttpError(
-        400,
-        'invalid_seed_url',
-        'GitHub 来源需要 https://github.com/<用户名> 形式的主页链接。'
-      );
-    }
-    if (run.provider === 'exa' && !isPublicHttpsUrl(seedCheck.url)) {
-      throw new HttpError(400, 'invalid_seed_url', 'Exa 的种子主页必须是可公开访问的 HTTPS 链接。');
-    }
-    const screen = screenQuestion(seedCheck.url);
-    if (screen.disallowed) {
-      throw new HttpError(422, 'scope_disallowed', screen.reason ?? '该请求不在可处理范围内。');
-    }
+    const screen = screenQuestion(seedUrl);
+    if (screen.disallowed) throw new HttpError(422, 'scope_disallowed', screen.reason ?? '该请求不在可处理范围内。');
     const gate = runner.checkStartAllowed(user.id);
-    if (!gate.allowed) {
-      throw new HttpError(429, gate.code ?? 'rate_limited', gate.message ?? '请求过于频繁。');
-    }
-    const result = runner.resume(run.id, user.id, seedCheck.url);
+    if (!gate.allowed) throw new HttpError(429, gate.code ?? 'rate_limited', gate.message ?? '请求过于频繁。');
+    const result = runner.resume(run.id, user.id, seedUrl);
     if (result === 'not_found') throw new HttpError(404, 'run_not_found', '未找到该研究。');
-    if (result === 'conflict') {
-      throw new HttpError(409, 'run_not_waiting', '该研究不在等待补充信息状态。');
-    }
+    if (result === 'conflict') throw new HttpError(409, 'run_not_waiting', '该研究不在等待补充信息状态。');
     runner.recordStart(user.id);
     res.json({ run: store.buildCanonicalView(result) });
   });
@@ -313,6 +320,7 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     if (!isTerminalState(parent.state)) {
       throw new HttpError(409, 'run_active', '研究仍在进行，不能重试。');
     }
+    if (parent.provider === 'research' && !researchConfigured) throw new HttpError(409, 'provider_unavailable', '人物研究服务尚未配置。');
     if (parent.provider === 'exa' && !exaConfigured) {
       throw new HttpError(409, 'provider_unavailable', 'Exa 未配置，无法重试。');
     }
@@ -357,15 +365,15 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     const user = requireUser(res);
     const parent = store.getRunForOwner(String(req.params.id), user.id);
     if (!parent) throw new HttpError(404, 'run_not_found', '未找到该研究。');
-    if (parent.provider !== 'exa') {
+    if (parent.provider !== 'exa' && parent.provider !== 'research') {
       throw new HttpError(
         409,
         'followup_requires_exa',
         'GitHub 来源只整理账号与仓库元数据，追问需要配置 Exa；可以改用 Exa 重新研究。'
       );
     }
-    if (!exaConfigured) {
-      throw new HttpError(409, 'provider_unavailable', 'Exa 未配置，无法发起追问。');
+    if ((parent.provider === 'research' && !researchConfigured) || !exaConfigured) {
+      throw new HttpError(409, 'provider_unavailable', '研究服务未配置，无法发起追问。');
     }
     const body = readBody(req);
     const question = normalizeQuestion(body.question);
@@ -424,12 +432,35 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     res.status(204).end();
   });
 
-  router.get('/runs/:id/export', (req: Request, res: Response) => {
+  router.get('/runs/:id/export', async (req: Request, res: Response) => {
     const user = requireUser(res);
     const run = store.getRunForOwner(String(req.params.id), user.id);
     if (!run) throw new HttpError(404, 'run_not_found', '未找到该研究。');
-    const format = req.query.format === 'json' ? 'json' : 'markdown';
+    const requested = req.query.format ?? 'markdown';
+    if (!['json', 'markdown', 'md', 'html', 'pdf'].includes(String(requested))) {
+      throw new HttpError(400, 'invalid_format', '不支持该导出格式。');
+    }
+    const format = String(requested);
+    if (req.query.revision !== undefined && String(req.query.revision) !== String(run.revision)) {
+      throw new HttpError(409, 'stale_revision', '报告已更新，请刷新后再导出。');
+    }
     const view = store.buildCanonicalView(run);
+    const exportSnapshot = JSON.stringify(view);
+    if (format === 'html' || format === 'pdf') {
+      const html = renderReportHtml(view);
+      const content = format === 'pdf' ? await renderReportPdf(html) : html;
+      // A source may have been withdrawn while the PDF renderer was running.
+      const latest = store.getRunForOwner(run.id, user.id);
+      if (!latest) throw new HttpError(404, 'run_not_found', '未找到该研究。');
+      if (JSON.stringify(store.buildCanonicalView(latest)) !== exportSnapshot) {
+        throw new HttpError(409, 'stale_revision', '报告已更新，请刷新后再导出。');
+      }
+      res.setHeader('content-type', format === 'pdf' ? 'application/pdf' : 'text/html; charset=utf-8');
+      res.setHeader('content-disposition', `attachment; filename="stripsearch-${run.id}-v${view.revision}.${format}"`);
+      res.setHeader('x-report-revision', String(view.revision));
+      res.send(content);
+      return;
+    }
     if (format === 'json') {
       res.setHeader('content-type', 'application/json; charset=utf-8');
       res.setHeader('content-disposition', `attachment; filename="stripsearch-${run.id}.json"`);

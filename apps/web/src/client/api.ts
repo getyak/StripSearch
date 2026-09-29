@@ -48,11 +48,15 @@ export interface CreateRunInput {
   followup?: boolean;
 }
 
+export type ExportFormat = 'markdown' | 'json' | 'html' | 'pdf';
+
+export type ResumeInput = { seedUrl: string } | { candidateId: string; expectedRevision: number };
+
 export interface HealthResponse {
   status: string;
   app: string;
   version: string;
-  capabilities: { github: boolean; exa: boolean };
+  capabilities: { github: boolean; exa: boolean; research?: boolean };
   limits: Record<string, number>;
 }
 
@@ -153,6 +157,16 @@ export class ApiClient {
     return { run: data.run, idempotent: Boolean(data.idempotent) };
   }
 
+  async createResearch(input: string, idempotencyKey: string): Promise<{ run: CanonicalView; idempotent: boolean }> {
+    const data = await this.request<ApiEnvelope>('/api/runs', {
+      method: 'POST',
+      headers: { 'idempotency-key': idempotencyKey },
+      body: JSON.stringify({ input })
+    });
+    if (!data.run) throw new ApiError(500, 'invalid_response', '服务器响应缺少研究数据。');
+    return { run: data.run, idempotent: Boolean(data.idempotent) };
+  }
+
   async getRun(id: string, since = 0): Promise<{ run: CanonicalView; events: RunEventRecord[]; latestSeq: number }> {
     const data = await this.request<ApiEnvelope>(`/api/runs/${encodeURIComponent(id)}?since=${since}&events=1`);
     if (!data.run) throw new ApiError(404, 'run_not_found', '未找到该研究。');
@@ -168,10 +182,10 @@ export class ApiClient {
     return data.run;
   }
 
-  async resumeRun(id: string, seedUrl: string): Promise<CanonicalView> {
+  async resumeRun(id: string, resolution: string | ResumeInput): Promise<CanonicalView> {
     const data = await this.request<ApiEnvelope>(`/api/runs/${encodeURIComponent(id)}/resume`, {
       method: 'POST',
-      body: JSON.stringify({ seedUrl })
+      body: JSON.stringify(typeof resolution === 'string' ? { seedUrl: resolution } : resolution)
     });
     if (!data.run) throw new ApiError(500, 'invalid_response', '服务器响应缺少研究数据。');
     return data.run;
@@ -210,6 +224,19 @@ export class ApiClient {
       throw new ApiError(response.status, 'export_failed', '导出失败。');
     }
     return response.text();
+  }
+
+  async exportBlob(id: string, format: ExportFormat, revision: number): Promise<Blob> {
+    const response = await fetch(
+      `${this.baseUrl}/api/runs/${encodeURIComponent(id)}/export?format=${format}&revision=${revision}`,
+      { credentials: 'same-origin' }
+    );
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as ApiEnvelope | null;
+      throw new ApiError(response.status, body?.error?.code ?? body?.code ?? 'export_failed',
+        body?.error?.message ?? body?.message ?? '导出失败，请稍后重试。');
+    }
+    return response.blob();
   }
 
   async setExclusion(

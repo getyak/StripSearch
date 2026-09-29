@@ -224,3 +224,22 @@ export function sanitizeText(raw: unknown, maxLength: number): string {
     .trim()
     .slice(0, maxLength);
 }
+
+/** Public person inputs are normalized once for stable anchors and allowlists. */
+export function normalizeResearchUrl(raw: unknown): string | null {
+  if (!isPublicHttpsUrl(raw)) return null;
+  const url = new URL(raw as string);
+  if (url.port || /^(?:www\.)?example\.(?:org|com|net)$/.test(url.hostname)) return null;
+  url.hash = '';
+  for (const key of [...url.searchParams.keys()]) if (/^(utm_|fbclid$|gclid$)/i.test(key)) url.searchParams.delete(key);
+  if (url.hostname === 'www.github.com') url.hostname = 'github.com';
+  if (['www.x.com','twitter.com','www.twitter.com'].includes(url.hostname)) url.hostname = 'x.com';
+  url.pathname = url.pathname.replace(/\/+$/, '') || '/';
+  if (['github.com','x.com'].includes(url.hostname) && url.pathname.split('/').filter(Boolean).length === 1) url.pathname = url.pathname.toLowerCase();
+  return url.href;
+}
+
+export function extractResearchUrl(input: string): string | null {
+  const match = input.match(/https:\/\/[^\s<>"'，。；）)]+/i);
+  return match ? normalizeResearchUrl(match[0]) : null;
+}

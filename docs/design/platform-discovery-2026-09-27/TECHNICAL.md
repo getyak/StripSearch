@@ -43,8 +43,8 @@ type CorrectionAction = 'confirm' | 'dismiss' | 'reopen';
 ```
 
 - `proposed` 是候选，`confirmed` 才有归属力，`dismissed` 撤回归属。`attributionFor(state)` → `linked | unattributed | revoked`，帖子与导出只认 `linked`。
-- **一次性校正 = 一个批次一次修订。** `POST /corrections` 提交 N 条 decisions，事务内逐条落 `account_link_revisions`（actor、from/to、basis、note、counterevidence），任务 `revision` 只 +1。
-- **自动确认只有确定性依据**：已归属来源（种子页）明确互链到候选主页 → `cross_link` 确认。**用户名一致永远只进 `needsReview`**，附带理由“同名/同用户名不等于同一人”。显示名、自述同理不自动确认（自述仍是自述）。
+- **一次性校正 = 一个批次一次修订。** `POST /corrections` 提交 N 条 decisions，整个批次在同一事务内落 `account_link_revisions`（actor、from/to、basis、note、counterevidence）；任一条失败时，账号、帖子、事件与任务修订全部回滚，成功时任务 `revision` 只 +1。
+- **自动确认仅接受明确自链**：种子页必须位于服务端平台注册表允许的 origin，成功返回 HTML，且实际 `a[rel~=me]` 的规范化 URL 与候选主页完全一致。普通文本、URL 前缀、评论/脚本和错误页均不构成归属证据。未在允许列表内的个人网站不由服务端直接抓取，降为人工确认；安全的远端正文接入另行实现。种子页请求同样计入任务预算。**用户名一致永远只进 `needsReview`**，附带理由“同名/同用户名不等于同一人”。
 - **撤回级联对称**：`dismiss` → 该链接下所有帖子 `excluded=1`（`attribution_revoked` 事件）；`reopen` / 从 dismissed 确认 → 恢复（`attribution_restored`）。帖子不删除，只失效——审计可回放。
 
 ### 2.3 任务连续性（检查点）

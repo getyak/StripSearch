@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "StripSearch · 下一代研究 Agent",
+    "subtitle": "待评审设计 · 身份先行、平台研究、统一证据 · 2026-09-29",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "none",
+    "views": [
+      {"id":"identity-path","label":"找到正确对象","focus":["input","identity","confirmation"],"note":"明确主页先建立账号锚点；有关键歧义才询问。用户选择与证据支持分别记录。"},
+      {"id":"research-path","label":"按平台深入研究","focus":["supervisor","context","worker","skills","gateway","providers"],"note":"同一种研究 worker 加载平台技能；并发与每个付费请求都由持久控制器约束。"},
+      {"id":"evidence-path","label":"形成可修订认识","focus":["worker","verifier","snapshot","ledger"],"note":"核验后的内容由唯一写入者发布。撤回沿身份、来源、断言和快照的依赖传播。"}
+    ]
+  },
+  "components": [
+    {"id":"input","type":"frontend","label":"统一输入","sublabel":"链接 / 用户名 / 邮箱","pos":[40,280],"size":[170,76]},
+    {"id":"identity","type":"backend","label":"身份解析","sublabel":"候选发现 + 归属判断","pos":[290,280],"size":[170,76]},
+    {"id":"supervisor","type":"backend","label":"持久控制器","sublabel":"任务图 / 预算 / 恢复","pos":[540,280],"size":[170,76]},
+    {"id":"worker","type":"backend","label":"平台研究 Worker","sublabel":"同一执行器，按需加载方法","pos":[790,280],"size":[190,76]},
+    {"id":"verifier","type":"security","label":"核验与综合","sublabel":"引文 / 归属 / 反证 / 覆盖","pos":[1060,280],"size":[180,76]},
+    {"id":"snapshot","type":"frontend","label":"人物阅读页","sublabel":"同一快照 / 引用 / 修订","pos":[1320,280],"size":[180,76]},
+    {"id":"confirmation","type":"frontend","label":"最小确认卡","sublabel":"仅关键歧义打断用户","pos":[290,490],"size":[170,76]},
+    {"id":"context","type":"database","label":"证据与覆盖索引","sublabel":"按引用读取，保留未知","pos":[540,80],"size":[170,76]},
+    {"id":"skills","type":"backend","label":"版本化 Skills","sublabel":"X / Reddit / GitHub / Web","pos":[790,80],"size":[190,76]},
+    {"id":"ledger","type":"database","label":"运行与动作账本","sublabel":"租约 / 预留 / 回执 / 版本","pos":[540,490],"size":[170,76]},
+    {"id":"gateway","type":"security","label":"受限工具网关","sublabel":"能力检测 / 计费 / 权限","pos":[790,490],"size":[190,76]},
+    {"id":"providers","type":"external","label":"数据与模型服务","sublabel":"逐端点验收，缺失可降级","pos":[1060,490],"size":[180,76]}
+  ],
+  "connections": [
+    {"from":"input","to":"identity","variant":"emphasis"},
+    {"from":"identity","to":"supervisor","variant":"emphasis"},
+    {"from":"supervisor","to":"worker","variant":"emphasis"},
+    {"from":"worker","to":"verifier","variant":"emphasis"},
+    {"from":"verifier","to":"snapshot","variant":"emphasis"},
+    {"from":"identity","to":"confirmation","variant":"dashed"},
+    {"from":"context","to":"supervisor"},
+    {"from":"skills","to":"worker"},
+    {"from":"supervisor","to":"ledger"},
+    {"from":"worker","to":"gateway"},
+    {"from":"gateway","to":"providers"}
+  ],
+  "cards": [
+    {"dot":"emerald","title":"领域状态由 StripSearch 持有","items":["图中为提案组件，不是已部署拓扑","Worker 只提交证据包，不能直接合并人物或发布报告","所有模型与数据请求进入同一预算账本"]},
+    {"dot":"amber","title":"先行约束","items":["发现候选与证明归属分开","并发初始最多 2 个 worker；平台覆盖不保证历史全量","Skills 定义方法，程序执行权限与发布门禁"]}
+  ]
+}

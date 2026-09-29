@@ -14,7 +14,7 @@
  * - Post extraction keeps a short excerpt and a locator, never full text.
  */
 
-import { asArray, asNumber, asRecord, asString } from './http.js';
+import { asArray, asNumber, asRecord, asString, readBoundedBody } from './http.js';
 import { ProviderError } from './types.js';
 import type { HttpTransport } from './types.js';
 import type {
@@ -58,6 +58,7 @@ interface BoundedResponse {
   status: number;
   text: string;
   bytes: number;
+  contentType: string | null;
 }
 
 /** Build the request URL from a rule template; throws on template misuse. */
@@ -117,12 +118,15 @@ export async function fetchBounded(
       redirect: 'error',
       signal: controller.signal
     });
-    const text = await response.text();
+    if (response.redirected) {
+      throw new ProviderError('provider_redirect', '平台响应发生了未授权重定向。');
+    }
+    const text = await readBoundedBody(response, maxBytes);
     const bytes = Buffer.byteLength(text, 'utf8');
     if (bytes > maxBytes) {
       throw new ProviderError('provider_response_too_large', '平台响应超过大小上限。');
     }
-    return { status: response.status, text, bytes };
+    return { status: response.status, text, bytes, contentType: response.headers.get('content-type') };
   } catch (error) {
     if (error instanceof ProviderError) throw error;
     if (timedOut) throw new ProviderError('provider_timeout', '平台请求超时。');

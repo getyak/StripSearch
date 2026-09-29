@@ -17,6 +17,10 @@ import { DiscoveryStore } from './discovery-store.js';
 import { BUILTIN_PLATFORM_REGISTRY } from './platforms/registry.js';
 import type { PlatformRegistry } from '../shared/platform-discovery.js';
 import { Store } from './store.js';
+import type { ResearchTools } from './research/tool-contracts.js';
+import { createResearchTools } from './research/toolkit.js';
+import { LIMITS } from '../shared/limits.js';
+import type { ResearchPlanner } from './research/planner.js';
 import type { DB } from './db/index.js';
 
 export interface BootstrapOverrides {
@@ -24,6 +28,8 @@ export interface BootstrapOverrides {
   transport?: HttpTransport;
   clientDir?: string;
   discoveryRegistry?: PlatformRegistry;
+  researchTools?: ResearchTools;
+  researchPlanner?: ResearchPlanner;
 }
 
 export interface BootstrappedApp {
@@ -60,7 +66,13 @@ export async function bootstrap(
     store,
     config,
     providerFactory,
-    transport
+    transport,
+    researchTools: overrides.researchTools ?? createResearchTools({
+      transport, exaApiKey: config.exaApiKey,
+      firecrawlApiKey: config.firecrawlApiKey ?? null, tikhubApiKey: config.tikhubApiKey ?? null,
+      githubToken: config.githubToken, timeoutMs: LIMITS.providerTimeoutMs, maxBytes: LIMITS.providerMaxBytes
+    }),
+    researchPlanner: overrides.researchPlanner
   });
   const discoveryRegistry = overrides.discoveryRegistry ?? BUILTIN_PLATFORM_REGISTRY;
   const discoveryRunner = new DiscoveryRunner({
@@ -80,6 +92,7 @@ export async function bootstrap(
     runner,
     clientDir
   });
+  void runner.pump();
   return { config, db, store, reviewStore, discoveryStore, discoveryRunner, runner, app, interrupted, interruptedDiscovery };
 }
 

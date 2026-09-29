@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { ResearchStore } from './research/research-store.js';
 import type {
   AnswerSectionDraft,
   CanonicalView,
@@ -237,7 +238,8 @@ export interface CreateRunInput {
 }
 
 export class Store {
-  constructor(private readonly db: DB) {}
+  readonly research: ResearchStore;
+  constructor(private readonly db: DB) { this.research = new ResearchStore(db); }
 
   insertRun(input: CreateRunInput): RunRecord {
     const timestamp = nowIso();
@@ -380,7 +382,24 @@ export class Store {
     return false;
   }
 
+  private bumpDependentRevisions(runId: string, ownerId: string): void {
+    const queue = [runId]; const visited = new Set(queue);
+    while (queue.length) {
+      const parent = queue.shift()!;
+      const children = this.db.prepare('SELECT id FROM runs WHERE parent_run_id=? AND owner_id=? AND deleted_at IS NULL').all(parent, ownerId) as {id:string}[];
+      for (const child of children) {
+        if (visited.has(child.id)) continue;
+        visited.add(child.id); queue.push(child.id);
+        this.db.prepare('UPDATE runs SET revision=revision+1,updated_at=? WHERE id=?').run(nowIso(),child.id);
+        const updated = this.getRun(child.id);
+        this.addEvent(child.id,'revision',{revision:updated?.revision,reason:'parent_dependency_changed'});
+      }
+    }
+  }
+
   deleteRun(id: string): boolean {
+    const run = this.getRun(id);
+    if (run) this.bumpDependentRevisions(id,run.ownerId);
     const info = this.db.prepare('DELETE FROM runs WHERE id = ?').run(id);
     return info.changes > 0;
   }
@@ -500,11 +519,14 @@ export class Store {
   }
 
   setSourceExcluded(runId: string, sourceKey: string, excluded: boolean): boolean {
+    const previous = this.getSource(runId,sourceKey);
     const info = this.db
       .prepare(
         'UPDATE sources SET excluded = ?, excluded_at = ? WHERE run_id = ? AND source_key = ?'
       )
       .run(excluded ? 1 : 0, excluded ? nowIso() : null, runId, sourceKey);
+    const run = this.getRun(runId);
+    if (run && previous && previous.excluded !== excluded) this.bumpDependentRevisions(runId,run.ownerId);
     return info.changes > 0;
   }
 
@@ -563,10 +585,32 @@ export class Store {
     });
   }
 
+  /** Follow-up provenance is transitive; cycles, deleted ancestors and owner mismatches fail closed. */
+  isResearchSourceActive(runId: string, sourceKey: string, ownerId: string, visited = new Set<string>()): boolean {
+    const key = `${runId}:${sourceKey}`;
+    if (visited.has(key)) return false;
+    const seen = new Set(visited); seen.add(key);
+    const run = this.getRunForOwner(runId, ownerId);
+    const source = run ? this.getSource(runId, sourceKey) : null;
+    if (!run || !source || source.excluded) return false;
+    const checkpoint = this.research.checkpoint(runId);
+    const page = checkpoint?.pages.find(page => page.sourceKey === sourceKey);
+    const anchor = checkpoint?.pages.find(page => page.url === checkpoint.anchorUrl);
+    if (anchor && anchor.sourceKey !== sourceKey && !this.isResearchSourceActive(runId, anchor.sourceKey, ownerId, seen)) return false;
+    return !page?.inheritedFrom || this.isResearchSourceActive(page.inheritedFrom.runId, page.inheritedFrom.sourceKey, ownerId, seen);
+  }
+
   buildCanonicalView(run: RunRecord): CanonicalView {
-    const sources = this.listSources(run.id);
+    const checkpoint = run.provider === 'research' ? this.research.checkpoint(run.id) : null;
+    const sources = this.listSources(run.id).map(source => checkpoint && !this.isResearchSourceActive(run.id, source.sourceKey, run.ownerId)
+      ? { ...source, excluded: true, fetchStatus: 'excluded' as const }
+      : source);
     const excluded = excludedSourceKeys(sources);
-    const observations = this.listObservations(run.id);
+    const anchorRevoked = Boolean(checkpoint?.anchorUrl && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
+    if (anchorRevoked) sources.forEach(source => excluded.add(source.sourceKey));
+    const observations = this.listObservations(run.id).map(observation => ({ ...observation,
+      validity: validityFor(observation.sourceKeys, excluded), reviewReason: reviewReason(observation.sourceKeys, excluded)
+    }));
     const answer: CanonicalAnswerSection[] = run.answer.map((section) => ({
       id: section.id,
       heading: section.heading,
@@ -587,6 +631,7 @@ export class Store {
       note: run.identity.note,
       candidates: run.identity.candidates
     };
+    if (anchorRevoked) { identity.status = 'ambiguous'; identity.note = '人物主页证据已撤回，需要重新确认身份。'; }
     return {
       schemaVersion: SCHEMA_VERSION,
       runId: run.id,
@@ -608,7 +653,20 @@ export class Store {
       answer,
       limitations: run.limitations,
       usage: run.usage,
-      reviewCount: countReviewItems(observations, answer)
+      reviewCount: countReviewItems(observations, answer),
+      ...(checkpoint ? {
+        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id), stopReason: run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns },
+        ...(checkpoint.anchorUrl && identity.status === 'resolved' ? {
+          personObject: {
+            schemaVersion: 'stripsearch/person/v1' as const,
+            person: { id: 'person_' + createHash('sha256').update(run.ownerId + '\0' + checkpoint.anchorUrl).digest('hex').slice(0,24), displayName: identity.displayName, profileUrl: checkpoint.anchorUrl },
+            claims: checkpoint.claims.filter(claim => sources.some(source => source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote))).map((claim,index) => ({id:`C${index+1}`,statement:claim.statement,kind:claim.kind,sourceKeys:[claim.sourceKey],evidenceIds:[`E${index+1}`]})),
+            evidence: checkpoint.claims.filter(claim => sources.some(source => source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote))).map((claim,index) => ({id:`E${index+1}`,sourceKey:claim.sourceKey,quote:claim.quote})),
+            unknowns: checkpoint.unknowns,
+            report: { runId: run.id, revision: run.revision, asOf: run.updatedAt }
+          }
+        } : {})
+      } : {})
     };
   }
 
@@ -675,7 +733,13 @@ export class Store {
       .all() as { id: string }[];
     let count = 0;
     for (const row of rows) {
+      const run = this.getRun(row.id);
+      if (run?.provider === 'research') {
+        const unknown = this.research.receipts(row.id).some(receipt => receipt.state !== 'completed');
+        if (!unknown) { this.updateRun(row.id, {state:'queued', interrupted:1}); continue; }
+      }
       if (this.markInterrupted(row.id)) {
+        if (run?.provider === 'research') this.updateRun(row.id, {stop_reason:'unknown_inflight',error_message:'上次调用的计费结果不明，已保留材料；不会自动重复调用。'});
         this.addEvent(row.id, 'interrupted', {
           message: '服务重启，未完成的研究已标记为中断。',
           state: 'partial' as RunState

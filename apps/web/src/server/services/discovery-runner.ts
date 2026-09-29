@@ -18,6 +18,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { parseFragment, type DefaultTreeAdapterTypes } from 'parse5';
 import { fetchBounded, fetchPostsPage, probePlatform } from '../adapters/discovery.js';
 import { ProviderError } from '../adapters/types.js';
 import type { HttpTransport } from '../adapters/types.js';
@@ -78,6 +79,33 @@ function methodOf(rule: PlatformRule): ProbeMethod {
   return rule.probe?.transport === 'api_http' ? 'api_http' : 'profile_http';
 }
 
+function profileKey(value: string, base?: string): string | null {
+  try {
+    const url = new URL(value, base);
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    url.hash = '';
+    url.pathname = url.pathname.replace(/\/+$/, '') || '/';
+    return url.href;
+  } catch { return null; }
+}
+
+/** Only actual HTML self-links count, never mentions, comments or script text. */
+function selfLinks(html: string, base: string): Set<string> {
+  const targets = new Set<string>();
+  const pending: DefaultTreeAdapterTypes.Node[] = [parseFragment(html)];
+  while (pending.length) {
+    const node = pending.pop()!;
+    if ('tagName' in node && node.tagName === 'a' && node.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+      const rel = node.attrs.find(attr => attr.name === 'rel')?.value.toLowerCase().split(/\s+/) ?? [];
+      const href = node.attrs.find(attr => attr.name === 'href')?.value;
+      const target = href && rel.includes('me') ? profileKey(href, base) : null;
+      if (target) targets.add(target);
+    }
+    if ('childNodes' in node) pending.push(...node.childNodes);
+  }
+  return targets;
+}
+
 export class DiscoveryRunner {
   private readonly jobs = new Map<string, AbortController>();
   private readonly starts = new Map<string, number[]>();
@@ -132,7 +160,7 @@ export class DiscoveryRunner {
     this.jobs.set(taskId, controller);
     void this.executeTask(taskId, controller).catch((error: unknown) => {
       const task = this.deps.store.getTask(taskId);
-      if (task && !isTerminalDiscoveryState(task.state)) {
+      if (!controller.signal.aborted && task && !isTerminalDiscoveryState(task.state)) {
         this.deps.store.setState(taskId, 'failed', {
           stop_reason: 'error',
           error_code: 'internal_error',
@@ -209,66 +237,68 @@ export class DiscoveryRunner {
       if (!check.ok) throw new CorrectionError('invalid_correction', check.error ?? '修订无效。');
     }
 
-    for (const input of inputs) {
-      const link = this.deps.store.getLink(taskId, input.linkId);
-      if (!link) throw new CorrectionError('link_not_found', '未找到要修订的账号链接。');
-      const toState = nextLinkState(link.state, input.action);
-      if (!toState) {
-        throw new CorrectionError(
-          'invalid_transition',
-          `链接 ${link.platformId} 当前状态不允许该修订。`
-        );
-      }
-      if (
-        (input.action === 'confirm' || input.action === 'dismiss') &&
-        !input.note &&
-        input.basis.includes('manual_review') === false &&
-        input.basis.length === 0
-      ) {
-        throw new CorrectionError('invalid_correction', '修订必须给出依据。');
-      }
-      this.deps.store.applyLinkRevision({
-        taskId,
-        linkId: link.id,
-        action: input.action,
-        fromState: link.state,
-        toState,
-        basis: input.basis,
-        note: input.note,
-        counterevidence: input.counterevidence,
-        actor
-      });
-      if (toState === 'dismissed') {
-        const revoked = this.deps.store.revokePostsForLink(taskId, link.id);
-        this.deps.store.addEvent(taskId, 'attribution_revoked', {
+    this.deps.store.transaction(() => {
+      for (const input of inputs) {
+        const link = this.deps.store.getLink(taskId, input.linkId);
+        if (!link) throw new CorrectionError('link_not_found', '未找到要修订的账号链接。');
+        const toState = nextLinkState(link.state, input.action);
+        if (!toState) {
+          throw new CorrectionError(
+            'invalid_transition',
+            `链接 ${link.platformId} 当前状态不允许该修订。`
+          );
+        }
+        if (
+          (input.action === 'confirm' || input.action === 'dismiss') &&
+          !input.note &&
+          input.basis.includes('manual_review') === false &&
+          input.basis.length === 0
+        ) {
+          throw new CorrectionError('invalid_correction', '修订必须给出依据。');
+        }
+        this.deps.store.applyLinkRevision({
+          taskId,
+          linkId: link.id,
+          action: input.action,
+          fromState: link.state,
+          toState,
+          basis: input.basis,
+          note: input.note,
+          counterevidence: input.counterevidence,
+          actor
+        });
+        if (toState === 'dismissed') {
+          const revoked = this.deps.store.revokePostsForLink(taskId, link.id);
+          this.deps.store.addEvent(taskId, 'attribution_revoked', {
+            linkId: link.id,
+            platformId: link.platformId,
+            revokedPosts: revoked,
+            reason: input.counterevidence ?? input.note ?? '人工排除'
+          });
+        }
+        if (link.state === 'dismissed' && toState !== 'dismissed') {
+          // Re-opening (or confirming) a dismissed link restores the posts that
+          // were revoked through it; the cascade is symmetric and recorded.
+          const restored = this.deps.store.restorePostsForLink(taskId, link.id);
+          this.deps.store.addEvent(taskId, 'attribution_restored', {
+            linkId: link.id,
+            platformId: link.platformId,
+            restoredPosts: restored
+          });
+        }
+        this.deps.store.addEvent(taskId, 'correction_applied', {
           linkId: link.id,
           platformId: link.platformId,
-          revokedPosts: revoked,
-          reason: input.counterevidence ?? input.note ?? '人工排除'
+          action: input.action,
+          fromState: link.state,
+          toState,
+          basis: input.basis,
+          actor
         });
       }
-      if (link.state === 'dismissed' && toState !== 'dismissed') {
-        // Re-opening (or confirming) a dismissed link restores the posts that
-        // were revoked through it; the cascade is symmetric and recorded.
-        const restored = this.deps.store.restorePostsForLink(taskId, link.id);
-        this.deps.store.addEvent(taskId, 'attribution_restored', {
-          linkId: link.id,
-          platformId: link.platformId,
-          restoredPosts: restored
-        });
-      }
-      this.deps.store.addEvent(taskId, 'correction_applied', {
-        linkId: link.id,
-        platformId: link.platformId,
-        action: input.action,
-        fromState: link.state,
-        toState,
-        basis: input.basis,
-        actor
-      });
-    }
-    // One batch correction = one revision bump.
-    this.deps.store.updateTask(taskId, { revision: task.revision + 1 });
+      // One batch correction = one revision bump.
+      this.deps.store.updateTask(taskId, { revision: task.revision + 1 });
+    });
 
     const links = this.deps.store.listLinks(taskId);
     const pendingReview = links.filter((link) => link.state === 'proposed');
@@ -327,7 +357,7 @@ export class DiscoveryRunner {
 
       this.finish(taskId, 'completed', 'done');
     } finally {
-      this.jobs.delete(taskId);
+      if (this.jobs.get(taskId) === controller) this.jobs.delete(taskId);
     }
   }
 
@@ -421,17 +451,33 @@ export class DiscoveryRunner {
     // Deterministic cross-link evidence: an explicitly given seed page links
     // to a candidate profile URL. One fetch, checked for every candidate.
     const crossLinked = new Set<string>();
-    if (task.seedUrl && proposed.some((link) => link.profileUrl)) {
+    // Only server-owned registry origins may be contacted. Arbitrary personal
+    // websites require a hardened remote reader; until then keep manual review.
+    const seedOrigin = task.seedUrl ? new URL(task.seedUrl).origin : null;
+    const allowedSeed = seedOrigin && registry.rules.some(rule => new URL(rule.homepage).origin === seedOrigin);
+    if (task.seedUrl && !allowedSeed) {
+      store.addEvent(taskId, 'seed_cross_link_unavailable', { reason: 'seed_origin_not_allowed' });
+    }
+    if (task.seedUrl && allowedSeed && proposed.some((link) => link.profileUrl)) {
+      const stop = budgetStop(task.usage, task.limits);
+      if (stop) { this.finish(taskId, 'partial', `budget:${stop}`); return true; }
+      const usage = { ...task.usage, requests: task.usage.requests + 1 };
+      this.saveProgress(taskId, task.checkpoint, usage);
       try {
-        const seed = await fetchBounded(task.seedUrl, null, {
+        const seed = await fetchBounded(task.seedUrl, seedOrigin, {
           transport,
           signal,
           timeoutMs: this.deps.timeoutMs ?? LIMITS.providerTimeoutMs
         }, 256 * 1024);
+        if (signal.aborted) return true;
+        usage.bytes += seed.bytes;
+        if (!this.saveProgress(taskId, task.checkpoint, usage)) return true;
+        const targets = seed.status === 200 && /^(?:text\/html|application\/xhtml\+xml)(?:;|$)/i.test(seed.contentType ?? '')
+          ? selfLinks(seed.text, task.seedUrl) : new Set<string>();
         for (const link of proposed) {
           if (!link.profileUrl) continue;
-          const needle = link.profileUrl.replace(/\/$/, '');
-          if (seed.text.includes(needle)) crossLinked.add(link.id);
+          const target = profileKey(link.profileUrl);
+          if (target && targets.has(target)) crossLinked.add(link.id);
         }
         store.addEvent(taskId, 'seed_cross_link_checked', {
           seedUrl: task.seedUrl,
@@ -439,12 +485,19 @@ export class DiscoveryRunner {
           bytes: seed.bytes
         });
       } catch (error) {
+        if (signal.aborted) return true;
+        usage.outcomeUnknown += 1;
+        if (!this.saveProgress(taskId, task.checkpoint, usage)) return true;
         store.addEvent(taskId, 'seed_cross_link_unavailable', {
           seedUrl: task.seedUrl,
           reason: error instanceof ProviderError ? error.code : 'fetch_failed'
         });
       }
     }
+
+    if (signal.aborted) return true;
+    const current = store.getTask(taskId);
+    if (!current || isTerminalDiscoveryState(current.state) || current.cancelRequested) return true;
 
     const candidates: CorrectionCandidate[] = proposed.map((link) => ({
       linkId: link.id,
@@ -460,7 +513,7 @@ export class DiscoveryRunner {
     const plan = planOnePassCorrection(candidates);
     for (const proposal of plan.proposals) {
       const link = store.getLink(taskId, proposal.linkId);
-      if (!link) continue;
+      if (!link || link.state !== 'proposed') continue;
       store.applyLinkRevision({
         taskId,
         linkId: link.id,

@@ -6,9 +6,9 @@
     <meta name="color-scheme" content="light dark" />
     <meta
       name="description"
-      content="StripSearch：输入公开账号与问题，沿证据查看作品、经历与公开观点。"
+      content="StripSearch：从一个姓名或公开主页，了解经历、作品与公开表达。"
     />
-    <title>StripSearch · Evidence Terminal</title>
+    <title>StripSearch · 了解一个人</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -20,18 +20,16 @@
           <span class="brand-mark" aria-hidden="true">SS</span>
           <span>StripSearch</span>
         </a>
-        <nav class="nav-links" aria-label="主要导航">
-          <a href="#example">出处示例</a>
-          <a href="#/review">标注工作台</a>
-        </nav>
+        <nav class="nav-links" aria-label="主要导航"><a href="#example">了解报告</a></nav>
         <div class="nav-actions">
-          <button class="button primary narrow-nav" type="button" id="open-review">标注工作台</button>
-          <a class="button ghost" href="https://github.com/cubxxw/StripSearch" target="_blank" rel="noopener noreferrer">GitHub</a>
           <button class="button" type="button" id="open-auth" hidden>登录 / 注册</button>
           <div class="user-menu" id="user-menu" hidden>
             <span class="user-name" id="user-name"></span>
-            <button class="button" type="button" id="open-app">打开工作台</button>
-            <button class="button ghost" type="button" id="sign-out">退出</button>
+            <button class="button" type="button" id="open-app">已保存研究</button>
+            <details class="account-options"><summary aria-label="账号选项">更多</summary><div>
+              <button class="button ghost" type="button" id="open-review">资料标注</button>
+              <button class="button ghost" type="button" id="sign-out">退出登录</button>
+            </div></details>
           </div>
         </div>
       </div>
@@ -43,122 +41,49 @@
         <div id="view-home">
           <section class="container hero" aria-labelledby="hero-title">
             <div class="hero-copy">
+              <p class="hero-kicker">从一个线索，开始理解。</p>
               <h1 id="hero-title">想了解谁？</h1>
-              <p class="hero-lead">查公开资料，点开来源核对。</p>
+              <p class="hero-lead">输入姓名或公开主页，查看经历、作品与公开表达。</p>
             </div>
-
             <div class="composer-wrap">
               <form class="composer" id="research-form" novalidate>
                 <div class="composer-body">
                   <div class="field">
                     <div class="field-head">
-                      <label for="research-question">你想查什么？ <span class="required">必填</span></label>
+                      <label for="research-question">姓名、主页链接，或你想了解的人</label>
                       <button class="clear-input" id="clear-question" type="button" hidden>清空</button>
                     </div>
-                    <textarea
-                      id="research-question"
-                      name="question"
-                      rows="3"
-                      aria-describedby="question-help question-error"
-                      placeholder="simonw 做过哪些公开项目？"
-                    ></textarea>
-                    <span class="helper keyboard-hint" id="question-help">⌘ / Ctrl + Enter 开始</span>
+                    <textarea id="research-question" name="input" rows="3" aria-describedby="question-help question-error" placeholder="一个名字，或一条公开主页链接"></textarea>
                     <span class="error-text" id="question-error" role="alert"></span>
                   </div>
-
-                  <fieldset class="source-select" id="source-select">
-                    <legend class="source-legend">资料来源</legend>
-                    <div class="segmented">
-                      <label class="segment">
-                        <input type="radio" name="provider" value="github" checked />
-                        <span>GitHub 公开账号</span>
-                      </label>
-                      <label class="segment" id="exa-segment">
-                        <input type="radio" name="provider" value="exa" />
-                        <span>Exa 网页检索<small id="exa-status">检查中…</small></span>
-                      </label>
-                    </div>
-                  </fieldset>
-
                   <div class="composer-actions">
-                    <button class="button primary" type="submit" id="submit-research">开始研究</button>
-                    <button class="button" type="button" id="open-example">填入示例</button>
+                    <span class="helper keyboard-hint" id="question-help">⌘ / Ctrl + Enter 提交</span>
+                    <button class="button primary" type="submit" id="submit-research">开始了解 <span aria-hidden="true">↗</span></button>
                   </div>
                   <p class="form-status" id="form-status" role="status"></p>
-
-                  <div class="example-row">
-                    <span class="helper">试试这些问题</span>
-                    <div class="example-rail" aria-label="示例问题">
-                      <button class="example" type="button" data-profile="https://github.com/simonw" data-question="simonw 做过哪些公开项目？">simonw 做过哪些公开项目？</button>
-                      <button class="example" type="button" data-profile="https://github.com/simonw" data-question="simonw 的公开资料怎么写他的工作？">他的公开资料怎么说？</button>
-                      <button class="example" type="button" data-profile="https://github.com/simonw" data-question="simonw 最近在更新什么？">最近在更新什么？</button>
-                    </div>
-                  </div>
-
-                  <details class="scope" id="more-settings">
-                    <summary><span>添加主页（可选）</span></summary>
-                    <div>
-                      <div class="field">
-                        <label for="profile-url">主页链接</label>
-                        <input
-                          id="profile-url"
-                          name="profile"
-                          type="url"
-                          inputmode="url"
-                          autocomplete="url"
-                          aria-describedby="profile-help profile-error"
-                          placeholder="https://github.com/handle"
-                        />
-                        <span class="helper" id="profile-help">例如 https://github.com/simonw</span>
-                        <span class="error-text" id="profile-error" role="alert"></span>
-                      </div>
-                    </div>
-                  </details>
-
-                  <details class="demo-note">
-                    <summary>研究边界</summary>
-                    <p>只做公开职业研究；不查私人住址、联系方式或身份揭露。</p>
-                  </details>
                 </div>
               </form>
+              <div class="entry-help"><button class="clear-input" type="button" id="open-example">填入公开主页示例</button><span class="helper">提交后开始，资料将保存到你的账号。</span></div>
             </div>
           </section>
-
-          <section class="section" id="example" aria-labelledby="example-title">
-            <div class="container">
-              <div class="section-heading">
-                <h2 id="example-title">点开出处，再下结论。</h2>
-              </div>
-              <div class="evidence-example">
-                <div class="example-col">
-                  <div class="claim">
-                    <span class="source-label">01 / 查看</span>
-                    <strong>原文说了什么？</strong>
-                    <p>从引用跳到来源，查看摘录和原链接。</p>
-                  </div>
-                  <button class="button" type="button" id="open-example-2">填入示例 →</button>
-                </div>
-                <div class="example-col">
-                  <div class="source-preview">
-                    <span class="source-label">02 / 修订</span>
-                    <strong>不相关，就排除。</strong>
-                    <p>相关结论随即标记待复核。可随时恢复。</p>
-                  </div>
-                </div>
-              </div>
+          <section class="container person-preview" id="example" aria-labelledby="example-title">
+            <div><p class="hero-kicker">不止找到资料</p><h2 id="example-title">把一个人，读得更清楚。</h2><p class="helper">以下为原创合成片段</p></div>
+            <div class="preview-reading">
+              <p>从他做过的作品，到他如何解释自己的选择。<br>知道哪些有据可查，也知道哪里仍不能下结论。</p>
+              <details class="preview-evidence"><summary>看一个带出处的例子</summary><div>
+                <p><strong>作品记录</strong> · 合成项目 Lantern 的更新记录，提到了离线阅读功能。</p>
+                <blockquote>“新增离线阅读与本地索引。”</blockquote>
+                <p class="helper">原创合成更新记录，2025 年 6 月。它能说明功能已发布，不能证明由某个人独立完成。</p>
+              </div></details>
             </div>
           </section>
-
-          <details class="container scope-note" id="boundaries">
-            <summary>公开职业研究 · 适用范围</summary>
-            <p>用于采访准备、作品研究和授权自我研究。保留出处、反证和未知；不提供人格评分、招聘筛选、私人调查或身份猜测。</p>
-          </details>
+          <details class="container scope-note" id="boundaries"><summary>公开资料，有据可查。</summary><p>用于理解公开作品、准备采访和授权自我研究。保留出处、相反证据与未知；不提供私人位置追踪或匿名身份揭露。</p></details>
         </div>
 
         <!-- ============ APP ============ -->
         <div id="view-app" hidden>
-          <div class="app-shell" id="app-shell">
-            <aside class="history-rail" aria-label="研究历史">
+          <div class="app-shell inspector-collapsed" id="app-shell">
+            <aside class="history-rail" aria-label="已保存研究">
               <div class="rail-head">
                 <button class="button" id="new-research" type="button">新建研究</button>
                 <button class="button ghost" id="rail-return-home" type="button">返回首页</button>
@@ -175,32 +100,39 @@
                 </div>
                 <div class="work-actions">
                   <button class="button" id="stop-run" type="button" hidden>取消</button>
-                  <button class="button" id="copy-report" type="button" disabled>复制报告</button>
-                  <button class="button" id="download-md" type="button" disabled>下载 Markdown</button>
-                  <button class="button" id="download-json" type="button" disabled>下载 JSON</button>
+                  <details class="export-menu"><summary>导出资料</summary><div>
+                    <button class="button" id="download-html" type="button" disabled>下载 HTML</button>
+                    <button class="button" id="download-pdf" type="button" disabled>下载 PDF</button>
+                    <button class="button" id="download-json" type="button" disabled>下载 JSON</button>
+                    <button class="button" id="download-md" type="button" disabled>下载 Markdown</button>
+                    <button class="button" id="copy-report" type="button" disabled>复制文本</button>
+                  </div></details>
                   <button class="button" id="retry-run" type="button" hidden>重试</button>
                   <button class="button danger" id="delete-run" type="button" hidden>删除</button>
-                  <button class="button narrow-only" id="open-mobile-history" type="button">研究历史</button>
+                  <button class="button narrow-only" id="open-mobile-history" type="button">已保存研究</button>
                   <button class="button narrow-only" id="open-mobile-sources" type="button">出处</button>
-                  <button class="button wide-only" id="toggle-inspector" type="button" aria-pressed="true">收起出处</button>
+                  <button class="button wide-only" id="toggle-inspector" type="button" aria-pressed="false">展开出处</button>
                   <button class="button" id="app-return-home" type="button">返回首页</button>
                 </div>
               </header>
 
               <div class="work-body" id="work-body">
                 <div class="request-message">
-                  <span>你 · 研究问题</span>
-                  <p class="report-question" id="report-question">等待研究问题</p>
+                  <span>你想了解</span>
+                  <p class="report-question" id="report-question">从一个线索开始</p>
                 </div>
+
+                <p id="run-status-summary" class="run-status-summary" role="status" hidden></p>
 
                 <section class="stage-panel" id="needs-input-panel" hidden aria-labelledby="needs-input-title">
                   <div class="panel-bar mono"><span>需要补充</span><span>不会自动猜测</span></div>
                   <div class="panel-content">
-                    <h3 id="needs-input-title">还缺一个能确认身份的主页</h3>
+                    <h3 id="needs-input-title">先确认你想了解的人</h3>
                     <p id="needs-input-prompt"></p>
+                    <div id="identity-candidates" class="identity-candidates"></div>
                     <div class="field">
-                      <label for="resume-seed">主页链接</label>
-                      <input id="resume-seed" type="url" inputmode="url" placeholder="https://github.com/handle" />
+                      <label for="resume-seed">补充主页链接</label>
+                      <input id="resume-seed" type="url" inputmode="url" placeholder="补充一个公开主页链接" />
                       <span class="error-text" id="resume-error" role="alert"></span>
                     </div>
                     <button class="button primary" id="resume-run" type="button">继续研究</button>
@@ -219,6 +151,7 @@
                     <span class="progress-text mono" id="run-progress-text">0 / 0</span>
                   </div>
                   <div id="stage-list"></div>
+                  <div id="research-details" class="research-details"></div>
                 </details>
 
                 <div id="report" class="report"></div>

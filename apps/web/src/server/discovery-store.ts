@@ -367,6 +367,10 @@ export interface CreateDiscoveryTaskInput {
 export class DiscoveryStore {
   constructor(private readonly db: DB) {}
 
+  transaction<T>(action: () => T): T {
+    return this.db.transaction(action)();
+  }
+
   insertTask(input: CreateDiscoveryTaskInput): DiscoveryTaskRecord {
     const timestamp = nowIso();
     const id = newId('dtask');

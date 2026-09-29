@@ -3,9 +3,26 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  container-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build the production image
+        run: docker build --build-arg REVISION="$GITHUB_SHA" -t stripsearch:ci .
+      - name: Exercise DSH and PDF in the isolated runtime
+        run: |
+          docker run --rm -i --network none --read-only \
+            --tmpfs /tmp:size=128m,mode=1777 --memory=1536m --pids-limit=256 \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            stripsearch:ci node --input-type=module < deploy/runtime-smoke.mjs
   web-evals:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      CHROMIUM_EXECUTABLE_PATH: /usr/bin/google-chrome
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -21,6 +38,10 @@ jobs:
         run: |
           npm --prefix apps/web run typecheck
           npm --prefix apps/web run build
+      - name: Verify installed Chrome for PDF tests
+        run: |
+          test -x "$CHROMIUM_EXECUTABLE_PATH"
+          "$CHROMIUM_EXECUTABLE_PATH" --version
       - name: Runtime tests (offline providers)
         run: npm --prefix apps/web test
       - name: Dataset integrity (no answer grading)

@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { fetchPostsPage, probePlatform, resolveRuleUrl } from '../server/adapters/discovery.js';
+import { fetchBounded, fetchPostsPage, probePlatform, resolveRuleUrl } from '../server/adapters/discovery.js';
 import type { ProbeContext } from '../server/adapters/discovery.js';
 import type {
   HttpRequestInit,
@@ -126,6 +126,22 @@ const MARKER_RULE: PlatformRule = {
 function context(transport: HttpTransport, timeoutMs = 1000): ProbeContext {
   return { transport, signal: new AbortController().signal, timeoutMs };
 }
+
+test('bounded discovery reads cancel a stream before buffering an oversized response', async () => {
+  let cancelled = false;
+  const transport: HttpTransport = { async fetch() {
+    return {
+      status: 200, ok: true, headers: { get: () => null },
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) { controller.enqueue(new Uint8Array(9)); },
+        cancel() { cancelled = true; }
+      }),
+      async text() { return 'unbounded fallback must not be used'; }
+    };
+  } };
+  await assert.rejects(fetchBounded('https://fixturecode.example.test/p', 'https://fixturecode.example.test', context(transport), 8));
+  assert.equal(cancelled, true);
+});
 
 test('resolveRuleUrl encodes the subject and refuses non-https rules', () => {
   assert.equal(

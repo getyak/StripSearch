@@ -36,6 +36,10 @@ export interface AppConfig {
   dbPath: string;
   githubToken: string | null;
   exaApiKey: string | null;
+  deepseekApiKey?: string | null;
+  deepseekModel?: string;
+  firecrawlApiKey?: string | null;
+  tikhubApiKey?: string | null;
   nodeEnv: string;
   isTest: boolean;
 }
@@ -219,6 +223,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dbPath: path.join(dataDir, 'stripsearch.sqlite'),
     githubToken: env.GITHUB_TOKEN?.trim() || null,
     exaApiKey: env.EXA_API_KEY?.trim() || null,
+    deepseekApiKey: env.DEEPSEEK_API_KEY?.trim() || null,
+    deepseekModel: env.STRIPSEARCH_DEEPSEEK_MODEL?.trim() || 'deepseek-flash',
+    firecrawlApiKey: env.FIRECRAWL_API_KEY?.trim() || null,
+    tikhubApiKey: env.TIKHUB_API_KEY?.trim() || null,
     nodeEnv,
     isTest
   };

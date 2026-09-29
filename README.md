@@ -4,13 +4,13 @@
 
 从公开经历、作品与行动理解一个人，让每项判断都能回到证据。
 
-StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Agent 设计。计划提供本地 Agent、CLI 与 MCP 接口，输出带人物索引、原始链接和证据状态的 Markdown / JSON 报告。
+StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web Agent。输入姓名或公开主页链接，系统核对身份、选择资料工具、整理带出处的 Person Object，并导出 JSON、HTML、PDF 或 Markdown。
 
-> **当前阶段：设计基线 v0.1 + 可运行 Web alpha，2026-09-21。** 邮箱登录、研究记录、GitHub 公开资料读取和来源修订已实现并验收。HTTPS 托管已上线，Exa 已连通（本次返回部分结果）；完整 Agent、CLI、MCP 和研究效果评测尚未交付。
+> **当前阶段：有预算边界的人物研究 Web alpha，2026-09-26。** DeepSeek / DSH 决策、Exa 网页检索、TikHub X 公开账号与帖子、按需 Firecrawl、持久化动作账本和证据撤回已实现。CLI、MCP、多平台覆盖与研究质量 benchmark 尚未交付。具体运行边界见[本轮实现说明](docs/person-research-release.md)。
 
 **在线官网与工作台：** <https://stripsearch.103.195.188.236.sslip.io>（临时地址；登录受限，尚无邮件找回）。
 
-**Web 入口：** [`apps/web`](apps/web/README.md) 提供同一份 canonical 报告上的真实认证、按账号隔离的 SQLite 研究作业、GitHub 公开资料读取、可选 Exa 检索与 Markdown / JSON 导出。运行方式、实际限制与未验证边界见该说明；这不代表 M1–M4 整体通过。
+**Web 入口：** [`apps/web`](apps/web/README.md) 提供同一份 canonical 报告上的真实认证、按账号隔离的 SQLite 研究作业、有预算的多步人物研究、公开资料读取与四种格式导出。运行方式、实际限制与未验证边界见该说明；这不代表 M1–M4 整体通过。
 
 本轮入口：[初始化调研与实施方案](docs/initialization-research.md) · [验证记录](docs/initialization-validation.md)。探针验证程序约束与依赖兼容，不代表原 12 个研究案例或真实人物评测已通过。
 
@@ -37,6 +37,8 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Agen
 | 平台发现、身份校正与帖子追踪（holehe / maigret 接入） | [平台发现提案](docs/design/platform-discovery-2026-09-27/README.md) |
 | 分阶段交付与验收 | [开发 brief / 路线](docs/roadmap.md) |
 
+下一阶段：[人物研究 Agent 设计稿](docs/superpowers/specs/2026-09-29-person-research-agent-design.md) · [交互与架构阅读页](design/explorations/agent-research-2026-09-29/README.md)。覆盖身份发现、X / Reddit / GitHub / 个人网站研究、平台 Skills 与证据修订；这是待实施设计，不代表新增能力已上线。
+
 先看一份[合成报告](examples/report.md)，再对照[同一份 JSON](examples/report.json)和[请求配置](examples/request.json)。样例域名 `example.org` 是占位标识，不应抓取。
 
 ## 部署
@@ -52,11 +54,11 @@ flowchart LR
   C --> D["材料归属与证据账本"]
   D --> E["事件、反证与核验"]
   E --> F["同一份结构化研究"]
-  F --> G["Markdown / JSON / MCP"]
+  F --> G["JSON / HTML / PDF / Markdown"]
   D -. "身份被撤销" .-> E
 ```
 
-建议先验证 **Exa + TikHub**，在正文读取缺失时按需使用 **Firecrawl**。采集器负责取得资料；StripSearch 负责把资料归给正确的人，并约束结论能说到哪一步。具体能力与未验证项见[选型](docs/providers.md)。
+当前使用 **Exa + TikHub**，在普通网页正文读取缺失时按需使用 **Firecrawl**。采集器负责取得资料；StripSearch 负责把资料归给正确的人，并约束结论能说到哪一步。具体能力与未验证项见[选型](docs/providers.md)。
 
 ## 参与与复用
 
@@ -70,4 +72,4 @@ flowchart LR
 
 ---
 
-**English:** StripSearch is a design-stage, evidence-first research agent for public professional activity and authorized materials. It separates identity linkage, observed actions, attributed statements and hypotheses. Planned interfaces are a local agent, CLI and MCP; reports share a canonical JSON model. An authenticated Web alpha includes GitHub metadata research and an optional Exa adapter. A single-host HTTPS alpha is deployed; CLI, MCP and research-quality benchmarks are not released.
+**English:** StripSearch is an authenticated, evidence-first person-research Web alpha. A bounded DeepSeek / DSH controller chooses public-source tools and produces a canonical Person Object with JSON, HTML, PDF and Markdown exports. Identity linkage, attributed statements, page statements and inferences remain separate. CLI, MCP, broad social-platform coverage and research-quality benchmarks are not released.

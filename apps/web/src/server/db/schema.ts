@@ -38,6 +38,25 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS runs_owner_created ON runs(owner_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS runs_state ON runs(state);
 
+CREATE TABLE IF NOT EXISTS research_checkpoints (
+ run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+ data_json TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS research_actions (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ action_key TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ state TEXT NOT NULL,
+ request_json TEXT NOT NULL,
+ result_json TEXT,
+ usage_json TEXT,
+ reserved_input INTEGER NOT NULL DEFAULT 0,
+ reserved_output INTEGER NOT NULL DEFAULT 0,
+ created_at TEXT NOT NULL,
+ settled_at TEXT,
+ PRIMARY KEY (run_id, action_key)
+);
 CREATE TABLE IF NOT EXISTS idempotency_keys (
   owner_id TEXT NOT NULL,
   key TEXT NOT NULL,

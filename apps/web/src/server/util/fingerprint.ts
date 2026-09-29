@@ -26,7 +26,7 @@ export function fingerprintInput(input: FingerprintInput): string {
 }
 
 export function normalizeProvider(raw: unknown): ProviderName {
-  return raw === 'exa' ? 'exa' : 'github';
+  return raw === 'exa' ? 'exa' : raw === 'github' ? 'github' : 'research';
 }
 
 export function inputFromRun(run: {

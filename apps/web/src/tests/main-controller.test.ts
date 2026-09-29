@@ -503,7 +503,7 @@ test('an expired review session clears the previous account research state', asy
 
 test('a direct auth-form account switch clears the previous research DOM immediately', async () => {
   await freshUser('review-L');
-  const privateInputs = ['research-question', 'profile-url', 'chat-input', 'resume-seed'];
+  const privateInputs = ['research-question', 'chat-input', 'resume-seed'];
   for (const id of privateInputs) {
     (env.document.getElementById(id) as HTMLInputElement).value = `privateL unsent ${id}`;
   }
@@ -553,4 +553,148 @@ test('a direct auth-form account switch clears the previous research DOM immedia
   }
   runsGate.resolve();
   await settle();
+});
+
+test('single person input submits without a provider and suppresses concurrent double clicks', async () => {
+  await freshUser('person-entry');
+  const gate = deferred<void>();
+  const posted: unknown[] = [];
+  route = (url, init) => {
+    if (url === '/api/runs' && init?.method === 'POST') {
+      posted.push(JSON.parse(String(init.body)));
+      return gate.promise.then(() => jsonResponse({ run: makeView('person-created', { state: 'queued' }), idempotent: false }));
+    }
+    if (url.includes('/api/runs/person-created?')) return jsonResponse({ run: makeView('person-created', { state: 'queued' }), events: [], latestSeq: 0 });
+    if (url === '/api/runs') return jsonResponse({ runs: [] });
+    return jsonResponse({});
+  };
+  const input = env.document.getElementById('research-question') as HTMLTextAreaElement;
+  input.value = 'https://example.org/person/synthetic';
+  const form = env.document.getElementById('research-form')!;
+  form.dispatchEvent(new env.window.Event('submit', { bubbles: true, cancelable: true }));
+  form.dispatchEvent(new env.window.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  assert.deepEqual(posted, [{ input: 'https://example.org/person/synthetic' }]);
+  gate.resolve();
+  await settle();
+  assert.equal(state.run?.runId, 'person-created');
+  assert.equal(input.value, 'https://example.org/person/synthetic');
+  assert.equal(env.document.querySelector('input[name="provider"]'), null);
+});
+
+test('needs_input stream preserves the new prompt and displays stored candidate choices', async () => {
+  await freshUser('person-choice');
+  const waiting = makeView('choice', { state: 'researching', identity: { displayName: '', handle: null, profileUrl: null, status: 'needs_input', note: null, candidates: [] } });
+  route = () => jsonResponse({ run: waiting, events: [], latestSeq: 0 });
+  await selectRun('choice');
+  const { MockEventSource } = await import('./dom-env.js');
+  const stream = MockEventSource.instances.at(-1)!;
+  stream.emit('needs_input', { prompt: '你指的是哪位林舟？', candidates: [{ candidateId: 'candidate-a', label: '林舟', detail: '合成创作者', profileUrl: 'https://example.org/person/a' }] }, '2');
+  assert.match(env.document.getElementById('needs-input-prompt')?.textContent ?? '', /哪位林舟/);
+  const choice = env.document.querySelector<HTMLButtonElement>('[data-candidate-id="candidate-a"]');
+  assert.ok(choice);
+  assert.match(choice.getAttribute('aria-label') ?? '', /合成创作者/);
+  state.run = null;
+  stream.close();
+});
+
+test('retrying an uncertain person submission reuses its key and retains the input', async () => {
+  await freshUser('person-retry');
+  const keys: string[] = [];
+  route = (url, init) => {
+    if (url === '/api/runs' && init?.method === 'POST') {
+      keys.push(new Headers(init.headers).get('idempotency-key') ?? '');
+      if (keys.length === 1) throw new TypeError('connection lost');
+      return jsonResponse({ run: makeView('recovered'), idempotent: true });
+    }
+    return jsonResponse({ runs: [] });
+  };
+  const input = env.document.getElementById('research-question') as HTMLTextAreaElement;
+  input.value = '林舟 合成创作者';
+  const form = env.document.getElementById('research-form')!;
+  form.dispatchEvent(new env.window.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  assert.equal(input.value, '林舟 合成创作者');
+  assert.match(env.document.getElementById('form-status')?.textContent ?? '', /不会重复创建/);
+  form.dispatchEvent(new env.window.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+  assert.equal(state.run?.runId, 'recovered');
+});
+
+test('candidate confirmation submits only the stored ID and displayed revision', async () => {
+  await freshUser('person-confirm');
+  const identity = { displayName: '', handle: null, profileUrl: null, status: 'ambiguous' as const, note: '请选择人物', candidates: [{ candidateId: 'c-stored', label: '林舟', detail: '创作者', profileUrl: 'https://example.org/person/a' }] };
+  state.run = makeView('confirm', { state: 'needs_input', revision: 7, identity });
+  state.activeRunId = 'confirm';
+  renderAll();
+  let resolution: unknown;
+  route = (url, init) => {
+    if (url.endsWith('/resume')) { resolution = JSON.parse(String(init?.body)); return jsonResponse({ run: makeView('confirm', { state: 'completed' }) }); }
+    return jsonResponse({});
+  };
+  env.document.querySelector<HTMLButtonElement>('[data-candidate-id="c-stored"]')!.click();
+  await settle();
+  assert.deepEqual(resolution, { candidateId: 'c-stored', expectedRevision: 7 });
+});
+
+test('IME composition and repeated keyboard events do not start research', async () => {
+  await freshUser('person-ime');
+  let posts = 0;
+  route = (_url, init) => { if (init?.method === 'POST') posts += 1; return jsonResponse({}); };
+  const input = env.document.getElementById('research-question') as HTMLTextAreaElement;
+  input.value = '林舟';
+  input.dispatchEvent(new env.window.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true }));
+  input.dispatchEvent(new env.window.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, repeat: true, bubbles: true }));
+  await settle();
+  assert.equal(posts, 0);
+});
+
+
+test('a bookmarked person run is restored instead of the newest history item', async () => {
+  await freshUser('person-bookmark');
+  state.runs = [{ runId: 'newest', question: '新研究', state: 'completed', provider: 'github', revision: 1, createdAt: '', updatedAt: '', sourceCount: 0, reviewCount: 0 }];
+  route = (url) => {
+    const id = url.includes('/bookmarked?') ? 'bookmarked' : 'newest';
+    return jsonResponse({ run: makeView(id), events: [], latestSeq: 0 });
+  };
+  env.window.location.hash = '#/app/bookmarked';
+  await settle();
+  assert.equal(state.run?.runId, 'bookmarked');
+});
+
+test('budget stopping explains retained results and labels uncertain cost', async () => {
+  await freshUser('person-budget');
+  state.run = { ...makeView('limited', { state: 'partial' }), research: { phase: 'finished', steps: 4, stopReason: 'budget_exhausted', budget: { toolCalls: 3, modelCalls: 2, estimatedUsd: 0.013, unknownCost: true, limits: { toolCalls: 12, modelCalls: 8 } } } } as CanonicalView;
+  renderAll();
+  assert.match(env.document.getElementById('run-status-summary')?.textContent ?? '', /达到预算/);
+  const details = env.document.getElementById('research-details')?.textContent ?? '';
+  assert.match(details, /读取 3 \/ 12 次/);
+  assert.match(details, /估算/);
+  assert.match(details, /部分费用尚未确认/);
+  assert.equal((env.document.getElementById('activity-panel') as HTMLDetailsElement).hidden, false);
+});
+
+
+test('an older in-flight snapshot cannot erase a newer identity choice', async () => {
+  await freshUser('person-snapshot-order');
+  const initial = makeView('ordered', { state: 'researching', revision: 1 });
+  const late = deferred<void>();
+  let reads = 0;
+  route = () => ++reads === 1
+    ? jsonResponse({ run: initial, events: [], latestSeq: 0 })
+    : late.promise.then(() => jsonResponse({ run: initial, events: [], latestSeq: 1 }));
+  await selectRun('ordered');
+  const { MockEventSource } = await import('./dom-env.js');
+  const stream = MockEventSource.instances.at(-1)!;
+  stream.emit('revision', { revision: 1 }, '1');
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  stream.emit('needs_input', { prompt: '请选择新的候选人', revision: 2, candidates: [{ candidateId: 'new-person', label: '林舟', detail: '合成作者' }] }, '2');
+  late.resolve();
+  await settle();
+  assert.equal(state.run?.state, 'needs_input');
+  assert.equal(state.run?.revision, 2);
+  assert.ok(env.document.querySelector('[data-candidate-id="new-person"]'));
+  stream.close();
 });

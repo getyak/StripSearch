@@ -63,7 +63,8 @@ export function createApp(deps: AppDeps): Express {
       version: '0.1.0',
       capabilities: {
         github: true,
-        exa: Boolean(deps.config.exaApiKey)
+        exa: Boolean(deps.config.exaApiKey),
+        research: Boolean(deps.config.deepseekApiKey && deps.config.exaApiKey)
       },
       limits: {
         questionMax: LIMITS.questionMax,
@@ -87,7 +88,8 @@ export function createApp(deps: AppDeps): Express {
     store: deps.store,
     runner: deps.runner,
     auth: deps.auth,
-    exaConfigured: Boolean(deps.config.exaApiKey)
+    exaConfigured: Boolean(deps.config.exaApiKey),
+    researchConfigured: Boolean(deps.config.deepseekApiKey && deps.config.exaApiKey)
   });
   registerReviewRoutes(apiRouter, { reviewStore: deps.reviewStore });
   registerDiscoveryRoutes(apiRouter, {

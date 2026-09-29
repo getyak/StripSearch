@@ -23,7 +23,8 @@ export const STATE_LABELS: Record<RunState, string> = {
 
 export const PROVIDER_LABELS: Record<ProviderName, string> = {
   github: 'GitHub 公开账号',
-  exa: 'Exa 网页检索'
+  exa: 'Exa 网页检索',
+  research: '公开资料研究'
 };
 
 export const KIND_LABELS: Record<ClaimKind, string> = {

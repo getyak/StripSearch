@@ -3,7 +3,7 @@ import type { HttpRequestInit, HttpResponseLike, HttpTransport } from './types.j
 
 const decoder = new TextDecoder();
 
-async function readBoundedBody(response: HttpResponseLike, maxBytes: number): Promise<string> {
+export async function readBoundedBody(response: HttpResponseLike, maxBytes: number): Promise<string> {
   const body = response.body;
   if (!body || typeof body.getReader !== 'function') {
     const text = await response.text();
