@@ -172,4 +172,147 @@ CREATE TABLE IF NOT EXISTS review_research_tasks (
   UNIQUE(owner_id, dataset_version, external_id)
 );
 CREATE INDEX IF NOT EXISTS review_research_tasks_owner ON review_research_tasks(owner_id, created_at ASC, id ASC);
+
+-- Platform discovery: durable tasks with checkpoints, explicit identity
+-- corrections and post tracking whose attribution can be revoked.
+CREATE TABLE IF NOT EXISTS discovery_tasks (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  subject_kind TEXT NOT NULL,
+  subject_value TEXT NOT NULL,
+  authorization TEXT NOT NULL,
+  seed_url TEXT,
+  mode TEXT NOT NULL,
+  state TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  registry_version TEXT NOT NULL,
+  idempotency_key TEXT,
+  body_fingerprint TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1,
+  checkpoint_json TEXT NOT NULL,
+  limits_json TEXT NOT NULL,
+  usage_json TEXT NOT NULL,
+  stop_reason TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  interrupted INTEGER NOT NULL DEFAULT 0,
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  needs_input_prompt TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS discovery_tasks_owner ON discovery_tasks(owner_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS discovery_tasks_state ON discovery_tasks(state);
+
+CREATE TABLE IF NOT EXISTS discovery_idempotency_keys (
+  owner_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (owner_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS discovery_probes (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES discovery_tasks(id) ON DELETE CASCADE,
+  probe_key TEXT NOT NULL,
+  platform_id TEXT NOT NULL,
+  method TEXT NOT NULL,
+  status TEXT NOT NULL,
+  handle TEXT,
+  profile_url TEXT,
+  evidence_json TEXT NOT NULL,
+  verification TEXT NOT NULL,
+  receipt_json TEXT NOT NULL,
+  limitations_json TEXT NOT NULL DEFAULT '[]',
+  requests INTEGER NOT NULL DEFAULT 0,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  UNIQUE(task_id, probe_key)
+);
+CREATE INDEX IF NOT EXISTS discovery_probes_task ON discovery_probes(task_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS account_links (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES discovery_tasks(id) ON DELETE CASCADE,
+  platform_id TEXT NOT NULL,
+  handle TEXT,
+  profile_url TEXT,
+  state TEXT NOT NULL,
+  basis_json TEXT NOT NULL DEFAULT '[]',
+  counterevidence TEXT,
+  note TEXT,
+  revision INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(task_id, platform_id)
+);
+CREATE INDEX IF NOT EXISTS account_links_task ON account_links(task_id, created_at);
+
+CREATE TABLE IF NOT EXISTS account_link_revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL REFERENCES discovery_tasks(id) ON DELETE CASCADE,
+  link_id TEXT NOT NULL REFERENCES account_links(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  from_state TEXT NOT NULL,
+  to_state TEXT NOT NULL,
+  basis_json TEXT NOT NULL,
+  note TEXT,
+  counterevidence TEXT,
+  actor TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(link_id, revision)
+);
+CREATE INDEX IF NOT EXISTS account_link_revisions_task ON account_link_revisions(task_id, id);
+
+CREATE TABLE IF NOT EXISTS tracked_posts (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES discovery_tasks(id) ON DELETE CASCADE,
+  account_link_id TEXT NOT NULL REFERENCES account_links(id) ON DELETE CASCADE,
+  post_key TEXT NOT NULL,
+  platform_id TEXT NOT NULL,
+  url TEXT NOT NULL,
+  title TEXT NOT NULL,
+  published_at TEXT,
+  excerpt TEXT,
+  excerpt_locator TEXT,
+  fetch_status TEXT NOT NULL,
+  limits_json TEXT NOT NULL DEFAULT '[]',
+  excluded INTEGER NOT NULL DEFAULT 0,
+  excluded_at TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  UNIQUE(task_id, post_key)
+);
+CREATE INDEX IF NOT EXISTS tracked_posts_task ON tracked_posts(task_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS discovery_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL REFERENCES discovery_tasks(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(task_id, seq)
+);
+CREATE INDEX IF NOT EXISTS discovery_events_task_seq ON discovery_events(task_id, seq);
+
+CREATE TABLE IF NOT EXISTS discovery_imports (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES discovery_tasks(id) ON DELETE CASCADE,
+  tool TEXT NOT NULL,
+  report_format TEXT NOT NULL,
+  tool_version TEXT,
+  generated_at TEXT,
+  result_count INTEGER NOT NULL,
+  warning_json TEXT NOT NULL DEFAULT '[]',
+  content_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS discovery_imports_task ON discovery_imports(task_id, created_at);
 `;

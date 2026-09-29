@@ -20,6 +20,8 @@
 
 接入 Exa 与 TikHub；先做 30 页面契约试验，再用许可明确的公开职业材料跑小规模研究。基础读取不足才加 Firecrawl。逐端点记录可用性、分页、限制和实际费用。
 
+2026-09-27 增补：[平台发现、身份一次性校正与帖子深度追踪](design/platform-discovery-2026-09-27/README.md) 已在 `apps/web` 落地（探测引擎 + maigret / holehe 报告导入 + 检查点续跑 + 帖子追踪，离线验证）；除 GitHub 外平台规则未 live 验证、效果未评测，不计入里程碑验收，其验收门槛见该提案的 [REVIEW](design/platform-discovery-2026-09-27/REVIEW.md) 与 [EVAL](design/platform-discovery-2026-09-27/EVAL.md)。
+
 **验收：** 原 URL 与定位保真；失败可见；预算耗尽正确 partial；网络重试不静默重复扣费；依赖未报告费用时不假装保证硬费用上限。
 
 ## M3 · Agent / MCP 与本地档案

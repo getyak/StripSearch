@@ -45,6 +45,17 @@ Firecrawl 当前文档将旧 Extract 工具标为 deprecated；结构化读取�
 
 **判断：市场不缺搜索包装器；身份、证据和修订是否有可测收益，才决定项目是否值得继续。** 未运行基线前，不宣称 StripSearch 更准确。
 
+## 账号枚举 CLI：holehe / maigret 如何接入
+
+调研截面：2026-09-27。设计与实现见[平台发现提案](design/platform-discovery-2026-09-27/README.md)。
+
+| 项目 | 职责 | 许可 | 接入姿势 |
+|---|---|---|---|
+| [holehe](https://github.com/megadose/holehe) | 邮箱 → 注册过的网站（密码重置探测，声称 120+ 站） | GPL-3.0 | 只导入其模块 JSON 输出；不 vendor 代码、不实现原生密码重置探测；恢复邮箱/电话字段解析即丢弃 |
+| [maigret](https://github.com/soxoj/maigret) | 用户名 → 全平台候选账号（约 3000+ 站，数字各来源不一致） | MIT | 导入 `--json simple/ndjson` 报告（格式按源码核实）；`Claimed/Available/Unknown/Illegal` 诚实映射，`is_similar` 丢弃 |
+
+**判断：** 两工具输出都是候选发现，不是身份结论（maigret 报告模板自带误报警告）。StripSearch 自带受约束的原生探测引擎（固定注册表端点、限速限体、blocked/not_found 分离）补覆盖面，外部报告保持 `live_unverified` 与收据；用户名一致永不自动确认身份。发现质量、归属精度与合规均未实测（[评测设计](design/platform-discovery-2026-09-27/EVAL.md)）。
+
 ## 适配器的统一返回
 
 每次调用至少给出 provider 与版本、query/URL、状态、canonical URL、正文/结构化内容、获取时间、下一页游标、排序、已读范围、限制、请求 ID 与费用。status 区分 success / empty / inaccessible / rate_limited / timeout / error。

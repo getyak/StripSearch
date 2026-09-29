@@ -11,7 +11,11 @@ import type { AppConfig } from './config.js';
 import { openDatabase } from './db/index.js';
 import { migrateDatabase } from './db/migrate.js';
 import { Runner } from './services/runner.js';
+import { DiscoveryRunner } from './services/discovery-runner.js';
 import { ReviewStore } from './review-store.js';
+import { DiscoveryStore } from './discovery-store.js';
+import { BUILTIN_PLATFORM_REGISTRY } from './platforms/registry.js';
+import type { PlatformRegistry } from '../shared/platform-discovery.js';
 import { Store } from './store.js';
 import type { ResearchTools } from './research/tool-contracts.js';
 import { createResearchTools } from './research/toolkit.js';
@@ -23,6 +27,7 @@ export interface BootstrapOverrides {
   providerFactory?: ProviderFactory;
   transport?: HttpTransport;
   clientDir?: string;
+  discoveryRegistry?: PlatformRegistry;
   researchTools?: ResearchTools;
   researchPlanner?: ResearchPlanner;
 }
@@ -32,9 +37,12 @@ export interface BootstrappedApp {
   db: DB;
   store: Store;
   reviewStore: ReviewStore;
+  discoveryStore: DiscoveryStore;
+  discoveryRunner: DiscoveryRunner;
   runner: Runner;
   app: ReturnType<typeof createApp>;
   interrupted: number;
+  interruptedDiscovery: number;
 }
 
 export async function bootstrap(
@@ -47,26 +55,45 @@ export async function bootstrap(
   await migrateDatabase(db, auth);
   const store = new Store(db);
   const reviewStore = new ReviewStore(db);
+  const discoveryStore = new DiscoveryStore(db);
   const interrupted = store.recoverInterruptedRuns();
+  const interruptedDiscovery = discoveryStore.recoverInterruptedTasks();
   const providerFactory: ProviderFactory =
     overrides.providerFactory ??
     ((name) => (name === 'exa' ? createExaProvider(config.exaApiKey) : githubProvider));
+  const transport = overrides.transport ?? defaultTransport;
   const runner = new Runner({
     store,
     config,
     providerFactory,
-    transport: overrides.transport ?? defaultTransport,
+    transport,
     researchTools: overrides.researchTools ?? createResearchTools({
-      transport: overrides.transport ?? defaultTransport, exaApiKey: config.exaApiKey,
+      transport, exaApiKey: config.exaApiKey,
       firecrawlApiKey: config.firecrawlApiKey ?? null, tikhubApiKey: config.tikhubApiKey ?? null,
       githubToken: config.githubToken, timeoutMs: LIMITS.providerTimeoutMs, maxBytes: LIMITS.providerMaxBytes
     }),
     researchPlanner: overrides.researchPlanner
   });
+  const discoveryRegistry = overrides.discoveryRegistry ?? BUILTIN_PLATFORM_REGISTRY;
+  const discoveryRunner = new DiscoveryRunner({
+    store: discoveryStore,
+    transport,
+    registry: discoveryRegistry
+  });
   const clientDir = overrides.clientDir ?? defaultClientDir();
-  const app = createApp({ config, store, reviewStore, auth, runner, clientDir });
+  const app = createApp({
+    config,
+    store,
+    reviewStore,
+    discoveryStore,
+    discoveryRunner,
+    discoveryRegistry,
+    auth,
+    runner,
+    clientDir
+  });
   void runner.pump();
-  return { config, db, store, reviewStore, runner, app, interrupted };
+  return { config, db, store, reviewStore, discoveryStore, discoveryRunner, runner, app, interrupted, interruptedDiscovery };
 }
 
 function isMain(): boolean {
@@ -76,7 +103,7 @@ function isMain(): boolean {
 }
 
 async function main(): Promise<void> {
-  const { config, app, interrupted, runner } = await bootstrap();
+  const { config, app, interrupted, runner, discoveryRunner, interruptedDiscovery } = await bootstrap();
   let failed = false;
   const server = app.listen(config.port, config.host, (error?: Error) => {
     if (error) {
@@ -88,6 +115,11 @@ async function main(): Promise<void> {
     if (interrupted > 0) {
       console.log(`[stripsearch] marked ${interrupted} interrupted run(s) as partial`);
     }
+    if (interruptedDiscovery > 0) {
+      console.log(
+        `[stripsearch] paused ${interruptedDiscovery} discovery task(s) at their checkpoints`
+      );
+    }
   });
   server.on('error', (error: NodeJS.ErrnoException) => {
     if (failed) return;
@@ -97,6 +129,7 @@ async function main(): Promise<void> {
   });
   const shutdown = (): void => {
     runner.stopAll();
+    discoveryRunner.stopAll();
     server.close();
     // Drop lingering SSE / keep-alive sockets so the process can exit promptly.
     server.closeAllConnections?.();
