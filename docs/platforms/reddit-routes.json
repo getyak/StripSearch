@@ -1,0 +1,466 @@
+{
+  "schemaVersion": "stripsearch/reddit-route-review/v1",
+  "checkedOn": "2026-09-30",
+  "timezone": "Asia/Shanghai",
+  "purpose": "documentation_review_not_runtime_registry",
+  "codeBaseline": "d739694f01897f11153263cef8b345904a14b9a9",
+  "liveRequestsMade": 0,
+  "sources": [
+    {
+      "id": "tikhub_openapi",
+      "url": "https://api.tikhub.io/openapi.json",
+      "downloadSha256": "b97eb0f6331b5709da1ab789359d48efabe177c4ebdcd83078b7e57e9b8709c5"
+    },
+    {
+      "id": "tikhub_pricing",
+      "url": "https://api.tikhub.io/api/v1/tikhub/user/get_all_endpoints_info",
+      "downloadSha256": "1e8e498c04a9d577e7572d308ff6458fd17d78e7171ba02ee2ae940ed440fda8"
+    },
+    {
+      "id": "reddit_api",
+      "url": "https://www.reddit.com/dev/api/"
+    },
+    {
+      "id": "reddit_access",
+      "url": "https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki"
+    },
+    {
+      "id": "reddit_policy",
+      "url": "https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy"
+    }
+  ],
+  "routes": [
+    {
+      "id": "tikhub_reddit_app",
+      "baseUrl": "https://api.tikhub.io",
+      "catalogVersion": "V5.3.2",
+      "catalogRedditPathCount": 28,
+      "implementationStatus": "not_implemented",
+      "liveStatus": "not_run",
+      "activationStatus": "blocked_pending_acceptance",
+      "blockers": [
+        "reddit_adapter_missing",
+        "account_entitlement_unverified",
+        "data_use_authorization_evidence_not_provided",
+        "approved_samples_not_provided",
+        "live_request_budget_not_provided",
+        "response_and_pagination_receipts_missing"
+      ],
+      "capabilities": [
+        {
+          "capability": "profile",
+          "method": "GET",
+          "path": "/api/v1/reddit/app/fetch_user_profile",
+          "parameters": [
+            {
+              "name": "username",
+              "required": true
+            }
+          ],
+          "pagination": "none",
+          "documentationStatus": "documented",
+          "responseContract": "unspecified_data_schema",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "limits": [],
+          "sourceIds": [
+            "tikhub_openapi"
+          ],
+          "costMetadata": {
+            "endpointCost": 0.001,
+            "currency": null,
+            "rateLimit": "10/second",
+            "allowFreeCredit": false,
+            "allowDiscount": false,
+            "sourceId": "tikhub_pricing",
+            "basis": "catalog_only",
+            "actualCharge": null
+          }
+        },
+        {
+          "capability": "authored_posts",
+          "method": "GET",
+          "path": "/api/v1/reddit/app/fetch_user_posts",
+          "parameters": [
+            {
+              "name": "username",
+              "required": true
+            },
+            {
+              "name": "sort",
+              "required": false,
+              "enum": [
+                "NEW",
+                "TOP",
+                "HOT",
+                "CONTROVERSIAL"
+              ]
+            },
+            {
+              "name": "after",
+              "required": false
+            }
+          ],
+          "pagination": "after",
+          "documentationStatus": "documented",
+          "responseContract": "unspecified_data_schema",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "limits": [],
+          "sourceIds": [
+            "tikhub_openapi"
+          ],
+          "costMetadata": {
+            "endpointCost": 0.001,
+            "currency": null,
+            "rateLimit": "10/second",
+            "allowFreeCredit": false,
+            "allowDiscount": false,
+            "sourceId": "tikhub_pricing",
+            "basis": "catalog_only",
+            "actualCharge": null
+          }
+        },
+        {
+          "capability": "authored_comments",
+          "method": "GET",
+          "path": "/api/v1/reddit/app/fetch_user_comments",
+          "parameters": [
+            {
+              "name": "username",
+              "required": true
+            },
+            {
+              "name": "sort",
+              "required": false,
+              "enum": [
+                "NEW",
+                "TOP",
+                "HOT",
+                "CONTROVERSIAL"
+              ]
+            },
+            {
+              "name": "page_size",
+              "required": false
+            },
+            {
+              "name": "after",
+              "required": false
+            }
+          ],
+          "pagination": "after",
+          "documentationStatus": "documented",
+          "responseContract": "unspecified_data_schema",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "limits": [],
+          "sourceIds": [
+            "tikhub_openapi"
+          ],
+          "costMetadata": {
+            "endpointCost": 0.001,
+            "currency": null,
+            "rateLimit": "10/second",
+            "allowFreeCredit": false,
+            "allowDiscount": false,
+            "sourceId": "tikhub_pricing",
+            "basis": "catalog_only",
+            "actualCharge": null
+          }
+        },
+        {
+          "capability": "post_comments",
+          "method": "GET",
+          "path": "/api/v1/reddit/app/fetch_post_comments",
+          "parameters": [
+            {
+              "name": "post_id",
+              "required": true
+            },
+            {
+              "name": "sort_type",
+              "required": false,
+              "enum": [
+                "CONFIDENCE",
+                "NEW",
+                "TOP",
+                "HOT",
+                "CONTROVERSIAL",
+                "OLD",
+                "RANDOM"
+              ]
+            },
+            {
+              "name": "after",
+              "required": false
+            }
+          ],
+          "pagination": "after",
+          "documentationStatus": "documented",
+          "responseContract": "unspecified_data_schema",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "limits": [],
+          "sourceIds": [
+            "tikhub_openapi"
+          ],
+          "costMetadata": {
+            "endpointCost": 0.001,
+            "currency": null,
+            "rateLimit": "10/second",
+            "allowFreeCredit": false,
+            "allowDiscount": false,
+            "sourceId": "tikhub_pricing",
+            "basis": "catalog_only",
+            "actualCharge": null
+          }
+        },
+        {
+          "capability": "descendant_comments",
+          "method": "GET",
+          "path": "/api/v1/reddit/app/fetch_comment_replies",
+          "parameters": [
+            {
+              "name": "post_id",
+              "required": true
+            },
+            {
+              "name": "cursor",
+              "required": true
+            },
+            {
+              "name": "sort_type",
+              "required": false,
+              "enum": [
+                "CONFIDENCE",
+                "NEW",
+                "TOP",
+                "HOT",
+                "CONTROVERSIAL",
+                "OLD",
+                "RANDOM"
+              ]
+            }
+          ],
+          "pagination": "cursor",
+          "documentationStatus": "documented",
+          "responseContract": "unspecified_data_schema",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "limits": [
+            "Descendants only; not an ancestor-chain API."
+          ],
+          "sourceIds": [
+            "tikhub_openapi"
+          ],
+          "costMetadata": {
+            "endpointCost": 0.001,
+            "currency": null,
+            "rateLimit": "10/second",
+            "allowFreeCredit": false,
+            "allowDiscount": false,
+            "sourceId": "tikhub_pricing",
+            "basis": "catalog_only",
+            "actualCharge": null
+          }
+        },
+        {
+          "capability": "ancestor_context",
+          "method": "GET",
+          "path": "/api/v1/reddit/app/fetch_post_details",
+          "parameters": [
+            {
+              "name": "post_id",
+              "required": true
+            },
+            {
+              "name": "include_comment_id",
+              "required": false
+            },
+            {
+              "name": "comment_id",
+              "required": false
+            }
+          ],
+          "pagination": "none",
+          "documentationStatus": "documented",
+          "responseContract": "unspecified_data_schema",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "limits": [
+            "Ancestor completeness unverified; comment context is not a full parent-chain guarantee."
+          ],
+          "sourceIds": [
+            "tikhub_openapi"
+          ],
+          "costMetadata": {
+            "endpointCost": 0.001,
+            "currency": null,
+            "rateLimit": "10/second",
+            "allowFreeCredit": false,
+            "allowDiscount": false,
+            "sourceId": "tikhub_pricing",
+            "basis": "catalog_only",
+            "actualCharge": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "reddit_official_oauth",
+      "baseUrl": "https://oauth.reddit.com",
+      "implementationStatus": "not_implemented",
+      "liveStatus": "not_run",
+      "activationStatus": "blocked_pending_acceptance",
+      "blockers": [
+        "project_approval_evidence_not_provided",
+        "oauth_adapter_configuration_missing",
+        "approved_samples_not_provided",
+        "response_and_pagination_receipts_missing"
+      ],
+      "rateLimit": {
+        "eligibleFreeClientQpm": 100,
+        "projectEntitlementVerified": false,
+        "sourceId": "reddit_access"
+      },
+      "cost": {
+        "actualCharge": null,
+        "projectPricing": null,
+        "basis": "not_verified"
+      },
+      "capabilities": [
+        {
+          "capability": "profile",
+          "method": "GET",
+          "path": "/user/{username}/about",
+          "parameters": [
+            "username"
+          ],
+          "pagination": "none",
+          "documentationStatus": "documented",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "sourceIds": [
+            "reddit_api"
+          ],
+          "limits": []
+        },
+        {
+          "capability": "authored_posts",
+          "method": "GET",
+          "path": "/user/{username}/submitted",
+          "parameters": [
+            "username",
+            "after",
+            "before",
+            "limit",
+            "sort"
+          ],
+          "pagination": "after_before",
+          "documentationStatus": "documented",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "sourceIds": [
+            "reddit_api"
+          ],
+          "limits": []
+        },
+        {
+          "capability": "authored_comments",
+          "method": "GET",
+          "path": "/user/{username}/comments",
+          "parameters": [
+            "username",
+            "after",
+            "before",
+            "limit",
+            "sort"
+          ],
+          "pagination": "after_before",
+          "documentationStatus": "documented",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "sourceIds": [
+            "reddit_api"
+          ],
+          "limits": []
+        },
+        {
+          "capability": "post_comments",
+          "method": "GET",
+          "path": "/comments/{article}",
+          "parameters": [
+            "article",
+            "comment",
+            "context",
+            "depth",
+            "limit",
+            "sort"
+          ],
+          "pagination": "more_children",
+          "documentationStatus": "documented",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "sourceIds": [
+            "reddit_api"
+          ],
+          "limits": []
+        },
+        {
+          "capability": "descendant_comments",
+          "method": "GET",
+          "path": "/api/morechildren",
+          "parameters": [
+            "children",
+            "link_id",
+            "sort",
+            "depth"
+          ],
+          "pagination": "children_ids",
+          "documentationStatus": "documented",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "sourceIds": [
+            "reddit_api"
+          ],
+          "limits": [
+            "At most 100 children IDs per documented request; not a listing cursor.",
+            "Serialize this endpoint: official documentation permits only one request at a time, independent of overall QPM."
+          ],
+          "maxConcurrentRequests": 1
+        },
+        {
+          "capability": "ancestor_context",
+          "method": "GET",
+          "path": "/comments/{article}",
+          "parameters": [
+            "article",
+            "comment",
+            "context"
+          ],
+          "pagination": "none",
+          "documentationStatus": "documented",
+          "liveStatus": "not_run",
+          "acceptanceEvidence": [],
+          "sourceIds": [
+            "reddit_api"
+          ],
+          "limits": [
+            "Documented context counts parents; actual returned chain and deleted/missing nodes require acceptance."
+          ]
+        }
+      ]
+    }
+  ],
+  "acceptanceRequirements": [
+    "Approved purpose and route-specific access evidence; never infer entitlement from a key name.",
+    "Authorized sample IDs and bounded request/cost allowance, retained outside public Git.",
+    "Two consecutive pages for authored posts and comments with cursor replay, deduplication and honest stop reasons.",
+    "Author/account IDs, canonical Reddit permalink, original/published/edited/retrieved dates and deletion states checked against allowed material.",
+    "One root-comment-author-reply path plus missing/deleted parent and remaining descendants recorded without fabricated edges.",
+    "Per-request outcome, retry/rate-limit headers, cursor, bytes and known or unknown charge receipts.",
+    "Failure of one route must not mark the other route unsupported; no access-control bypass."
+  ],
+  "completionNote": "This review does not enable either route or satisfy missing live acceptance. Partial work must not close GET-69."
+}
