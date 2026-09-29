@@ -1,0 +1,1317 @@
+{
+  "type": "offline_controller_replay",
+  "datasetVersion": "research-baseline-v1",
+  "labels": {
+    "track": "offline controller replay (production runResearch + Store with injected scripted fixtures)",
+    "boundary": "program-behaviour baseline only; unreviewed original synthetic fixtures, not human gold, not a research-quality benchmark"
+  },
+  "generatedAt": "2026-09-29T20:05:05.370Z",
+  "totalMonotonicElapsedMs": 793.768583,
+  "config": {
+    "execution": {
+      "fixtureProvider": "scripted-research-tools-v1",
+      "injected": true,
+      "planner": "scripted-fixture-decisions-v1",
+      "modelGateway": "never invoked (scripted decisions do not call invoke)",
+      "transport": "none (no HttpTransport is supplied to runResearch)",
+      "credentials": "none (no API keys are supplied to runResearch)",
+      "networkPolicy": "isolated replay worker under network-guard.mjs; process-level API guard, not OS network isolation",
+      "baseLimits": {
+        "toolCalls": 12,
+        "modelCalls": 8,
+        "inputTokens": 150000,
+        "outputTokens": 16000,
+        "elapsedMs": 240000
+      },
+      "sha256": "118f573717f5033f8a1bd11c96441e5ef1c5a3c8a0ff350526af8305c7768ab9"
+    },
+    "paths": {
+      "outputDir": "<path>/evals/research-baseline-v1/evidence",
+      "tmpBase": "<TMPDIR>"
+    }
+  },
+  "build": {
+    "bootstrap": "tsc-precompiled worker (no transpiler in the guarded process); executed bytes hashed below",
+    "executedArtifacts": [
+      {
+        "path": "build/out/evals/canonical-store.js",
+        "sha256": "ede6e537b56fa607ecaca70dfb2913e387484695fd83618d4fe4bd838813da42"
+      },
+      {
+        "path": "build/out/evals/research-baseline-v1/case-runner.js",
+        "sha256": "21867526faaa454cc5836b30771baf77f6f372ed5e7066d84354656ced902f18"
+      },
+      {
+        "path": "build/out/evals/research-baseline-v1/fixtures.js",
+        "sha256": "62081a4fecf6577792224ac558ac77faeb7756b975e842d42c559910bf6e71a0"
+      },
+      {
+        "path": "build/out/evals/research-baseline-v1/replay-worker.js",
+        "sha256": "29817613d7c916909c080fcff99699a7c5b3eb2fa916d83deaee84d6ec133a4f"
+      },
+      {
+        "path": "build/out/evals/research-baseline-v1/schema.js",
+        "sha256": "cc2000af7bc5cd27a15aadab9cdf80d4484b844b9f4912699525a1a36b1003f7"
+      },
+      {
+        "path": "build/out/server/adapters/types.js",
+        "sha256": "0321eb7d4ae2a3598198bedcdb39f68e2765207c560530050fdca9fdc167710f"
+      },
+      {
+        "path": "build/out/server/db/index.js",
+        "sha256": "d3b5fc336af95039330bd68bfbc485470e0880338b0ef492b438e8a5291ae233"
+      },
+      {
+        "path": "build/out/server/db/schema.js",
+        "sha256": "e46fc281f8a54146a9e6d88e69471a1f1422391c23b965eef54a2567c45cf6aa"
+      },
+      {
+        "path": "build/out/server/research/controller.js",
+        "sha256": "369c294e7beda8752afc374d214d2b8b5f529a92eb8b5f0bc806eb0e9511824a"
+      },
+      {
+        "path": "build/out/server/research/dsh-decision.js",
+        "sha256": "73a9c65ea7058afabbc79ace5885f8329b5619e167ef551ab8594ef5f4cf7e10"
+      },
+      {
+        "path": "build/out/server/research/planner.js",
+        "sha256": "71aea018aace1774d97029fc3aac57cdb5cc8dcc4870cfafa13c6ad53fbdbc3a"
+      },
+      {
+        "path": "build/out/server/research/research-store.js",
+        "sha256": "1d00a265715868f268ebb08d68d77c139fd47e2e01a6bf62962b35154420cea9"
+      },
+      {
+        "path": "build/out/server/research/tool-contracts.js",
+        "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+      },
+      {
+        "path": "build/out/server/store.js",
+        "sha256": "a62ec5caf3e8a2cf18870209c859f3e34bf779e548514c10b7c7d60e02fc67c2"
+      },
+      {
+        "path": "build/out/shared/canonical.js",
+        "sha256": "6f6198769fcf2eeaf985bcf212c2cafe0e6eaca77f85fab84c30523f60938af4"
+      },
+      {
+        "path": "build/out/shared/limits.js",
+        "sha256": "97a711e2fc8e7f70a9d97ca0c3e1252efb95384549bcdc7353b7826b0148119b"
+      },
+      {
+        "path": "build/out/shared/types.js",
+        "sha256": "c878dabd4d1fe85562e6e30b3d4926cab2af457314254ccff85422134a60d827"
+      },
+      {
+        "path": "build/out/shared/validation.js",
+        "sha256": "6854ec76315e858e821fa251a45c8b87a3a0a600888051e9a45d0f425e910500"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/network-guard.mjs",
+        "sha256": "a2372c3c1620fe3ecc25c69cd08ba630d4f0ebea2248d581f82fb32e70a965e2"
+      }
+    ],
+    "aggregateSha256": "c845ceafdc87071730ee57d5a39f3c3c2998e2fa03407989bb0dc3777d47aed7"
+  },
+  "source": {
+    "datasetPath": "evals/research-baseline-v1/cases.jsonl",
+    "datasetSha256": "c97c7da377c876a545ae32a2900f70064a6c94981f5d90944c2ebf8146ce4300",
+    "commit": "d739694f01897f11153263cef8b345904a14b9a9",
+    "dirty": true,
+    "dirtyPaths": 7,
+    "nodeVersion": "v22.23.2",
+    "lockfile": {
+      "path": "apps/web/package-lock.json",
+      "sha256": "1292536f72542c35aa83d35add760792a6e64ea40e8c09755864f195307499e2"
+    },
+    "manifest": [
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/schema.ts",
+        "sha256": "21e05a93f8f93e91a24f5366b569bb0341eac2e5da57447bd77f3bc7e519efcb"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/fixtures.ts",
+        "sha256": "b62f95048e4491394a8b8f866f0ca1173b5f2a1cf4e85a2af24ef270ea4061bb"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/case-runner.ts",
+        "sha256": "d9ab52ffc0ddd6644ace41aa4e650ce8efda2867644ca0e15cb130a873e4a42f"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/normalize.ts",
+        "sha256": "df1fe77c1ff31b74213eb403c8c5ac4c55408048f3f2bc0aeb1e83cefdd2d479"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/grade.ts",
+        "sha256": "cc9a11c5e87d742d4698503b9a8548be8e5c97ad06bbb2023ac24322c08ef70a"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/report.ts",
+        "sha256": "8a4506412c7e00c973190b3579f0679bd72ea0e923d09409982cb46a81152738"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/runner.ts",
+        "sha256": "edfd4e406aa8a7aeb7e62211e5ca7e5d53b5f32a8a896d8b1f6773cd64b31fe9"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/run.ts",
+        "sha256": "a9b8b3d50045133241c34990203ae6eb221d2a321018bb6767ac44af87127824"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/replay-worker.ts",
+        "sha256": "a4ce4d810537b6e13767ca8c490424917ccc2d74eed878b91b75bce10c787c1e"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/network-guard.mjs",
+        "sha256": "a2372c3c1620fe3ecc25c69cd08ba630d4f0ebea2248d581f82fb32e70a965e2"
+      },
+      {
+        "path": "apps/web/src/evals/research-baseline-v1/network-probe.mjs",
+        "sha256": "cd902537f0bf00045ba8ad34ece4dc2d5fc3c09909142f45791da86ae0de7047"
+      },
+      {
+        "path": "apps/web/src/evals/canonical-store.ts",
+        "sha256": "0ea5def6789bbcfb0e2ba7db0b3f139b1989af99f5fbc67696a176c152c4155a"
+      },
+      {
+        "path": "apps/web/src/server/research/controller.ts",
+        "sha256": "79574990968db4d79ccdd0f4ab887b838da12f965c9c702ced447c52d8c07d18"
+      },
+      {
+        "path": "apps/web/src/server/research/research-store.ts",
+        "sha256": "2814daefd7a035b14a070515604bf477e619731a477bbc26ffa1c105a365f7bb"
+      },
+      {
+        "path": "apps/web/src/server/research/planner.ts",
+        "sha256": "9d45e6cfb1841b036193ac99843b1f6b935af8f7ed2f2e707ce67b17efa51854"
+      },
+      {
+        "path": "apps/web/src/server/research/tool-contracts.ts",
+        "sha256": "94ef4d19c290170cde243b3b08b6bdce1cfd4b31364cc5f4447a512f235bd928"
+      },
+      {
+        "path": "apps/web/src/server/research/dsh-decision.ts",
+        "sha256": "3762f8987a34127af6f1b0ae4decf9b45657a5cae036b6ebc64d37b4573aa800"
+      },
+      {
+        "path": "apps/web/src/server/store.ts",
+        "sha256": "905dd8e488cb6f924ff26da2804216112bca67267df2b4c6983d8163b477aa72"
+      },
+      {
+        "path": "apps/web/src/server/db/index.ts",
+        "sha256": "5dd1396ddb886cf5c4ca202f2f2c7f0c54ace6f0efd9fe29f15f54209780ee80"
+      },
+      {
+        "path": "apps/web/src/server/db/schema.ts",
+        "sha256": "e46fc281f8a54146a9e6d88e69471a1f1422391c23b965eef54a2567c45cf6aa"
+      },
+      {
+        "path": "apps/web/src/server/adapters/types.ts",
+        "sha256": "fbde00437a35e24eba1d9d6606785459c1133f1928f9b50d7580b474435e3032"
+      },
+      {
+        "path": "apps/web/src/shared/types.ts",
+        "sha256": "5d4961e8df3bea111fc34ca5f9e9b05cb27722ac64bb369b7e49c99dc825e840"
+      },
+      {
+        "path": "apps/web/src/shared/canonical.ts",
+        "sha256": "d3825ada12cb856835bc589f3f1997d42c3c8556f2fa3a79092e9aabeb13164d"
+      },
+      {
+        "path": "apps/web/src/shared/validation.ts",
+        "sha256": "846afe04fd7c0c8a099b65bf979c2d155f39f022ab68759c69a243b4b27b6a40"
+      }
+    ],
+    "manifestAggregateSha256": "3637109080511c318331e1bd8f89340d84636d2bb4b2b9a740b9c425a7c5d946"
+  },
+  "normalization": {
+    "ids": [
+      "runId",
+      "run_id",
+      "parentRunId",
+      "retryOf",
+      "ownerId"
+    ],
+    "timestamps": [
+      "startedAt",
+      "createdAt",
+      "updatedAt",
+      "settledAt",
+      "retrievedAt",
+      "finishedAt",
+      "generatedAt",
+      "asOf"
+    ],
+    "durations": [
+      "elapsedMs",
+      "durationMs",
+      "monotonicElapsedMs"
+    ]
+  },
+  "guard": {
+    "processIsolated": true,
+    "installedBeforeProductionImports": true,
+    "coveredApis": [
+      "fetch",
+      "WebSocket",
+      "http.request",
+      "http.get",
+      "https.request",
+      "https.get",
+      "net.connect",
+      "net.createConnection",
+      "net.Socket.prototype.connect",
+      "tls.connect",
+      "child_process.spawn",
+      "child_process.spawnSync",
+      "child_process.exec",
+      "child_process.execSync",
+      "child_process.execFile",
+      "child_process.execFileSync",
+      "child_process.fork",
+      "worker_threads.Worker"
+    ],
+    "violations": 0,
+    "logArtifact": "guard-violations.jsonl",
+    "boundary": "process-level network/subprocess API guard in the isolated replay worker; NOT OS network isolation and not claimed as such"
+  },
+  "run": {
+    "workerExitCode": 0,
+    "workerSignal": null,
+    "guardInstalled": true,
+    "recordsFormat": "jsonl-events-v1",
+    "failures": []
+  },
+  "runCommands": [
+    "npm --prefix apps/web ci --prefer-offline --no-audit --no-fund",
+    "npm --prefix apps/web run typecheck",
+    "node --import ./apps/web/node_modules/tsx/dist/loader.mjs --test apps/web/src/tests/research-baseline.test.ts",
+    "npm --prefix apps/web run eval:research",
+    "npm --prefix apps/web run eval:research -- --dataset evals/research-baseline-v1/cases.jsonl --output evals/research-baseline-v1/evidence"
+  ],
+  "summary": {
+    "scheduled": 11,
+    "caseProgress": {
+      "started": 11,
+      "finished": 11,
+      "unfinished": 0,
+      "notRun": 0
+    },
+    "structural": {
+      "passed": 11,
+      "failed": 0
+    },
+    "passRate": {
+      "value": 1,
+      "denominator": 11
+    },
+    "states": {
+      "completed": 2,
+      "partial": 7,
+      "needs_input": 1,
+      "runner_error": 1
+    },
+    "hardFailures": 0,
+    "fixtureViolations": 0,
+    "networkAttempts": 0,
+    "executionErrors": 2,
+    "runLevelFailures": 0,
+    "plannerDecisionCalls": 16,
+    "modelInvocations": 0,
+    "modelReceipts": 1,
+    "fixtureProviderCalls": 14,
+    "modelTokens": "not_measured",
+    "modelCostUsd": "not_measured",
+    "actualPaidCostUsd": null,
+    "fixtureFees": {
+      "measurement": "simulated",
+      "knownSimulatedSubtotal": 0.0048000000000000004,
+      "simulatedTotal": null,
+      "casesWithUnknownFee": 4
+    }
+  },
+  "cases": [
+    {
+      "caseId": "rb-001",
+      "scenario": "completed_profile_linked_evidence",
+      "title": "完成链路：主页→关联证据→finish→verify 全部支持",
+      "tags": [
+        "completed",
+        "verify",
+        "evidence"
+      ],
+      "expected": {
+        "state": "completed",
+        "stopReason": "research_complete",
+        "toolCalls": 2,
+        "plannerCalls": 3,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "identityStatus": "resolved",
+        "claimsRetained": 2,
+        "candidates": 0,
+        "includeText": [
+          "Nova Arden 的公开主页",
+          "Atlas 项目页",
+          "Nova Arden 自述自 2021 年起维护开源排版工具 Atlas。",
+          "未找到独立的雇佣记录。"
+        ],
+        "claimKinds": [
+          {
+            "contains": "自述自 2021 年起维护",
+            "kind": "attributed_statement"
+          },
+          {
+            "contains": "社区贡献者的补丁",
+            "kind": "page_statement"
+          }
+        ]
+      },
+      "actual": {
+        "state": "completed",
+        "stopReason": "research_complete",
+        "identityStatus": "resolved",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 2,
+          "plannerDecisionCalls": 3,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 2
+        },
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "claimsRetained": 2,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": 0.0008,
+          "simulatedTotal": 0.0008,
+          "unknownFeeReceipts": 0,
+          "bytes": 800
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 13.515791,
+      "hashes": {
+        "normalizedResult": "e0b500db0778d4bfa36df36e3875e5d367d313b8c99f39acc59ca065d9035610",
+        "serialized": {
+          "result": "3b09af943a5328440d387fcc510ff83d2341662e6c854f1cd294f195a67af2cc",
+          "checkpoint": "524670b160d6c36a67dcb3ff4011e283db2ff8aeedf76e64f78466e1959bebf5",
+          "receipts": "0e45b426a753283cc4f4449f729f8a9adb0949b868d190e71810dcb11d9f49e7",
+          "canonical": "ae9c3e34ce829f1dd2104ba6194cc9c8fc4f3dfae705ea7ae015ffb66f0db4f8",
+          "markdown": "f817a5af1037b7f041d040b7727ff92796393de79f95c5b083e640936b31173a"
+        },
+        "artifact": "6325b9d41e12eb049ff51ebc75bb899dabffbe5f2e1294164d1cd346ed72daae"
+      },
+      "artifact": "cases/rb-001.json"
+    },
+    {
+      "caseId": "rb-002",
+      "scenario": "needs_input_one_unconfirmed_candidate",
+      "title": "needs_input：只有一个未确认候选",
+      "tags": [
+        "needs_input",
+        "identity"
+      ],
+      "expected": {
+        "state": "needs_input",
+        "stopReason": null,
+        "toolCalls": 1,
+        "plannerCalls": 0,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 1,
+          "completed": 1,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": true,
+        "identityStatus": "needs_input",
+        "candidates": 1,
+        "includeText": [
+          "请确认你要研究的公开主页。"
+        ]
+      },
+      "actual": {
+        "state": "needs_input",
+        "stopReason": null,
+        "identityStatus": "needs_input",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 1,
+          "plannerDecisionCalls": 0,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 1
+        },
+        "receipts": {
+          "total": 1,
+          "completed": 1,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": true,
+        "claimsRetained": null,
+        "candidates": 1,
+        "runnerError": "NeedsInputError",
+        "fixtureViolations": [],
+        "executionError": {
+          "name": "NeedsInputError",
+          "message": "请确认你要研究的公开主页。",
+          "stack": "NeedsInputError: 请确认你要研究的公开主页。\n    at runResearch (file://<path>/out/server/research/controller.js:218:19)\n    at async executeCase (file://<path>/out/evals/research-baseline-v1/case-runner.js:158:22)\n    at async file://<path>/out/evals/research-baseline-v1/replay-worker.js:61:21"
+        },
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": null,
+          "simulatedTotal": null,
+          "unknownFeeReceipts": 1,
+          "bytes": 210
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 3.6690830000000005,
+      "hashes": {
+        "normalizedResult": "7fcce3b0c821512be023e3fa2448ecb8e06f354e15b8d64895dfcd202bdb82c3",
+        "serialized": {
+          "result": null,
+          "checkpoint": "81266f26ad3b88988417cbe005d3f0518fd0cc9e3546e81b466e4d1110ea4370",
+          "receipts": "744128f37c2f5eebc494ed7a987aa9028d513f0868f0dce6c7041913fff79aa2",
+          "canonical": "ea35204080c5292249b0972455616d485ecead7bc115056964213b37ebe9fa48",
+          "markdown": "bf223ba173a69123a2cd36cc50a54359db11b8e76e6defdc3d76dec76443be5c"
+        },
+        "artifact": "2d387a148a5bb4edb22860cf989ddd35d12ed505093710346218b031cc82368c"
+      },
+      "artifact": "cases/rb-002.json"
+    },
+    {
+      "caseId": "rb-003",
+      "scenario": "invalid_citation_partial",
+      "title": "非法引用：引用不在来源文本内 → partial",
+      "tags": [
+        "citation",
+        "partial"
+      ],
+      "expected": {
+        "state": "partial",
+        "stopReason": "invalid_evidence",
+        "toolCalls": 1,
+        "plannerCalls": 1,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 1,
+          "completed": 1,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "identityStatus": "resolved",
+        "claimsRetained": 0,
+        "includeText": [
+          "研究已停止：invalid_evidence。"
+        ],
+        "excludeText": [
+          "凭空发明的获奖陈述。",
+          "这段引用从未出现在任何来源文本里"
+        ]
+      },
+      "actual": {
+        "state": "partial",
+        "stopReason": "invalid_evidence",
+        "identityStatus": "resolved",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 1,
+          "plannerDecisionCalls": 1,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 1
+        },
+        "receipts": {
+          "total": 1,
+          "completed": 1,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "claimsRetained": 0,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": 0.0004,
+          "simulatedTotal": 0.0004,
+          "unknownFeeReceipts": 0,
+          "bytes": 420
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 4.239958999999999,
+      "hashes": {
+        "normalizedResult": "c6bc14ca5da77f827b3d39c277e270b33ce5bab9d2cafdfef98f756b533d96ba",
+        "serialized": {
+          "result": "801570d7d2333df6dab31bdac41813461e37f4f4bbd4dbcdd2c1feb1bf35500a",
+          "checkpoint": "bfeb0d69b70e4dbc2fd354557afd1f6be44636c8a288719ae17b6084af524e97",
+          "receipts": "834233fcc80872950ad9f0ec3c61929fd11848f4d5cf5026cac55fe68a04bc80",
+          "canonical": "5fc262d2b1baaf1524e93be75d2fbf65ee3f4cedb774402eacefb57a5fdd3e29",
+          "markdown": "63d5585703da2700acf8e475eb0097e91eb45b68472fe71cbf909798b9ee4815"
+        },
+        "artifact": "467fe3122dd21d8682f9b0f6295461735f510019d4ac821ae8aa4d823adfb573"
+      },
+      "artifact": "cases/rb-003.json"
+    },
+    {
+      "caseId": "rb-004",
+      "scenario": "verifier_rejection",
+      "title": "核验拒绝：一条断言被 verifier 驳回 → limited_evidence",
+      "tags": [
+        "verify",
+        "partial"
+      ],
+      "expected": {
+        "state": "partial",
+        "stopReason": "limited_evidence",
+        "toolCalls": 2,
+        "plannerCalls": 3,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "identityStatus": "resolved",
+        "claimsRetained": 1,
+        "includeText": [
+          "项目页的贡献者计数是自述，不能升格为独立事实。",
+          "研究已停止：limited_evidence。"
+        ],
+        "excludeText": [
+          "项目页称记录了"
+        ],
+        "claimKinds": [
+          {
+            "contains": "自述自 2021 年起维护",
+            "kind": "attributed_statement"
+          }
+        ]
+      },
+      "actual": {
+        "state": "partial",
+        "stopReason": "limited_evidence",
+        "identityStatus": "resolved",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 2,
+          "plannerDecisionCalls": 3,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 2
+        },
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "claimsRetained": 1,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": 0.0008,
+          "simulatedTotal": 0.0008,
+          "unknownFeeReceipts": 0,
+          "bytes": 800
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 6.630875000000003,
+      "hashes": {
+        "normalizedResult": "dadf7f97b6cfef781dceb292669ff58057e7ee78523318d0bd5be6c64a5e0068",
+        "serialized": {
+          "result": "1975db663c2539458f9f5f2cda53663e423ae0ca3d6c6a17e3854c0c5688977b",
+          "checkpoint": "cc17ec4b9d478512beb8db1b1c20a16699619b6a16da54f6d4cb49dc7ddf9283",
+          "receipts": "a9848995ef6d18fed987db7231a358093ca5b5338573f79c7fe7e8514e8d1092",
+          "canonical": "aa45009c6c6e5751fdb4ad6e5e5507a7a169f25f67cbfcf85d7d7dd37e5539d0",
+          "markdown": "5850c927f8d07d2ff8bb6997924ca0d82badcccecbdae9ff582c704fd1658a93"
+        },
+        "artifact": "e18cc5b5006b557f5accb46046e91955510f0d1e12fb68ded50fef62f77f49f2"
+      },
+      "artifact": "cases/rb-004.json"
+    },
+    {
+      "caseId": "rb-005",
+      "scenario": "malformed_verifier_excerpt_fallback",
+      "title": "核验结果畸形：回退保留逐字摘录",
+      "tags": [
+        "verify",
+        "fallback",
+        "partial"
+      ],
+      "expected": {
+        "state": "partial",
+        "stopReason": "verification_unavailable",
+        "toolCalls": 2,
+        "plannerCalls": 3,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "identityStatus": "resolved",
+        "claimsRetained": 2,
+        "includeText": [
+          "综合结论未通过独立语义核验",
+          "研究已停止：verification_unavailable。",
+          "自 2021 年起维护开源排版工具 Atlas"
+        ],
+        "excludeText": [
+          "自述自 2021 年起维护",
+          "项目页称记录了"
+        ],
+        "claimKinds": [
+          {
+            "contains": "自 2021 年起维护开源排版工具 Atlas",
+            "kind": "page_statement"
+          },
+          {
+            "contains": "项目页记录了 40 个社区贡献者的补丁",
+            "kind": "page_statement"
+          }
+        ]
+      },
+      "actual": {
+        "state": "partial",
+        "stopReason": "verification_unavailable",
+        "identityStatus": "resolved",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 2,
+          "plannerDecisionCalls": 3,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 2
+        },
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "claimsRetained": 2,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": 0.0008,
+          "simulatedTotal": 0.0008,
+          "unknownFeeReceipts": 0,
+          "bytes": 800
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 7.4579590000000096,
+      "hashes": {
+        "normalizedResult": "e51e2307817cd6e469801b1b2d17987d3679e2c783a361b644c5d7623c47a894",
+        "serialized": {
+          "result": "352e25a7f5d12f84da3a57185f769c6ad736a3e6428876597226cbbdd55a52c9",
+          "checkpoint": "b1cf191113ff685c54b44ab45b916eb13b6a9dedae548b2ab75a020cd55b9b8c",
+          "receipts": "a9848995ef6d18fed987db7231a358093ca5b5338573f79c7fe7e8514e8d1092",
+          "canonical": "5fafd0641568000d9c11179c23e0db248b90c3e16dfec71c14b2842ef5853128",
+          "markdown": "98b25a1d6b4a74678eb30bd162e397de1c3ef7dbc547cf348b0350dad2e5ae0b"
+        },
+        "artifact": "b9277877002d3fa353a7c32ddf0554d9c5aae4a1805ed606da51d88ab24c384a"
+      },
+      "artifact": "cases/rb-005.json"
+    },
+    {
+      "caseId": "rb-006",
+      "scenario": "budget_partial_no_extra_request",
+      "title": "预算耗尽：partial 且不再发出额外请求",
+      "tags": [
+        "budget",
+        "partial"
+      ],
+      "expected": {
+        "state": "partial",
+        "stopReason": "budget_exhausted",
+        "toolCalls": 2,
+        "plannerCalls": 2,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "identityStatus": "resolved",
+        "claimsRetained": 0,
+        "includeText": [
+          "研究已停止：budget_exhausted。"
+        ]
+      },
+      "actual": {
+        "state": "partial",
+        "stopReason": "budget_exhausted",
+        "identityStatus": "resolved",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 2,
+          "plannerDecisionCalls": 2,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 2
+        },
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "claimsRetained": 0,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": 0.0008,
+          "simulatedTotal": 0.0008,
+          "unknownFeeReceipts": 0,
+          "bytes": 800
+        },
+        "effectiveLimits": {
+          "toolCalls": 2,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 5.233165999999997,
+      "hashes": {
+        "normalizedResult": "838e808deb7b0d7f825df8a0ccbb676efec8a86d7171066f0d30c53a1f50b7cb",
+        "serialized": {
+          "result": "7d696cb1e5d4e6b1daaceabdff159f9bd4afd05ff122b6fe47675c99676f4f73",
+          "checkpoint": "b2d8bbea31195c0f53bb1566c010ce8ed4e15b6cf757e9aa896d1a2cd53e7426",
+          "receipts": "0e45b426a753283cc4f4449f729f8a9adb0949b868d190e71810dcb11d9f49e7",
+          "canonical": "e4e7de3058521c3d016789e80f77310f3283a45b5fd8026583141b72368177fe",
+          "markdown": "5bc3b309a325e11323038ef79cb60edb56f0d7e239c11ac25eaa4ba8dfa87c2d"
+        },
+        "artifact": "cbd302cd6d3ac7d36d176819a0f8add652604475d1b4f958eaa027b554bbcbf4"
+      },
+      "artifact": "cases/rb-006.json"
+    },
+    {
+      "caseId": "rb-007",
+      "scenario": "tool_failure_failed_receipt_unknown_fee",
+      "title": "工具失败：保留 failed 回执与未知费用",
+      "tags": [
+        "failure",
+        "receipts",
+        "partial"
+      ],
+      "expected": {
+        "state": "partial",
+        "stopReason": "provider_timeout",
+        "toolCalls": 2,
+        "plannerCalls": 1,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 2,
+          "completed": 1,
+          "failed": 1,
+          "inflight": 0
+        },
+        "unknownCost": true,
+        "identityStatus": "resolved",
+        "claimsRetained": 0,
+        "includeText": [
+          "研究已停止：provider_timeout。"
+        ]
+      },
+      "actual": {
+        "state": "partial",
+        "stopReason": "provider_timeout",
+        "identityStatus": "resolved",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 2,
+          "plannerDecisionCalls": 1,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 2
+        },
+        "receipts": {
+          "total": 2,
+          "completed": 1,
+          "failed": 1,
+          "inflight": 0
+        },
+        "unknownCost": true,
+        "claimsRetained": 0,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": 0.0004,
+          "simulatedTotal": null,
+          "unknownFeeReceipts": 1,
+          "bytes": 420
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 4.176832999999988,
+      "hashes": {
+        "normalizedResult": "384d9b79051c5b3164cd4856506000d818942d6f96d18b2bf2d274df94dbde6c",
+        "serialized": {
+          "result": "a1d9e09fddd8bc9c5a8d526d0e7be2012738accf991686497f48e8c1a4618af3",
+          "checkpoint": "46e5d398663ae5c5bd58b4bf6f23b9147cf052af04e9af61e997ed13b5c07cd5",
+          "receipts": "04908fdb7c5ef55352d6e9f763c63b62f7016d56cd41c112683a67c60e67984f",
+          "canonical": "54d231eae4f6c9b295ab559cf1218c54abcdc7b3c156ad2f2519cdaca50bffee",
+          "markdown": "600157b318ae3f0f3c61891b5f7ec698432b101068bc3b224d3df2f648418616"
+        },
+        "artifact": "5eb484f44991549783014ef3d69095fcbdde8e430da9d715de52650c442ccb7b"
+      },
+      "artifact": "cases/rb-007.json"
+    },
+    {
+      "caseId": "rb-008",
+      "scenario": "unknown_inflight_recovery_no_refetch",
+      "title": "未知在途回执：恢复时不再重复抓取",
+      "tags": [
+        "recovery",
+        "receipts",
+        "partial"
+      ],
+      "expected": {
+        "state": "partial",
+        "stopReason": "unknown_inflight",
+        "toolCalls": 0,
+        "plannerCalls": 0,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "inflight": 1
+        },
+        "unknownCost": true,
+        "identityStatus": "needs_input",
+        "claimsRetained": 0,
+        "includeText": [
+          "研究已停止：unknown_inflight。"
+        ]
+      },
+      "actual": {
+        "state": "partial",
+        "stopReason": "unknown_inflight",
+        "identityStatus": "needs_input",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 0,
+          "plannerDecisionCalls": 0,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 0
+        },
+        "receipts": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "inflight": 1
+        },
+        "unknownCost": true,
+        "claimsRetained": 0,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": null,
+          "simulatedTotal": null,
+          "unknownFeeReceipts": 1,
+          "bytes": 0
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 3.51566600000001,
+      "hashes": {
+        "normalizedResult": "0d439a4a6d4324cf716b27875053307bd3c9188171ac849e4e64cf7fd4932152",
+        "serialized": {
+          "result": "b9af63876cb002490a05c47027a201c897bf7c67e5e8df5c016bb21f3eda54d5",
+          "checkpoint": "30e02737a7913a0432c7995deac5b7228f011366b5efa57c4341c58fa31cec9c",
+          "receipts": "8f764a24ce82f64adc4c8e6eaa4123f41eb5d2f9f6cd331429cd0f2e78b01acc",
+          "canonical": "0f558b6712bdef0ac96b99375dc5f8c60ef034ac24d480399ff4b640269cf2b4",
+          "markdown": "d01be66ec0a1b4f44b2870c5a402c74ea27bad8b672ed3281497b6007634cc2a"
+        },
+        "artifact": "9be1b0085f467210fbfafd6a199df9dfaa9c7b28a3cdc46b17d98343a8b2a615"
+      },
+      "artifact": "cases/rb-008.json"
+    },
+    {
+      "caseId": "rb-009",
+      "scenario": "runner_error_retained",
+      "title": "runner 错误被保留（运行开始前已取消）",
+      "tags": [
+        "runner",
+        "error",
+        "recovery"
+      ],
+      "expected": {
+        "state": "runner_error",
+        "stopReason": "cancelled",
+        "toolCalls": 0,
+        "plannerCalls": 0,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 0,
+          "completed": 0,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "runnerError": "ResearchStop",
+        "runnerErrorIncludes": [
+          "run_inactive"
+        ]
+      },
+      "actual": {
+        "state": "runner_error",
+        "stopReason": "cancelled",
+        "identityStatus": "needs_input",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 0,
+          "plannerDecisionCalls": 0,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 0
+        },
+        "receipts": {
+          "total": 0,
+          "completed": 0,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "claimsRetained": null,
+        "candidates": 0,
+        "runnerError": "ResearchStop",
+        "fixtureViolations": [],
+        "executionError": {
+          "name": "ResearchStop",
+          "message": "run_inactive",
+          "stack": "ResearchStop: run_inactive\n    at ResearchStore.assertActive (file://<path>/out/server/research/research-store.js:18:19)\n    at active (file://<path>/out/server/research/controller.js:21:68)\n    at runResearch (file://<path>/out/server/research/controller.js:180:9)\n    at executeCase (file://<path>/out/evals/research-baseline-v1/case-runner.js:158:28)\n    at file://<path>/out/evals/research-baseline-v1/replay-worker.js:61:27"
+        },
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": null,
+          "simulatedTotal": null,
+          "unknownFeeReceipts": 0,
+          "bytes": 0
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 3.1797499999999985,
+      "hashes": {
+        "normalizedResult": "a480acef5ebbce2b7244e60bfe0f93812670a7710d218ee7d887946dd56687d1",
+        "serialized": {
+          "result": null,
+          "checkpoint": null,
+          "receipts": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "canonical": "45b4d3d7ceeea0bb50269abd12423ef86dc31d3b4c95584f8d8f879d0101062d",
+          "markdown": "aaf295e2d4e34c5187bf04fdfaa635facc9c23ae99c1a1351d466b46ac6e865d"
+        },
+        "artifact": "f769cbcce93e44388439c14844fdfc84311d578e8b7e94e1afa3029e235c26aa"
+      },
+      "artifact": "cases/rb-009.json"
+    },
+    {
+      "caseId": "rb-010",
+      "scenario": "post_runner_error_continuation",
+      "title": "runner 错误之后的后续案例仍执行并完成",
+      "tags": [
+        "runner",
+        "completed",
+        "continuation"
+      ],
+      "expected": {
+        "state": "completed",
+        "stopReason": "research_complete",
+        "toolCalls": 2,
+        "plannerCalls": 3,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "identityStatus": "resolved",
+        "claimsRetained": 2,
+        "candidates": 0,
+        "includeText": [
+          "Ivo Marsh 的公开主页",
+          "Ivo Marsh 译注集",
+          "Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。"
+        ]
+      },
+      "actual": {
+        "state": "completed",
+        "stopReason": "research_complete",
+        "identityStatus": "resolved",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 2,
+          "plannerDecisionCalls": 3,
+          "modelInvocations": 0,
+          "modelReceipts": 0,
+          "fixtureProviderCalls": 2
+        },
+        "receipts": {
+          "total": 2,
+          "completed": 2,
+          "failed": 0,
+          "inflight": 0
+        },
+        "unknownCost": false,
+        "claimsRetained": 2,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": 0.0008,
+          "simulatedTotal": 0.0008,
+          "unknownFeeReceipts": 0,
+          "bytes": 580
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 5.965333000000001,
+      "hashes": {
+        "normalizedResult": "63c8c83c0637f79d72f8cd7c025185c05e67292ab3f75de4f56079a102cbd68f",
+        "serialized": {
+          "result": "0420f80db1a5ae88834abd72679742bf8a00c46aaa993df399b7c9ae3952c6ee",
+          "checkpoint": "82a39c10e88f18e17001c1d9b8f39f29fc4841da0a3f3dd838920b17ff1b511f",
+          "receipts": "54e8d0134a28cf3181cbe7c51dda2a224b4f055dfad197285101433a770a743f",
+          "canonical": "1bfb24b771cacbf992535eef03ac5b7b032d54b73cc0a6c24d2ac6c75c2aa048",
+          "markdown": "135573fc72fb13422568595aa58950afc823bfaa538cb34640e61b635971de5c"
+        },
+        "artifact": "4c893f3b9d9ffd4bc6c89730811701db2fcee68e9d218b27af17c34b2383459f"
+      },
+      "artifact": "cases/rb-010.json"
+    },
+    {
+      "caseId": "rb-011",
+      "scenario": "historical_inflight_model_receipt",
+      "title": "历史在途模型回执：恢复证据不是本次调用",
+      "tags": [
+        "recovery",
+        "receipts",
+        "model-accounting",
+        "partial"
+      ],
+      "expected": {
+        "state": "partial",
+        "stopReason": "unknown_inflight",
+        "toolCalls": 0,
+        "plannerCalls": 0,
+        "modelCalls": 0,
+        "receipts": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "inflight": 1
+        },
+        "unknownCost": true,
+        "identityStatus": "needs_input",
+        "claimsRetained": 0,
+        "includeText": [
+          "研究已停止：unknown_inflight。"
+        ]
+      },
+      "actual": {
+        "state": "partial",
+        "stopReason": "unknown_inflight",
+        "identityStatus": "needs_input",
+        "completion": "finished",
+        "counts": {
+          "toolCalls": 0,
+          "plannerDecisionCalls": 0,
+          "modelInvocations": 0,
+          "modelReceipts": 1,
+          "fixtureProviderCalls": 0
+        },
+        "receipts": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "inflight": 1
+        },
+        "unknownCost": true,
+        "claimsRetained": 0,
+        "candidates": 0,
+        "runnerError": null,
+        "fixtureViolations": [],
+        "executionError": null,
+        "fixtureUsage": {
+          "measurement": "simulated",
+          "knownSimulatedSubtotal": null,
+          "simulatedTotal": null,
+          "unknownFeeReceipts": 1,
+          "bytes": 0
+        },
+        "effectiveLimits": {
+          "toolCalls": 12,
+          "modelCalls": 8,
+          "inputTokens": 150000,
+          "outputTokens": 16000,
+          "elapsedMs": 240000
+        }
+      },
+      "structural": "pass",
+      "failures": [],
+      "hardFailure": false,
+      "monotonicElapsedMs": 3.1005409999999927,
+      "hashes": {
+        "normalizedResult": "d5ad79670a0aecd21e58f57beef2eeb251a231ea2957fb8f312b50cc5cb2ea51",
+        "serialized": {
+          "result": "b9af63876cb002490a05c47027a201c897bf7c67e5e8df5c016bb21f3eda54d5",
+          "checkpoint": "e1ff4222131cfdb32663ab1a36f14d4584fcfbae148ec9dddff4fd449af1bf49",
+          "receipts": "1100e9b8bd5c95910e35aed78b1f6f67f8f5888948b13efbadff3ea7d359cb9e",
+          "canonical": "9975374c8bd90c7d33935445903fe8e25ca07088d5381e3b248be8f9aadb4581",
+          "markdown": "d9b8ba1c3f6573c277df9a028a7b890fce9aee693ec8c042c5cf70b9e359ab7c"
+        },
+        "artifact": "08e43dbe0697baabc55e91db5851b4c693de4b0c81e51f08b443345b5f88faf4"
+      },
+      "artifact": "cases/rb-011.json"
+    }
+  ],
+  "notEvaluated": [
+    "semantic_entailment: citations are structurally checked only; no human judged whether quotes support statements",
+    "research_quality: coverage, identity precision and recall, and human verification cost are not evaluated",
+    "model_usage: the scripted planner never invokes a model, so real token counts and model cost are not_measured, not zero",
+    "provider_costs: fixture estimatedUsd values are simulated; unknown fees stay unknown and the simulatedTotal stays null when any fee is unknown",
+    "os_network_isolation: the replay runs under a process-level network API guard, not under an OS network sandbox",
+    "freeze_chronology: dataset expectations are versioned synthetic assertions with recorded hashes; no historical pre-registration is claimed"
+  ]
+}

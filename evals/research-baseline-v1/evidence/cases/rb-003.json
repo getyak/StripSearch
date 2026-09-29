@@ -1,0 +1,295 @@
+{
+  "caseId": "rb-003",
+  "scenario": "invalid_citation_partial",
+  "title": "非法引用：引用不在来源文本内 → partial",
+  "expected": {
+    "state": "partial",
+    "stopReason": "invalid_evidence",
+    "toolCalls": 1,
+    "plannerCalls": 1,
+    "modelCalls": 0,
+    "receipts": {
+      "total": 1,
+      "completed": 1,
+      "failed": 0,
+      "inflight": 0
+    },
+    "unknownCost": false,
+    "identityStatus": "resolved",
+    "claimsRetained": 0,
+    "includeText": [
+      "研究已停止：invalid_evidence。"
+    ],
+    "excludeText": [
+      "凭空发明的获奖陈述。",
+      "这段引用从未出现在任何来源文本里"
+    ]
+  },
+  "actual": {
+    "state": "partial",
+    "stopReason": "invalid_evidence",
+    "identityStatus": "resolved",
+    "completion": "finished",
+    "counts": {
+      "toolCalls": 1,
+      "plannerDecisionCalls": 1,
+      "modelInvocations": 0,
+      "modelReceipts": 0,
+      "fixtureProviderCalls": 1
+    },
+    "receipts": {
+      "total": 1,
+      "completed": 1,
+      "failed": 0,
+      "inflight": 0
+    },
+    "unknownCost": false,
+    "claimsRetained": 0,
+    "candidates": 0,
+    "runnerError": null,
+    "fixtureViolations": [],
+    "executionError": null,
+    "fixtureUsage": {
+      "measurement": "simulated",
+      "knownSimulatedSubtotal": 0.0004,
+      "simulatedTotal": 0.0004,
+      "unknownFeeReceipts": 0,
+      "bytes": 420
+    },
+    "effectiveLimits": {
+      "toolCalls": 12,
+      "modelCalls": 8,
+      "inputTokens": 150000,
+      "outputTokens": 16000,
+      "elapsedMs": 240000
+    }
+  },
+  "failures": [],
+  "error": null,
+  "raw": {
+    "result": {
+      "state": "partial",
+      "identity": {
+        "displayName": "Nova Arden 的公开主页",
+        "handle": null,
+        "profileUrl": "https://nova-arden.invalid/about",
+        "status": "resolved",
+        "note": "已读取所选公开主页；跨平台账号关系尚未自动合并。",
+        "candidates": []
+      },
+      "sources": [
+        {
+          "key": "S1",
+          "url": "https://nova-arden.invalid/about",
+          "title": "Nova Arden 的公开主页",
+          "kind": "profile",
+          "publishedAt": null,
+          "excerpt": "Nova Arden 的公开主页。自 2021 年起维护开源排版工具 Atlas。2023 年的公开访谈解释了项目动机。",
+          "excerptLocator": "公开页面文本",
+          "identityLabel": "所选公开主页",
+          "identityConfirmed": true,
+          "fetchStatus": "ok",
+          "limits": [
+            "主页内容由该账号维护。",
+            "主页内容由该账号维护；不代表跨平台身份已核实。"
+          ]
+        }
+      ],
+      "observations": [],
+      "answer": [],
+      "limitations": [
+        "研究已停止：invalid_evidence。已有材料保留，未证实的内容不补写。"
+      ],
+      "usage": {
+        "requests": 1,
+        "bytes": 420
+      },
+      "stopReason": "invalid_evidence"
+    },
+    "checkpoint": {
+      "phase": "done",
+      "steps": 0,
+      "startedAt": 1790712305320,
+      "elapsedMs": 0,
+      "anchorUrl": "https://nova-arden.invalid/about",
+      "identity": {
+        "displayName": "Nova Arden 的公开主页",
+        "handle": null,
+        "profileUrl": "https://nova-arden.invalid/about",
+        "status": "resolved",
+        "note": "已读取所选公开主页；跨平台账号关系尚未自动合并。",
+        "candidates": []
+      },
+      "candidates": [],
+      "pages": [
+        {
+          "url": "https://nova-arden.invalid/about",
+          "title": "Nova Arden 的公开主页",
+          "text": "Nova Arden 的公开主页。自 2021 年起维护开源排版工具 Atlas。2023 年的公开访谈解释了项目动机。",
+          "kind": "profile",
+          "publishedAt": null,
+          "links": [
+            "https://nova-arden.invalid/atlas"
+          ],
+          "limitations": [
+            "主页内容由该账号维护。"
+          ],
+          "sourceKey": "S1"
+        }
+      ],
+      "claims": [],
+      "unknowns": [],
+      "stopReason": "invalid_evidence"
+    },
+    "receipts": [
+      {
+        "key": "tool:5df00d81db500c3e16e333b0",
+        "kind": "tool",
+        "state": "completed",
+        "request": {
+          "type": "read",
+          "url": "https://nova-arden.invalid/about"
+        },
+        "result": {
+          "pages": [
+            {
+              "url": "https://nova-arden.invalid/about",
+              "title": "Nova Arden 的公开主页",
+              "text": "Nova Arden 的公开主页。自 2021 年起维护开源排版工具 Atlas。2023 年的公开访谈解释了项目动机。",
+              "kind": "profile",
+              "publishedAt": null,
+              "links": [
+                "https://nova-arden.invalid/atlas"
+              ],
+              "limitations": [
+                "主页内容由该账号维护。"
+              ]
+            }
+          ],
+          "requests": 1,
+          "bytes": 420,
+          "estimatedUsd": 0.0004,
+          "credits": null,
+          "limitations": []
+        },
+        "usage": {
+          "estimatedUsd": 0.0004,
+          "credits": null,
+          "bytes": 420,
+          "unknownCost": false
+        },
+        "reservedInput": 0,
+        "reservedOutput": 0
+      }
+    ],
+    "canonical": {
+      "schemaVersion": "stripsearch/web-alpha/v1",
+      "runId": "run_9dd5c88e17e349b5803d923c",
+      "state": "partial",
+      "revision": 2,
+      "question": "研究 Nova Arden 的公开工作与项目 Atlas",
+      "seedUrl": "https://nova-arden.invalid/about",
+      "provider": "research",
+      "parentRunId": null,
+      "retryOf": null,
+      "followup": false,
+      "createdAt": "2026-09-29T20:05:05.319Z",
+      "updatedAt": "2026-09-29T20:05:05.321Z",
+      "interrupted": false,
+      "stopReason": "invalid_evidence",
+      "identity": {
+        "displayName": "Nova Arden 的公开主页",
+        "handle": null,
+        "profileUrl": "https://nova-arden.invalid/about",
+        "status": "resolved",
+        "note": "已读取所选公开主页；跨平台账号关系尚未自动合并。",
+        "candidates": []
+      },
+      "sources": [
+        {
+          "sourceKey": "S1",
+          "url": "https://nova-arden.invalid/about",
+          "title": "Nova Arden 的公开主页",
+          "kind": "profile",
+          "publishedAt": null,
+          "retrievedAt": "2026-09-29T20:05:05.321Z",
+          "fetchStatus": "ok",
+          "excerpt": "Nova Arden 的公开主页。自 2021 年起维护开源排版工具 Atlas。2023 年的公开访谈解释了项目动机。",
+          "excerptLocator": "公开页面文本",
+          "identityLabel": "所选公开主页",
+          "identityConfirmed": true,
+          "limits": [
+            "主页内容由该账号维护。",
+            "主页内容由该账号维护；不代表跨平台身份已核实。"
+          ],
+          "excluded": false,
+          "excludedAt": null
+        }
+      ],
+      "observations": [],
+      "answer": [],
+      "limitations": [
+        "研究已停止：invalid_evidence。已有材料保留，未证实的内容不补写。"
+      ],
+      "usage": {
+        "provider": "research",
+        "requests": 1,
+        "bytes": 420,
+        "elapsedMs": 3,
+        "measurement": "observed"
+      },
+      "reviewCount": 0,
+      "research": {
+        "phase": "done",
+        "steps": 0,
+        "budget": {
+          "toolCalls": 1,
+          "modelCalls": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "estimatedUsd": 0.0004,
+          "firecrawlCredits": 0,
+          "unknownCost": false,
+          "limits": {
+            "toolCalls": 12,
+            "modelCalls": 8,
+            "inputTokens": 150000,
+            "outputTokens": 16000,
+            "elapsedMs": 240000
+          }
+        },
+        "stopReason": "invalid_evidence",
+        "unresolved": []
+      },
+      "personObject": {
+        "schemaVersion": "stripsearch/person/v1",
+        "person": {
+          "id": "person_36a761c61e35f191b9d6f89a",
+          "displayName": "Nova Arden 的公开主页",
+          "profileUrl": "https://nova-arden.invalid/about"
+        },
+        "claims": [],
+        "evidence": [],
+        "unknowns": [],
+        "report": {
+          "runId": "run_9dd5c88e17e349b5803d923c",
+          "revision": 2,
+          "asOf": "2026-09-29T20:05:05.321Z"
+        }
+      }
+    },
+    "markdown": "# Nova Arden 的公开主页 · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：部分完成\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:05:05.321Z\n- 需要复核：0 处\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n### S1 · Nova Arden 的公开主页\n\n- 类型：主页\n- 链接：https://nova-arden.invalid/about\n- 身份归属：已确认（种子账号）\n- 状态：已读取\n- 摘录（公开页面文本）：\n\n  > Nova Arden 的公开主页。自 2021 年起维护开源排版工具 Atlas。2023 年的公开访谈解释了项目动机。\n\n- 限制：主页内容由该账号维护。\n- 限制：主页内容由该账号维护；不代表跨平台身份已核实。\n\n## 限制与未知\n\n- 研究已停止：invalid\\_evidence。已有材料保留，未证实的内容不补写。\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
+  },
+  "hashes": {
+    "normalizedResult": "c6bc14ca5da77f827b3d39c277e270b33ce5bab9d2cafdfef98f756b533d96ba",
+    "serialized": {
+      "result": "801570d7d2333df6dab31bdac41813461e37f4f4bbd4dbcdd2c1feb1bf35500a",
+      "checkpoint": "bfeb0d69b70e4dbc2fd354557afd1f6be44636c8a288719ae17b6084af524e97",
+      "receipts": "834233fcc80872950ad9f0ec3c61929fd11848f4d5cf5026cac55fe68a04bc80",
+      "canonical": "5fc262d2b1baaf1524e93be75d2fbf65ee3f4cedb774402eacefb57a5fdd3e29",
+      "markdown": "63d5585703da2700acf8e475eb0097e91eb45b68472fe71cbf909798b9ee4815"
+    },
+    "artifact": null
+  },
+  "artifactHashNote": "hashes.artifact is stored in report.json and manifest.json: a file cannot contain its own hash"
+}

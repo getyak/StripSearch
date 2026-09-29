@@ -1,0 +1,519 @@
+{
+  "caseId": "rb-010",
+  "scenario": "post_runner_error_continuation",
+  "title": "runner 错误之后的后续案例仍执行并完成",
+  "expected": {
+    "state": "completed",
+    "stopReason": "research_complete",
+    "toolCalls": 2,
+    "plannerCalls": 3,
+    "modelCalls": 0,
+    "receipts": {
+      "total": 2,
+      "completed": 2,
+      "failed": 0,
+      "inflight": 0
+    },
+    "unknownCost": false,
+    "identityStatus": "resolved",
+    "claimsRetained": 2,
+    "candidates": 0,
+    "includeText": [
+      "Ivo Marsh 的公开主页",
+      "Ivo Marsh 译注集",
+      "Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。"
+    ]
+  },
+  "actual": {
+    "state": "completed",
+    "stopReason": "research_complete",
+    "identityStatus": "resolved",
+    "completion": "finished",
+    "counts": {
+      "toolCalls": 2,
+      "plannerDecisionCalls": 3,
+      "modelInvocations": 0,
+      "modelReceipts": 0,
+      "fixtureProviderCalls": 2
+    },
+    "receipts": {
+      "total": 2,
+      "completed": 2,
+      "failed": 0,
+      "inflight": 0
+    },
+    "unknownCost": false,
+    "claimsRetained": 2,
+    "candidates": 0,
+    "runnerError": null,
+    "fixtureViolations": [],
+    "executionError": null,
+    "fixtureUsage": {
+      "measurement": "simulated",
+      "knownSimulatedSubtotal": 0.0008,
+      "simulatedTotal": 0.0008,
+      "unknownFeeReceipts": 0,
+      "bytes": 580
+    },
+    "effectiveLimits": {
+      "toolCalls": 12,
+      "modelCalls": 8,
+      "inputTokens": 150000,
+      "outputTokens": 16000,
+      "elapsedMs": 240000
+    }
+  },
+  "failures": [],
+  "error": null,
+  "raw": {
+    "result": {
+      "state": "completed",
+      "identity": {
+        "displayName": "Ivo Marsh 的公开主页",
+        "handle": null,
+        "profileUrl": "https://ivo-marsh.invalid/about",
+        "status": "resolved",
+        "note": "已读取所选公开主页；跨平台账号关系尚未自动合并。",
+        "candidates": []
+      },
+      "sources": [
+        {
+          "key": "S1",
+          "url": "https://ivo-marsh.invalid/about",
+          "title": "Ivo Marsh 的公开主页",
+          "kind": "profile",
+          "publishedAt": null,
+          "excerpt": "Ivo Marsh 的公开主页。自 2019 年起翻译公共领域科幻小说并公开译注。",
+          "excerptLocator": "公开页面文本",
+          "identityLabel": "所选公开主页",
+          "identityConfirmed": true,
+          "fetchStatus": "ok",
+          "limits": [
+            "主页内容由该账号维护。",
+            "主页内容由该账号维护；不代表跨平台身份已核实。"
+          ]
+        },
+        {
+          "key": "S2",
+          "url": "https://ivo-marsh.invalid/notes",
+          "title": "Ivo Marsh 译注集",
+          "kind": "work",
+          "publishedAt": "2024-03-10",
+          "excerpt": "译注集收录了 12 篇公开译注，署名 Ivo Marsh。",
+          "excerptLocator": "公开页面文本",
+          "identityLabel": "来源归属未独立验证",
+          "identityConfirmed": false,
+          "fetchStatus": "ok",
+          "limits": [
+            "篇数未独立核实。",
+            "与研究对象的关系需结合原文核对，不因同名自动合并。"
+          ]
+        }
+      ],
+      "observations": [
+        {
+          "statement": "Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。",
+          "kind": "attributed_statement",
+          "sourceKeys": [
+            "S1"
+          ],
+          "limitations": [
+            "来源原文摘录；身份归属与独立事实核实另行判断。"
+          ]
+        },
+        {
+          "statement": "译注集页面称收录了 12 篇公开译注。",
+          "kind": "page_statement",
+          "sourceKeys": [
+            "S2"
+          ],
+          "limitations": [
+            "来源原文摘录；身份归属与独立事实核实另行判断。"
+          ]
+        }
+      ],
+      "answer": [
+        {
+          "id": "work",
+          "heading": "作品与行动",
+          "body": "",
+          "bullets": [
+            {
+              "text": "Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。",
+              "sourceKeys": [
+                "S1"
+              ],
+              "kind": "attributed_statement"
+            },
+            {
+              "text": "译注集页面称收录了 12 篇公开译注。",
+              "sourceKeys": [
+                "S2"
+              ],
+              "kind": "page_statement"
+            }
+          ]
+        }
+      ],
+      "limitations": [],
+      "usage": {
+        "requests": 2,
+        "bytes": 580
+      },
+      "stopReason": "research_complete"
+    },
+    "checkpoint": {
+      "phase": "done",
+      "steps": 3,
+      "startedAt": 1790712305356,
+      "elapsedMs": 2,
+      "anchorUrl": "https://ivo-marsh.invalid/about",
+      "identity": {
+        "displayName": "Ivo Marsh 的公开主页",
+        "handle": null,
+        "profileUrl": "https://ivo-marsh.invalid/about",
+        "status": "resolved",
+        "note": "已读取所选公开主页；跨平台账号关系尚未自动合并。",
+        "candidates": []
+      },
+      "candidates": [],
+      "pages": [
+        {
+          "url": "https://ivo-marsh.invalid/about",
+          "title": "Ivo Marsh 的公开主页",
+          "text": "Ivo Marsh 的公开主页。自 2019 年起翻译公共领域科幻小说并公开译注。",
+          "kind": "profile",
+          "publishedAt": null,
+          "links": [
+            "https://ivo-marsh.invalid/notes"
+          ],
+          "limitations": [
+            "主页内容由该账号维护。"
+          ],
+          "sourceKey": "S1"
+        },
+        {
+          "url": "https://ivo-marsh.invalid/notes",
+          "title": "Ivo Marsh 译注集",
+          "text": "译注集收录了 12 篇公开译注，署名 Ivo Marsh。",
+          "kind": "work",
+          "publishedAt": "2024-03-10",
+          "links": [],
+          "limitations": [
+            "篇数未独立核实。"
+          ],
+          "sourceKey": "S2"
+        }
+      ],
+      "claims": [
+        {
+          "sourceKey": "S1",
+          "quote": "自 2019 年起翻译公共领域科幻小说并公开译注",
+          "statement": "Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。",
+          "kind": "attributed_statement",
+          "section": "work"
+        },
+        {
+          "sourceKey": "S2",
+          "quote": "译注集收录了 12 篇公开译注",
+          "statement": "译注集页面称收录了 12 篇公开译注。",
+          "kind": "page_statement",
+          "section": "work"
+        }
+      ],
+      "unknowns": [],
+      "stopReason": "research_complete"
+    },
+    "receipts": [
+      {
+        "key": "tool:d91cf276b8eb7f66ff3f692d",
+        "kind": "tool",
+        "state": "completed",
+        "request": {
+          "type": "read",
+          "url": "https://ivo-marsh.invalid/about"
+        },
+        "result": {
+          "pages": [
+            {
+              "url": "https://ivo-marsh.invalid/about",
+              "title": "Ivo Marsh 的公开主页",
+              "text": "Ivo Marsh 的公开主页。自 2019 年起翻译公共领域科幻小说并公开译注。",
+              "kind": "profile",
+              "publishedAt": null,
+              "links": [
+                "https://ivo-marsh.invalid/notes"
+              ],
+              "limitations": [
+                "主页内容由该账号维护。"
+              ]
+            }
+          ],
+          "requests": 1,
+          "bytes": 320,
+          "estimatedUsd": 0.0004,
+          "credits": null,
+          "limitations": []
+        },
+        "usage": {
+          "estimatedUsd": 0.0004,
+          "credits": null,
+          "bytes": 320,
+          "unknownCost": false
+        },
+        "reservedInput": 0,
+        "reservedOutput": 0
+      },
+      {
+        "key": "tool:bad96cb46e1c7c2c240449a4",
+        "kind": "tool",
+        "state": "completed",
+        "request": {
+          "type": "read",
+          "url": "https://ivo-marsh.invalid/notes"
+        },
+        "result": {
+          "pages": [
+            {
+              "url": "https://ivo-marsh.invalid/notes",
+              "title": "Ivo Marsh 译注集",
+              "text": "译注集收录了 12 篇公开译注，署名 Ivo Marsh。",
+              "kind": "work",
+              "publishedAt": "2024-03-10",
+              "links": [],
+              "limitations": [
+                "篇数未独立核实。"
+              ]
+            }
+          ],
+          "requests": 1,
+          "bytes": 260,
+          "estimatedUsd": 0.0004,
+          "credits": null,
+          "limitations": []
+        },
+        "usage": {
+          "estimatedUsd": 0.0004,
+          "credits": null,
+          "bytes": 260,
+          "unknownCost": false
+        },
+        "reservedInput": 0,
+        "reservedOutput": 0
+      }
+    ],
+    "canonical": {
+      "schemaVersion": "stripsearch/web-alpha/v1",
+      "runId": "run_3f47a3b10b75428a8309c8b4",
+      "state": "completed",
+      "revision": 2,
+      "question": "研究 Ivo Marsh 的公开翻译与译注工作",
+      "seedUrl": "https://ivo-marsh.invalid/about",
+      "provider": "research",
+      "parentRunId": null,
+      "retryOf": null,
+      "followup": false,
+      "createdAt": "2026-09-29T20:05:05.356Z",
+      "updatedAt": "2026-09-29T20:05:05.359Z",
+      "interrupted": false,
+      "stopReason": "research_complete",
+      "identity": {
+        "displayName": "Ivo Marsh 的公开主页",
+        "handle": null,
+        "profileUrl": "https://ivo-marsh.invalid/about",
+        "status": "resolved",
+        "note": "已读取所选公开主页；跨平台账号关系尚未自动合并。",
+        "candidates": []
+      },
+      "sources": [
+        {
+          "sourceKey": "S1",
+          "url": "https://ivo-marsh.invalid/about",
+          "title": "Ivo Marsh 的公开主页",
+          "kind": "profile",
+          "publishedAt": null,
+          "retrievedAt": "2026-09-29T20:05:05.359Z",
+          "fetchStatus": "ok",
+          "excerpt": "Ivo Marsh 的公开主页。自 2019 年起翻译公共领域科幻小说并公开译注。",
+          "excerptLocator": "公开页面文本",
+          "identityLabel": "所选公开主页",
+          "identityConfirmed": true,
+          "limits": [
+            "主页内容由该账号维护。",
+            "主页内容由该账号维护；不代表跨平台身份已核实。"
+          ],
+          "excluded": false,
+          "excludedAt": null
+        },
+        {
+          "sourceKey": "S2",
+          "url": "https://ivo-marsh.invalid/notes",
+          "title": "Ivo Marsh 译注集",
+          "kind": "work",
+          "publishedAt": "2024-03-10",
+          "retrievedAt": "2026-09-29T20:05:05.359Z",
+          "fetchStatus": "ok",
+          "excerpt": "译注集收录了 12 篇公开译注，署名 Ivo Marsh。",
+          "excerptLocator": "公开页面文本",
+          "identityLabel": "来源归属未独立验证",
+          "identityConfirmed": false,
+          "limits": [
+            "篇数未独立核实。",
+            "与研究对象的关系需结合原文核对，不因同名自动合并。"
+          ],
+          "excluded": false,
+          "excludedAt": null
+        }
+      ],
+      "observations": [
+        {
+          "observationId": "obs_cad1177b9bb14a0bab2cb411",
+          "statement": "Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。",
+          "kind": "attributed_statement",
+          "sourceKeys": [
+            "S1"
+          ],
+          "limitations": [
+            "来源原文摘录；身份归属与独立事实核实另行判断。"
+          ],
+          "validity": "valid",
+          "reviewReason": null
+        },
+        {
+          "observationId": "obs_eaf992b9fdf44f038ae504d0",
+          "statement": "译注集页面称收录了 12 篇公开译注。",
+          "kind": "page_statement",
+          "sourceKeys": [
+            "S2"
+          ],
+          "limitations": [
+            "来源原文摘录；身份归属与独立事实核实另行判断。"
+          ],
+          "validity": "valid",
+          "reviewReason": null
+        }
+      ],
+      "answer": [
+        {
+          "id": "work",
+          "heading": "作品与行动",
+          "body": "",
+          "bullets": [
+            {
+              "text": "Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。",
+              "sourceKeys": [
+                "S1"
+              ],
+              "kind": "attributed_statement",
+              "validity": "valid",
+              "reviewReason": null
+            },
+            {
+              "text": "译注集页面称收录了 12 篇公开译注。",
+              "sourceKeys": [
+                "S2"
+              ],
+              "kind": "page_statement",
+              "validity": "valid",
+              "reviewReason": null
+            }
+          ]
+        }
+      ],
+      "limitations": [],
+      "usage": {
+        "provider": "research",
+        "requests": 2,
+        "bytes": 580,
+        "elapsedMs": 4,
+        "measurement": "observed"
+      },
+      "reviewCount": 0,
+      "research": {
+        "phase": "done",
+        "steps": 3,
+        "budget": {
+          "toolCalls": 2,
+          "modelCalls": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "estimatedUsd": 0.0008,
+          "firecrawlCredits": 0,
+          "unknownCost": false,
+          "limits": {
+            "toolCalls": 12,
+            "modelCalls": 8,
+            "inputTokens": 150000,
+            "outputTokens": 16000,
+            "elapsedMs": 240000
+          }
+        },
+        "stopReason": "research_complete",
+        "unresolved": []
+      },
+      "personObject": {
+        "schemaVersion": "stripsearch/person/v1",
+        "person": {
+          "id": "person_d1748eaa018019b76c784529",
+          "displayName": "Ivo Marsh 的公开主页",
+          "profileUrl": "https://ivo-marsh.invalid/about"
+        },
+        "claims": [
+          {
+            "id": "C1",
+            "statement": "Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。",
+            "kind": "attributed_statement",
+            "sourceKeys": [
+              "S1"
+            ],
+            "evidenceIds": [
+              "E1"
+            ]
+          },
+          {
+            "id": "C2",
+            "statement": "译注集页面称收录了 12 篇公开译注。",
+            "kind": "page_statement",
+            "sourceKeys": [
+              "S2"
+            ],
+            "evidenceIds": [
+              "E2"
+            ]
+          }
+        ],
+        "evidence": [
+          {
+            "id": "E1",
+            "sourceKey": "S1",
+            "quote": "自 2019 年起翻译公共领域科幻小说并公开译注"
+          },
+          {
+            "id": "E2",
+            "sourceKey": "S2",
+            "quote": "译注集收录了 12 篇公开译注"
+          }
+        ],
+        "unknowns": [],
+        "report": {
+          "runId": "run_3f47a3b10b75428a8309c8b4",
+          "revision": 2,
+          "asOf": "2026-09-29T20:05:05.359Z"
+        }
+      }
+    },
+    "markdown": "# Ivo Marsh 的公开主页 · 研究报告\n\n> 研究 Ivo Marsh 的公开翻译与译注工作\n\n- 运行状态：已完成\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:05:05.359Z\n- 需要复核：0 处\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 作品与行动\n\n- Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。 [S1]\n- 译注集页面称收录了 12 篇公开译注。 [S2]\n\n## 观察项\n\n- Ivo Marsh 自述自 2019 年起翻译公共领域科幻小说并公开译注。 [S1]\n  - 限制：来源原文摘录；身份归属与独立事实核实另行判断。\n- 译注集页面称收录了 12 篇公开译注。 [S2]\n  - 限制：来源原文摘录；身份归属与独立事实核实另行判断。\n\n## 来源\n\n### S1 · Ivo Marsh 的公开主页\n\n- 类型：主页\n- 链接：https://ivo-marsh.invalid/about\n- 身份归属：已确认（种子账号）\n- 状态：已读取\n- 摘录（公开页面文本）：\n\n  > Ivo Marsh 的公开主页。自 2019 年起翻译公共领域科幻小说并公开译注。\n\n- 限制：主页内容由该账号维护。\n- 限制：主页内容由该账号维护；不代表跨平台身份已核实。\n\n### S2 · Ivo Marsh 译注集\n\n- 类型：作品\n- 链接：https://ivo-marsh.invalid/notes\n- 身份归属：未确认\n- 发表时间：2024-03-10\n- 状态：已读取\n- 摘录（公开页面文本）：\n\n  > 译注集收录了 12 篇公开译注，署名 Ivo Marsh。\n\n- 限制：篇数未独立核实。\n- 限制：与研究对象的关系需结合原文核对，不因同名自动合并。\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
+  },
+  "hashes": {
+    "normalizedResult": "63c8c83c0637f79d72f8cd7c025185c05e67292ab3f75de4f56079a102cbd68f",
+    "serialized": {
+      "result": "0420f80db1a5ae88834abd72679742bf8a00c46aaa993df399b7c9ae3952c6ee",
+      "checkpoint": "82a39c10e88f18e17001c1d9b8f39f29fc4841da0a3f3dd838920b17ff1b511f",
+      "receipts": "54e8d0134a28cf3181cbe7c51dda2a224b4f055dfad197285101433a770a743f",
+      "canonical": "1bfb24b771cacbf992535eef03ac5b7b032d54b73cc0a6c24d2ac6c75c2aa048",
+      "markdown": "135573fc72fb13422568595aa58950afc823bfaa538cb34640e61b635971de5c"
+    },
+    "artifact": null
+  },
+  "artifactHashNote": "hashes.artifact is stored in report.json and manifest.json: a file cannot contain its own hash"
+}

@@ -1,0 +1,126 @@
+{
+  "caseId": "rb-009",
+  "scenario": "runner_error_retained",
+  "title": "runner 错误被保留（运行开始前已取消）",
+  "expected": {
+    "state": "runner_error",
+    "stopReason": "cancelled",
+    "toolCalls": 0,
+    "plannerCalls": 0,
+    "modelCalls": 0,
+    "receipts": {
+      "total": 0,
+      "completed": 0,
+      "failed": 0,
+      "inflight": 0
+    },
+    "unknownCost": false,
+    "runnerError": "ResearchStop",
+    "runnerErrorIncludes": [
+      "run_inactive"
+    ]
+  },
+  "actual": {
+    "state": "runner_error",
+    "stopReason": "cancelled",
+    "identityStatus": "needs_input",
+    "completion": "finished",
+    "counts": {
+      "toolCalls": 0,
+      "plannerDecisionCalls": 0,
+      "modelInvocations": 0,
+      "modelReceipts": 0,
+      "fixtureProviderCalls": 0
+    },
+    "receipts": {
+      "total": 0,
+      "completed": 0,
+      "failed": 0,
+      "inflight": 0
+    },
+    "unknownCost": false,
+    "claimsRetained": null,
+    "candidates": 0,
+    "runnerError": "ResearchStop",
+    "fixtureViolations": [],
+    "executionError": {
+      "name": "ResearchStop",
+      "message": "run_inactive",
+      "stack": "ResearchStop: run_inactive\n    at ResearchStore.assertActive (file://<path>/out/server/research/research-store.js:18:19)\n    at active (file://<path>/out/server/research/controller.js:21:68)\n    at runResearch (file://<path>/out/server/research/controller.js:180:9)\n    at executeCase (file://<path>/out/evals/research-baseline-v1/case-runner.js:158:28)\n    at file://<path>/out/evals/research-baseline-v1/replay-worker.js:61:27"
+    },
+    "fixtureUsage": {
+      "measurement": "simulated",
+      "knownSimulatedSubtotal": null,
+      "simulatedTotal": null,
+      "unknownFeeReceipts": 0,
+      "bytes": 0
+    },
+    "effectiveLimits": {
+      "toolCalls": 12,
+      "modelCalls": 8,
+      "inputTokens": 150000,
+      "outputTokens": 16000,
+      "elapsedMs": 240000
+    }
+  },
+  "failures": [],
+  "error": {
+    "name": "ResearchStop",
+    "message": "run_inactive",
+    "stack": "ResearchStop: run_inactive\n    at ResearchStore.assertActive (file://<path>/out/server/research/research-store.js:18:19)\n    at active (file://<path>/out/server/research/controller.js:21:68)\n    at runResearch (file://<path>/out/server/research/controller.js:180:9)\n    at executeCase (file://<path>/out/evals/research-baseline-v1/case-runner.js:158:28)\n    at file://<path>/out/evals/research-baseline-v1/replay-worker.js:61:27"
+  },
+  "raw": {
+    "result": null,
+    "checkpoint": null,
+    "receipts": [],
+    "canonical": {
+      "schemaVersion": "stripsearch/web-alpha/v1",
+      "runId": "run_e455d3cb81c54ec4a977d6d9",
+      "state": "cancelled",
+      "revision": 1,
+      "question": "研究 Nova Arden 的公开工作与项目 Atlas",
+      "seedUrl": "https://nova-arden.invalid/about",
+      "provider": "research",
+      "parentRunId": null,
+      "retryOf": null,
+      "followup": false,
+      "createdAt": "2026-09-29T20:05:05.353Z",
+      "updatedAt": "2026-09-29T20:05:05.353Z",
+      "interrupted": false,
+      "stopReason": "cancelled",
+      "identity": {
+        "displayName": "",
+        "handle": null,
+        "profileUrl": null,
+        "status": "needs_input",
+        "note": null,
+        "candidates": []
+      },
+      "sources": [],
+      "observations": [],
+      "answer": [],
+      "limitations": [],
+      "usage": {
+        "provider": "research",
+        "requests": 0,
+        "bytes": 0,
+        "elapsedMs": null,
+        "measurement": "not_run"
+      },
+      "reviewCount": 0
+    },
+    "markdown": "# 研究 Nova Arden 的公开工作与项目 Atlas · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：已取消\n- 数据来源：公开资料研究\n- 报告修订：v1\n- 更新时间：2026-09-29T20:05:05.353Z\n- 需要复核：0 处\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n---\n本报告由 StripSearch 整理，修订 v1，schema stripsearch/web-alpha/v1。\n"
+  },
+  "hashes": {
+    "normalizedResult": "a480acef5ebbce2b7244e60bfe0f93812670a7710d218ee7d887946dd56687d1",
+    "serialized": {
+      "result": null,
+      "checkpoint": null,
+      "receipts": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "canonical": "45b4d3d7ceeea0bb50269abd12423ef86dc31d3b4c95584f8d8f879d0101062d",
+      "markdown": "aaf295e2d4e34c5187bf04fdfaa635facc9c23ae99c1a1351d466b46ac6e865d"
+    },
+    "artifact": null
+  },
+  "artifactHashNote": "hashes.artifact is stored in report.json and manifest.json: a file cannot contain its own hash"
+}
