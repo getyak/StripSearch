@@ -75,8 +75,8 @@
     "checkpoint": {
       "phase": "needs_input",
       "steps": 0,
-      "startedAt": 1790712305316,
-      "elapsedMs": 0,
+      "startedAt": 1790713028561,
+      "elapsedMs": 1,
       "anchorUrl": null,
       "identity": null,
       "candidates": [
@@ -135,7 +135,7 @@
     ],
     "canonical": {
       "schemaVersion": "stripsearch/web-alpha/v1",
-      "runId": "run_b1a2ad8106dd452e92579c39",
+      "runId": "run_bcf25df213024e418203499c",
       "state": "needs_input",
       "revision": 2,
       "question": "研究一位维护 Atlas 排版工具的独立开发者",
@@ -144,8 +144,8 @@
       "parentRunId": null,
       "retryOf": null,
       "followup": false,
-      "createdAt": "2026-09-29T20:05:05.315Z",
-      "updatedAt": "2026-09-29T20:05:05.316Z",
+      "createdAt": "2026-09-29T20:17:08.561Z",
+      "updatedAt": "2026-09-29T20:17:08.563Z",
       "interrupted": false,
       "stopReason": null,
       "identity": {
@@ -198,16 +198,16 @@
         "unresolved": []
       }
     },
-    "markdown": "# 研究一位维护 Atlas 排版工具的独立开发者 · 研究报告\n\n> 研究一位维护 Atlas 排版工具的独立开发者\n\n- 运行状态：等待确认\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:05:05.316Z\n- 需要复核：0 处\n- 身份状态：请确认你要研究的公开主页。\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
+    "markdown": "# 研究一位维护 Atlas 排版工具的独立开发者 · 研究报告\n\n> 研究一位维护 Atlas 排版工具的独立开发者\n\n- 运行状态：等待确认\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:17:08.563Z\n- 需要复核：0 处\n- 身份状态：请确认你要研究的公开主页。\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
   },
   "hashes": {
     "normalizedResult": "7fcce3b0c821512be023e3fa2448ecb8e06f354e15b8d64895dfcd202bdb82c3",
     "serialized": {
       "result": null,
-      "checkpoint": "81266f26ad3b88988417cbe005d3f0518fd0cc9e3546e81b466e4d1110ea4370",
+      "checkpoint": "c456c5ccfb468345ae7674296ae2284919e8ab6d71138469b11d0c2554608c63",
       "receipts": "744128f37c2f5eebc494ed7a987aa9028d513f0868f0dce6c7041913fff79aa2",
-      "canonical": "ea35204080c5292249b0972455616d485ecead7bc115056964213b37ebe9fa48",
-      "markdown": "bf223ba173a69123a2cd36cc50a54359db11b8e76e6defdc3d76dec76443be5c"
+      "canonical": "6d87910895d80cd65b188cdf40c7221729f072041119519da93e273c2249272c",
+      "markdown": "10014b676f088960b0d13b07a7db5414ee9b9c6530afe3fd5270f0d2b7c250bc"
     },
     "artifact": null
   },

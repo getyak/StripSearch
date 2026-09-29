@@ -121,7 +121,7 @@
     "checkpoint": {
       "phase": "done",
       "steps": 1,
-      "startedAt": 1790712305339,
+      "startedAt": 1790713028586,
       "elapsedMs": 2,
       "anchorUrl": "https://nova-arden.invalid/about",
       "identity": {
@@ -247,7 +247,7 @@
     ],
     "canonical": {
       "schemaVersion": "stripsearch/web-alpha/v1",
-      "runId": "run_74132f8ceaaa41a38f7c2a18",
+      "runId": "run_9937c8c4e4d14c50ae05d8fb",
       "state": "partial",
       "revision": 2,
       "question": "研究 Nova Arden 的公开工作与项目 Atlas",
@@ -256,8 +256,8 @@
       "parentRunId": null,
       "retryOf": null,
       "followup": false,
-      "createdAt": "2026-09-29T20:05:05.339Z",
-      "updatedAt": "2026-09-29T20:05:05.341Z",
+      "createdAt": "2026-09-29T20:17:08.586Z",
+      "updatedAt": "2026-09-29T20:17:08.589Z",
       "interrupted": false,
       "stopReason": "budget_exhausted",
       "identity": {
@@ -275,7 +275,7 @@
           "title": "Nova Arden 的公开主页",
           "kind": "profile",
           "publishedAt": null,
-          "retrievedAt": "2026-09-29T20:05:05.341Z",
+          "retrievedAt": "2026-09-29T20:17:08.588Z",
           "fetchStatus": "ok",
           "excerpt": "Nova Arden 的公开主页。自 2021 年起维护开源排版工具 Atlas。2023 年的公开访谈解释了项目动机。",
           "excerptLocator": "公开页面文本",
@@ -294,7 +294,7 @@
           "title": "Atlas 项目页",
           "kind": "work",
           "publishedAt": "2024-05-01",
-          "retrievedAt": "2026-09-29T20:05:05.341Z",
+          "retrievedAt": "2026-09-29T20:17:08.588Z",
           "fetchStatus": "ok",
           "excerpt": "Atlas 是一个开源排版工具，由 Nova Arden 于 2021 年发起，项目页记录了 40 个社区贡献者的补丁。",
           "excerptLocator": "公开页面文本",
@@ -317,7 +317,7 @@
         "provider": "research",
         "requests": 2,
         "bytes": 800,
-        "elapsedMs": 4,
+        "elapsedMs": 5,
         "measurement": "observed"
       },
       "reviewCount": 0,
@@ -354,22 +354,22 @@
         "evidence": [],
         "unknowns": [],
         "report": {
-          "runId": "run_74132f8ceaaa41a38f7c2a18",
+          "runId": "run_9937c8c4e4d14c50ae05d8fb",
           "revision": 2,
-          "asOf": "2026-09-29T20:05:05.341Z"
+          "asOf": "2026-09-29T20:17:08.589Z"
         }
       }
     },
-    "markdown": "# Nova Arden 的公开主页 · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：部分完成\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:05:05.341Z\n- 需要复核：0 处\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n### S1 · Nova Arden 的公开主页\n\n- 类型：主页\n- 链接：https://nova-arden.invalid/about\n- 身份归属：已确认（种子账号）\n- 状态：已读取\n- 摘录（公开页面文本）：\n\n  > Nova Arden 的公开主页。自 2021 年起维护开源排版工具 Atlas。2023 年的公开访谈解释了项目动机。\n\n- 限制：主页内容由该账号维护。\n- 限制：主页内容由该账号维护；不代表跨平台身份已核实。\n\n### S2 · Atlas 项目页\n\n- 类型：作品\n- 链接：https://nova-arden.invalid/atlas\n- 身份归属：未确认\n- 发表时间：2024-05-01\n- 状态：已读取\n- 摘录（公开页面文本）：\n\n  > Atlas 是一个开源排版工具，由 Nova Arden 于 2021 年发起，项目页记录了 40 个社区贡献者的补丁。\n\n- 限制：项目页数字未独立核实。\n- 限制：与研究对象的关系需结合原文核对，不因同名自动合并。\n\n## 限制与未知\n\n- 研究已停止：budget\\_exhausted。已有材料保留，未证实的内容不补写。\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
+    "markdown": "# Nova Arden 的公开主页 · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：部分完成\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:17:08.589Z\n- 需要复核：0 处\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n### S1 · Nova Arden 的公开主页\n\n- 类型：主页\n- 链接：https://nova-arden.invalid/about\n- 身份归属：已确认（种子账号）\n- 状态：已读取\n- 摘录（公开页面文本）：\n\n  > Nova Arden 的公开主页。自 2021 年起维护开源排版工具 Atlas。2023 年的公开访谈解释了项目动机。\n\n- 限制：主页内容由该账号维护。\n- 限制：主页内容由该账号维护；不代表跨平台身份已核实。\n\n### S2 · Atlas 项目页\n\n- 类型：作品\n- 链接：https://nova-arden.invalid/atlas\n- 身份归属：未确认\n- 发表时间：2024-05-01\n- 状态：已读取\n- 摘录（公开页面文本）：\n\n  > Atlas 是一个开源排版工具，由 Nova Arden 于 2021 年发起，项目页记录了 40 个社区贡献者的补丁。\n\n- 限制：项目页数字未独立核实。\n- 限制：与研究对象的关系需结合原文核对，不因同名自动合并。\n\n## 限制与未知\n\n- 研究已停止：budget\\_exhausted。已有材料保留，未证实的内容不补写。\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
   },
   "hashes": {
     "normalizedResult": "838e808deb7b0d7f825df8a0ccbb676efec8a86d7171066f0d30c53a1f50b7cb",
     "serialized": {
       "result": "7d696cb1e5d4e6b1daaceabdff159f9bd4afd05ff122b6fe47675c99676f4f73",
-      "checkpoint": "b2d8bbea31195c0f53bb1566c010ce8ed4e15b6cf757e9aa896d1a2cd53e7426",
+      "checkpoint": "4bddf450e9c84ed69e1d386429da1af18d0c75f649d0d8b8058dce133b2aace4",
       "receipts": "0e45b426a753283cc4f4449f729f8a9adb0949b868d190e71810dcb11d9f49e7",
-      "canonical": "e4e7de3058521c3d016789e80f77310f3283a45b5fd8026583141b72368177fe",
-      "markdown": "5bc3b309a325e11323038ef79cb60edb56f0d7e239c11ac25eaa4ba8dfa87c2d"
+      "canonical": "169605a825cad2f37f0706f7eb2c80fd92035192a7a9c87edcef528c43f02725",
+      "markdown": "1bace0f561368eb945d0d66bfe34ca1990a47bb6667757f1f69cbbb0265b6a6b"
     },
     "artifact": null
   },

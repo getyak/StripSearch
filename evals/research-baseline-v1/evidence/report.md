@@ -5,8 +5,8 @@
 - 报告类型：`offline_controller_replay`（与 runtime-v1 的 provider 契约回放 `offline_provider_contract` 分轨，互不替代）
 - 数据集：`evals/research-baseline-v1/cases.jsonl`（计划 11 案例，SHA256 `c97c7da377c876a5…`）
 - 数据来源：ORIGINAL synthetic 案例，全部 `unreviewed`，不是人工 gold，也不是研究质量 benchmark；期望是带哈希的版本化合成断言，不宣称历史上先于断言冻结
-- 源码版本：commit `d739694f01897f11153263cef8b345904a14b9a9`（dirty） · Node v22.23.2 · lockfile SHA256 `1292536f72542c35…`
-- 源码清单聚合哈希：`3637109080511c31…` · 配置哈希：`118f573717f5033f…` · 执行字节聚合哈希：`c845ceafdc870717…`
+- 源码版本：commit `498c5b70330cde2bb9fe176bd9ab42f02fd95aff` · Node v22.23.2 · lockfile SHA256 `1292536f72542c35…`
+- 源码清单聚合哈希：`06bfb806f0c972e5…` · 配置哈希：`118f573717f5033f…` · 执行字节聚合哈希：`8cedd3066bf3d2e8…`
 - 引导方式：tsc-precompiled worker (no transpiler in the guarded process); executed bytes hashed below
 - 网络边界：process-level network/subprocess API guard in the isolated replay worker; NOT OS network isolation and not claimed as such
 
@@ -26,11 +26,12 @@
 
 ## 调用与费用记账
 
+- 观测调用与回执计数：`exact`；用量记录缺失案例：0（未启动案例不计入未知用量）。以下计数来自完整的执行记录。
 - 脚本化规划决策（plannerDecisionCalls）：16
 - 实际模型调用（modelInvocations）：0；同一次运行账本中的模型回执（modelReceipts）：1（可含历史恢复证据，不是本次调用）
 - 模型 token / 费用：`not_measured` / `not_measured`；实际支付费用：`null`
 - fixture 工具调用：14（注入的 `scripted-research-tools-v1`）
-- fixture 声明费用（measurement=`simulated`）：已知小计 0.0048000000000000004；完整模拟合计 null（存在未知费用，不给出误导性合计）；含未知费用的案例 4
+- fixture 声明费用（measurement=`simulated`）：已知小计 0.0048000000000000004；完整模拟合计 null（费用或用量未知，或无可合计记录）；含未知费用的案例 4
 
 ## 逐案结构断言
 

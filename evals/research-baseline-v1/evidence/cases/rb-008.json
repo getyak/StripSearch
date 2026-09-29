@@ -88,7 +88,7 @@
     "checkpoint": {
       "phase": "done",
       "steps": 0,
-      "startedAt": 1790712305349,
+      "startedAt": 1790713028598,
       "elapsedMs": 0,
       "anchorUrl": "https://nova-arden.invalid/about",
       "identity": null,
@@ -115,7 +115,7 @@
     ],
     "canonical": {
       "schemaVersion": "stripsearch/web-alpha/v1",
-      "runId": "run_350ab172167544e587549f17",
+      "runId": "run_e844d37f15334957832f6dcf",
       "state": "partial",
       "revision": 2,
       "question": "研究 Nova Arden 的公开工作与项目 Atlas",
@@ -124,8 +124,8 @@
       "parentRunId": null,
       "retryOf": null,
       "followup": false,
-      "createdAt": "2026-09-29T20:05:05.349Z",
-      "updatedAt": "2026-09-29T20:05:05.349Z",
+      "createdAt": "2026-09-29T20:17:08.597Z",
+      "updatedAt": "2026-09-29T20:17:08.598Z",
       "interrupted": false,
       "stopReason": "unknown_inflight",
       "identity": {
@@ -173,16 +173,16 @@
         "unresolved": []
       }
     },
-    "markdown": "# 研究 Nova Arden 的公开工作与项目 Atlas · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：部分完成\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:05:05.349Z\n- 需要复核：0 处\n- 身份状态：尚未确认公开主页。\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n## 限制与未知\n\n- 研究已停止：unknown\\_inflight。已有材料保留，未证实的内容不补写。\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
+    "markdown": "# 研究 Nova Arden 的公开工作与项目 Atlas · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：部分完成\n- 数据来源：公开资料研究\n- 报告修订：v2\n- 更新时间：2026-09-29T20:17:08.598Z\n- 需要复核：0 处\n- 身份状态：尚未确认公开主页。\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n## 限制与未知\n\n- 研究已停止：unknown\\_inflight。已有材料保留，未证实的内容不补写。\n\n---\n本报告由 StripSearch 整理，修订 v2，schema stripsearch/web-alpha/v1。\n"
   },
   "hashes": {
     "normalizedResult": "0d439a4a6d4324cf716b27875053307bd3c9188171ac849e4e64cf7fd4932152",
     "serialized": {
       "result": "b9af63876cb002490a05c47027a201c897bf7c67e5e8df5c016bb21f3eda54d5",
-      "checkpoint": "30e02737a7913a0432c7995deac5b7228f011366b5efa57c4341c58fa31cec9c",
+      "checkpoint": "b4d265ac57c480a62a999eca7de18bf4498f0a2b70a20f6aeee8b9d5222e2e58",
       "receipts": "8f764a24ce82f64adc4c8e6eaa4123f41eb5d2f9f6cd331429cd0f2e78b01acc",
-      "canonical": "0f558b6712bdef0ac96b99375dc5f8c60ef034ac24d480399ff4b640269cf2b4",
-      "markdown": "d01be66ec0a1b4f44b2870c5a402c74ea27bad8b672ed3281497b6007634cc2a"
+      "canonical": "ea9ac9a9f40504c1e0d54ec230b6e2fd8fda9aa06fd915200c587de5fae0f657",
+      "markdown": "2534ef88cc10c9a85ad0cc227e0ff54866f98706d21410c9e410a40453328491"
     },
     "artifact": null
   },

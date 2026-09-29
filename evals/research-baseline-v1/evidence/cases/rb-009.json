@@ -75,7 +75,7 @@
     "receipts": [],
     "canonical": {
       "schemaVersion": "stripsearch/web-alpha/v1",
-      "runId": "run_e455d3cb81c54ec4a977d6d9",
+      "runId": "run_4cbfa9e4ecf448ae85ed7e44",
       "state": "cancelled",
       "revision": 1,
       "question": "研究 Nova Arden 的公开工作与项目 Atlas",
@@ -84,8 +84,8 @@
       "parentRunId": null,
       "retryOf": null,
       "followup": false,
-      "createdAt": "2026-09-29T20:05:05.353Z",
-      "updatedAt": "2026-09-29T20:05:05.353Z",
+      "createdAt": "2026-09-29T20:17:08.601Z",
+      "updatedAt": "2026-09-29T20:17:08.601Z",
       "interrupted": false,
       "stopReason": "cancelled",
       "identity": {
@@ -109,7 +109,7 @@
       },
       "reviewCount": 0
     },
-    "markdown": "# 研究 Nova Arden 的公开工作与项目 Atlas · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：已取消\n- 数据来源：公开资料研究\n- 报告修订：v1\n- 更新时间：2026-09-29T20:05:05.353Z\n- 需要复核：0 处\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n---\n本报告由 StripSearch 整理，修订 v1，schema stripsearch/web-alpha/v1。\n"
+    "markdown": "# 研究 Nova Arden 的公开工作与项目 Atlas · 研究报告\n\n> 研究 Nova Arden 的公开工作与项目 Atlas\n\n- 运行状态：已取消\n- 数据来源：公开资料研究\n- 报告修订：v1\n- 更新时间：2026-09-29T20:17:08.601Z\n- 需要复核：0 处\n\n> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。\n\n## 来源\n\n---\n本报告由 StripSearch 整理，修订 v1，schema stripsearch/web-alpha/v1。\n"
   },
   "hashes": {
     "normalizedResult": "a480acef5ebbce2b7244e60bfe0f93812670a7710d218ee7d887946dd56687d1",
@@ -117,8 +117,8 @@
       "result": null,
       "checkpoint": null,
       "receipts": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-      "canonical": "45b4d3d7ceeea0bb50269abd12423ef86dc31d3b4c95584f8d8f879d0101062d",
-      "markdown": "aaf295e2d4e34c5187bf04fdfaa635facc9c23ae99c1a1351d466b46ac6e865d"
+      "canonical": "d3054a9e1ad312069b3af359ea9a2632c2fdf3c90a7bf689259f8cc02c1cb90f",
+      "markdown": "09484b547ef38c08e823a384f9e1f947fe21c1bd8c0a80cb446c22c68717246c"
     },
     "artifact": null
   },
