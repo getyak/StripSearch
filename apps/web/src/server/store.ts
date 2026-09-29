@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore } from './research/research-store.js';
+import { CaseStore } from './research/case-store.js';
 import type {
   AnswerSectionDraft,
   CanonicalView,
@@ -239,7 +240,11 @@ export interface CreateRunInput {
 
 export class Store {
   readonly research: ResearchStore;
-  constructor(private readonly db: DB) { this.research = new ResearchStore(db); }
+  readonly cases: CaseStore;
+  constructor(private readonly db: DB) {
+    this.research = new ResearchStore(db);
+    this.cases = new CaseStore(db);
+  }
 
   insertRun(input: CreateRunInput): RunRecord {
     const timestamp = nowIso();

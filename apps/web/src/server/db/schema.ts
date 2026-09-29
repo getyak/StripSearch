@@ -315,4 +315,161 @@ CREATE TABLE IF NOT EXISTS discovery_imports (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS discovery_imports_task ON discovery_imports(task_id, created_at);
+
+-- GET-58 research case domain (shared/research-case.ts). Additive only: old
+-- alpha databases, tables and reports stay readable. Stable case/person/
+-- account/source/evidence/claim ids, immutable scope versions with real
+-- per-account selection/allowedScope snapshots, and append-only source
+-- revisions. Foundations for later scheduling/coverage issues; no tasks,
+-- leases or workers here.
+CREATE TABLE IF NOT EXISTS research_cases (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  person_id TEXT NOT NULL,
+  intent TEXT NOT NULL,
+  scope_version INTEGER NOT NULL DEFAULT 1,
+  person_revision INTEGER NOT NULL DEFAULT 1,
+  provenance_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS research_cases_owner ON research_cases(owner_id, created_at DESC);
+
+-- Append-only scope journal: every row is an immutable before/after snapshot
+-- of the actual per-account selection and allowed scope. Version-advancing
+-- scope mutations write one row at the new version; account baselines are
+-- recorded at the version in effect, so old scope stays readable after later
+-- changes and across reopens.
+CREATE TABLE IF NOT EXISTS research_case_scope_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  scope_version INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  before_json TEXT NOT NULL DEFAULT '[]',
+  after_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_case_scope_versions_case ON research_case_scope_versions(case_id, id);
+
+CREATE TABLE IF NOT EXISTS research_case_accounts (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  owner_id TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  handle TEXT,
+  profile_url TEXT,
+  identity_support_json TEXT NOT NULL,
+  user_selection_json TEXT NOT NULL,
+  allowed_scope_json TEXT NOT NULL,
+  research_value_json TEXT NOT NULL,
+  access_coverage_json TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- Same-platform multiple accounts are allowed; no UNIQUE(case_id, platform).
+CREATE INDEX IF NOT EXISTS research_case_accounts_case ON research_case_accounts(case_id, created_at);
+
+CREATE TABLE IF NOT EXISTS research_case_sources (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES research_case_accounts(id) ON DELETE CASCADE,
+  latest_revision INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_case_sources_case ON research_case_sources(case_id, created_at);
+
+CREATE TABLE IF NOT EXISTS research_case_source_revisions (
+  source_id TEXT NOT NULL REFERENCES research_case_sources(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  author TEXT,
+  original_url TEXT NOT NULL,
+  title TEXT NOT NULL,
+  published_at TEXT,
+  retrieved_at TEXT NOT NULL,
+  locator TEXT,
+  content_hash TEXT NOT NULL,
+  provenance_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (source_id, revision)
+);
+
+CREATE TABLE IF NOT EXISTS research_case_evidence (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES research_case_accounts(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  source_revision INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  quote TEXT NOT NULL,
+  locator TEXT,
+  quote_hash TEXT NOT NULL,
+  provenance_json TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  revoked_at TEXT,
+  FOREIGN KEY (source_id, source_revision)
+    REFERENCES research_case_source_revisions(source_id, revision)
+);
+CREATE INDEX IF NOT EXISTS research_case_evidence_case ON research_case_evidence(case_id, created_at);
+
+CREATE TABLE IF NOT EXISTS research_case_claims (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES research_case_accounts(id) ON DELETE CASCADE,
+  statement TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  limitations_json TEXT NOT NULL DEFAULT '[]',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  withdrawn_at TEXT
+);
+CREATE INDEX IF NOT EXISTS research_case_claims_case ON research_case_claims(case_id, created_at);
+
+CREATE TABLE IF NOT EXISTS research_case_claim_evidence (
+  claim_id TEXT NOT NULL REFERENCES research_case_claims(id) ON DELETE CASCADE,
+  evidence_id TEXT NOT NULL REFERENCES research_case_evidence(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (claim_id, evidence_id, role)
+);
+
+-- Per-content coverage items: keyed by (locator, taskRef) where the locator is
+-- accountId + stable source id + source revision, so cross-account data is
+-- never mixed and different posts/revisions stay distinct. Items are never
+-- rebound; writes append immutable revisions that keep each write's
+-- scopeVersion as historical provenance.
+CREATE TABLE IF NOT EXISTS research_case_item_coverage (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES research_case_accounts(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  source_revision INTEGER NOT NULL,
+  task_ref_key TEXT NOT NULL,
+  task_ref_json TEXT NOT NULL,
+  latest_revision INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(case_id, account_id, source_id, source_revision, task_ref_key),
+  FOREIGN KEY (source_id, source_revision)
+    REFERENCES research_case_source_revisions(source_id, revision)
+);
+CREATE INDEX IF NOT EXISTS research_case_coverage_case ON research_case_item_coverage(case_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS research_case_item_coverage_revisions (
+  item_id TEXT NOT NULL REFERENCES research_case_item_coverage(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  scope_version INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '[]',
+  counterevidence_json TEXT NOT NULL DEFAULT '[]',
+  note TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (item_id, revision)
+);
 `;
