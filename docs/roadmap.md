@@ -54,6 +54,8 @@
 
 不预设截止日期和负责人。优先完成第一个能失败、能核查、能修正的小闭环。
 
+2026-09-30：[研究案例领域契约（GET-58）](research-case-domain.md) 已落地：`ResearchCase / AccountSelection / ScopeVersion / SourceRevision / EvidenceRef / ItemCoverage` 共享契约、原子范围快照与增量 SQLite 案例持久化。它是后续任务的地基，未启用 Search / Fetch 运行时。
+
 ## 已采纳的设计基线
 
 | 决定 | 理由 | 什么会使它改变 |
