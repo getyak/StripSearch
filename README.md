@@ -36,6 +36,8 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 | TikHub 与开源生态如何取舍 | [工具选型与调研](docs/providers.md) |
 | 分阶段交付与验收 | [开发 brief / 路线](docs/roadmap.md) |
 
+下一阶段：[人物研究 Agent 设计稿](docs/superpowers/specs/2026-09-29-person-research-agent-design.md) · [交互与架构阅读页](design/explorations/agent-research-2026-09-29/README.md)。覆盖身份发现、X / Reddit / GitHub / 个人网站研究、平台 Skills 与证据修订；这是待实施设计，不代表新增能力已上线。
+
 先看一份[合成报告](examples/report.md)，再对照[同一份 JSON](examples/report.json)和[请求配置](examples/request.json)。样例域名 `example.org` 是占位标识，不应抓取。
 
 ## 部署
