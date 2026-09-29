@@ -37,6 +37,16 @@ Exa 使用固定官方 endpoint、超时、响应大小和结果数限制，不�
 
 离线测试注入合成 provider，不访问网络或示例域名。真实验收仅记录请求状态、计数及验证结果，人物材料留在忽略目录，不提交第三方全文或个人研究档案。
 
+## 平台发现与帖子追踪（2026-09-27 新增）
+
+契约全文见[平台发现提案](design/platform-discovery-2026-09-27/TECHNICAL.md)。要点：
+
+- **发现**：`POST /api/discovery/tasks` 创建持久任务（用户名/邮箱 + `authorization` 授权声明），探测引擎只打注册表固定 https 端点（限速/限体/重定向不跟随），状态诚实分为 found / not_found / unknown / blocked / error；支持导入 maigret / holehe 报告，每条结果带工具收据与 `live_unverified`。
+- **一次纠正**：用户名一致只进待确认；仅确定性互链自动确认。`POST .../corrections` 批量 confirm / dismiss / reopen，一次修订一条审计，撤回级联到帖子。
+- **深度追踪**：只读已确认归属账号的帖子列表（JSON / RSS、分页、摘录+定位），正文不抓取；归属撤回则帖子失效，重开恢复。
+- **连续性**：每问先落检查点再发下一请求；重启转 `partial` 并保留检查点，显式 `resume` 续跑不重复计费；取消为终态，迟到结果被守卫丢弃。
+- **未验证**：除 GitHub 外全部平台规则、真实 maigret / holehe CLI 端到端、发现/归属精度、ToS 合规（见[审查](design/platform-discovery-2026-09-27/REVIEW.md)）。UI 尚未接入，入口为 HTTP API 与规范导出。
+
 ## 验证重点
 
 认证 cookie、错误密码、退出失效、跨账号隔离、Origin 拒绝、幂等冲突、重启持久化、取消不被晚回包覆盖、来源撤回与导出一致、供应商超时 / 429 / 错误 / 非法引用、UI 空白 / 加载 / 错误 / 重试、375px 不溢出、系统主题与 reduced motion。
@@ -63,6 +73,8 @@ npm --prefix apps/web start   # http://localhost:4392
 独立验收：63 项运行时测试、36 项静态设计交互测试、三套 TypeScript 检查和生产构建通过。真实 GitHub 调研完成（2 次请求、9 条来源）；账号隔离、退出失效、来源修订、Markdown / JSON 一致和服务重启持久化通过。Safari 完成登录与真实调研；内嵌 Chromium 完成历史恢复、引用、排除 / 恢复、刷新、明暗主题和 375px / reduced-motion 检查，控制台无错误。
 
 2026-09-22 托管部署的真实服务验收见[部署记录](deployment.md#线上验收记录)。未验证：Exa 回答质量、MCP 宿主、TikHub、本地档案和研究效果评测。邮箱未验证，邮件找回与 OAuth 未实现；GitHub 只读元数据。
+
+2026-09-27 平台发现 / 校正 / 追踪模块落地（27 项新离线测试，全量 187 项通过，冻结回放 40 案例无回归）；除 GitHub 端点语义外全部平台规则未 live 验证，发现与归属质量未评测，不得当作已具备的能力。
 
 ## 官方接口依据
 

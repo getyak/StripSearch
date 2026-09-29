@@ -34,6 +34,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Agen
 | MCP、可配置首屏、人物索引与返回契约 | [接口设计](docs/interfaces.md) |
 | 准确度、覆盖、数据集与对照实验 | [评估设计](docs/evaluation.md) |
 | TikHub 与开源生态如何取舍 | [工具选型与调研](docs/providers.md) |
+| 平台发现、身份校正与帖子追踪（holehe / maigret 接入） | [平台发现提案](docs/design/platform-discovery-2026-09-27/README.md) |
 | 分阶段交付与验收 | [开发 brief / 路线](docs/roadmap.md) |
 
 先看一份[合成报告](examples/report.md)，再对照[同一份 JSON](examples/report.json)和[请求配置](examples/request.json)。样例域名 `example.org` 是占位标识，不应抓取。

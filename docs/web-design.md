@@ -4,6 +4,8 @@
 
 2026-09-26 新增[人物入口、Person Object 与 DSH 重构提案](design/person-object-2026-09-26/README.md)，系统梳理单输入、条件消歧、低成本研究与三格式输出。该提案尚未替换生产实现；本页保留历史设计依据。
 
+2026-09-27 新增[平台发现、身份一次性校正与帖子深度追踪提案](design/platform-discovery-2026-09-27/README.md)：用 holehe / maigret 两类账号枚举能力扩展资料发现面，含已实施的探测引擎、报告导入、检查点续跑与帖子追踪（全部未 live 验证）。
+
 已交付：[最终交互原型](../design/web/index.html) · [设计规范](../design/web/DESIGN.md) · [验证记录](../design/web/VALIDATION.md)。
 
 新增视觉探索（2026-09-21）：[Signal Atlas / Open Dossier](../design/web/next/README.md) 与[多平台状态契约](../design/web/NEXT-DESIGN.md)。用户已选择 A，深化官网图谱、研究引导与配置；B 保留为存档。独立原型使用明确隔离的合成语料 v2，不改变原有 Web alpha 能力与里程碑。
