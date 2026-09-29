@@ -458,6 +458,9 @@ export interface ItemCoverageRevision {
 export interface CaseCoverageView extends ItemCoverage {
   scopeValidity: Validity;
   scopeReviewReason: string | null;
+  /** Dependency validity is separate from scope freshness and historical status. */
+  dependencyValidity: Validity;
+  dependencyReviewReason: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -495,11 +498,12 @@ export interface CaseReportView {
  */
 export function buildCaseReportView(input: CaseReportInput): CaseReportView {
   const known = new Map(input.evidence.map((evidence) => [evidence.evidenceId, evidence]));
-  const refProblem = (id: string, role: EvidenceRole): string | null => {
+  const refProblem = (id: string, role: EvidenceRole | readonly EvidenceRole[]): string | null => {
     const evidence = known.get(id);
     if (!evidence) return `${id} 不在案`;
     if (evidence.revokedAt !== null) return `${id} 已撤回`;
-    if (evidence.role !== role) return `${id} 角色不符`;
+    const roles = typeof role === 'string' ? [role] : role;
+    if (!roles.includes(evidence.role)) return `${id} 角色不符`;
     return null;
   };
   const claims = input.claims.map<CaseClaimView>((claim) => {
@@ -545,10 +549,26 @@ export function buildCaseReportView(input: CaseReportInput): CaseReportView {
     if (item.scopeVersion !== input.case.scopeVersion) {
       reasons.push(`覆盖来自范围 v${String(item.scopeVersion)}，当前范围 v${String(input.case.scopeVersion)}`);
     }
+    const dependencyReasons: string[] = [];
+    for (const [ids, roles] of [
+      [item.evidenceIds, [FACTUAL_SUPPORT_ROLE, IDENTITY_SUPPORT_ROLE]],
+      [item.counterevidenceIds, [FACTUAL_COUNTEREVIDENCE_ROLE, IDENTITY_COUNTEREVIDENCE_ROLE]]
+    ] as const) {
+      for (const id of ids) {
+        const problem = refProblem(id, roles);
+        if (problem) dependencyReasons.push(problem);
+        const evidence = known.get(id);
+        if (evidence && (evidence.caseId !== item.caseId || evidence.accountId !== item.locator.accountId)) {
+          dependencyReasons.push(`${id} 不属于该账号的覆盖记录`);
+        }
+      }
+    }
     return {
       ...item,
       scopeValidity: reasons.length > 0 ? 'review' : 'valid',
-      scopeReviewReason: reasons.length > 0 ? reasons.join('；') : null
+      scopeReviewReason: reasons.length > 0 ? reasons.join('；') : null,
+      dependencyValidity: dependencyReasons.length > 0 ? 'review' : 'valid',
+      dependencyReviewReason: dependencyReasons.length > 0 ? dependencyReasons.join('；') : null
     };
   });
   return {

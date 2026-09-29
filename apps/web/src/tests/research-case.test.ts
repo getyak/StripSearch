@@ -31,6 +31,7 @@ import {
   ScopeBypassError,
   StaleScopeError,
   asScopeVersion,
+  buildCaseReportView,
   legacyNoAuthorizationProvenance,
   taskRefKey
 } from '../shared/research-case.js';
@@ -1269,5 +1270,53 @@ test('caller-supplied identifiers remain data in Markdown exports', (t) => {
   assert.ok(!markdown.includes('[link](javascript:alert)'));
   for (const prefix of ['case', 'person', 'account', 'evidence', 'claim']) {
     assert.ok(markdown.includes(`${prefix} ## FORGED &lt;strong&gt;FALSE&lt;/strong&gt;`));
+  }
+});
+
+
+test('coverage marks withdrawn support and counterevidence independently of scope validity', (t) => {
+  for (const role of ['factual_support', 'identity_support', 'factual_counterevidence', 'identity_counterevidence'] as const) {
+    const { db, store } = memoryStore();
+    t.after(() => db.close());
+    const record = newCase(store);
+    const account = store.cases.addAccount(ctx(record, 'new'), draft());
+    const context = ctx(record, account.accountId);
+    const source = store.cases.recordSourceRevision(context, sourceDraft());
+    const evidence = store.cases.addEvidence(context, {
+      evidenceId: 'E-DEPENDENCY', sourceId: source.sourceId, sourceRevision: source.sourceRevision,
+      role, quote: 'Synthetic dependency', locator: null, provenance: PROVENANCE
+    });
+    const counter = role.endsWith('counterevidence');
+    const item = store.cases.recordItemCoverage(context, {
+      locator: { accountId: account.accountId, sourceId: source.sourceId, sourceRevision: source.sourceRevision },
+      taskRef: { kind: 'question_matrix', slot: 'work' }, status: counter ? 'conflicting' : 'evidence_found',
+      evidenceIds: counter ? [] : [evidence.evidenceId], counterevidenceIds: counter ? [evidence.evidenceId] : [], note: null
+    });
+    const history = store.cases.listItemCoverageHistory(OWNER, record.caseId, item.itemId);
+    const before = store.cases.reportView(OWNER, record.caseId);
+    assert.equal(before.coverage[0]?.dependencyValidity, 'valid');
+    for (const fault of ['missing', 'polarity', 'foreign'] as const) {
+      const input = JSON.parse(JSON.stringify(before)) as CaseReportView;
+      if (fault === 'missing') input.evidence = [];
+      if (fault === 'polarity') input.evidence[0]!.role = counter ? 'factual_support' : 'factual_counterevidence';
+      if (fault === 'foreign') input.evidence[0]!.accountId = 'foreign-account';
+      const marked = buildCaseReportView(input).coverage[0]!;
+      assert.equal(marked.scopeValidity, 'valid');
+      assert.equal(marked.dependencyValidity, 'review', `${role}/${fault}`);
+    }
+    store.cases.revokeEvidence(context, evidence.evidenceId);
+    const view = store.cases.reportView(OWNER, record.caseId);
+    const coverage = view.coverage[0]!;
+    assert.equal(coverage.scopeValidity, 'valid');
+    assert.equal(coverage.dependencyValidity, 'review', role);
+    assert.match(coverage.dependencyReviewReason ?? '', /E-DEPENDENCY 已撤回/);
+    assert.equal(coverage.status, item.status);
+    assert.deepEqual(store.cases.listItemCoverageHistory(OWNER, record.caseId, item.itemId), history);
+    const json = JSON.parse(renderCaseJson(view)) as CaseReportView;
+    assert.equal(json.coverage[0]?.dependencyValidity, 'review');
+    const line = renderCaseMarkdown(view).split('\n').find((value) => value.includes('来源 ') && value.includes('范围 v1'))!;
+    assert.match(line, /证据待复核/);
+    assert.match(line, /E-DEPENDENCY 已撤回/);
+    assert.match(line, counter ? /反证 \[E-DEPENDENCY\]/ : /支持 \[E-DEPENDENCY\]/);
   }
 });

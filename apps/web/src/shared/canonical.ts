@@ -383,9 +383,12 @@ export function renderCaseMarkdown(view: CaseReportView): string {
         item.scopeValidity === 'review'
           ? ` **[待复核 · ${escapeInline(item.scopeReviewReason ?? '')}]**`
           : '';
+      const dependencyMarker = item.dependencyValidity === 'review'
+        ? ` **[证据待复核 · ${escapeInline(item.dependencyReviewReason ?? '')}]**`
+        : '';
       const refs = claimRefs(item.evidenceIds, item.counterevidenceIds);
       lines.push(
-        `- ${escapeInline(item.itemId)} · ${escapeInline(taskRefLabel(item.taskRef))} · ${COVERAGE_STATUS_LABELS[item.status]} · 账号 ${escapeInline(item.locator.accountId)} · 来源 ${escapeInline(item.locator.sourceId)} rev${item.locator.sourceRevision} · 范围 v${String(item.scopeVersion)}${staleMarker}${refs ? ` ${refs}` : ''}`
+        `- ${escapeInline(item.itemId)} · ${escapeInline(taskRefLabel(item.taskRef))} · ${COVERAGE_STATUS_LABELS[item.status]} · 账号 ${escapeInline(item.locator.accountId)} · 来源 ${escapeInline(item.locator.sourceId)} rev${item.locator.sourceRevision} · 范围 v${String(item.scopeVersion)}${staleMarker}${dependencyMarker}${refs ? ` ${refs}` : ''}`
       );
       if (item.note) lines.push(`  - 备注：${escapeInline(item.note)}`);
     }

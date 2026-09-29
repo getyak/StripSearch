@@ -34,7 +34,7 @@
 
 ## 逐帖覆盖记录（ItemCoverage）
 
-覆盖按**逐内容定位**存储：`CoverageLocator` = accountId + 稳定 sourceId + sourceRevision，唯一键为（locator + taskRef）。同一案例的两个账号、同一账号的两篇内容、同一内容的两个 sourceRevision 永不共用一条记录，跨账号数据不混用。`recordSourceRevision` 即可建立定位，所以无证据的 `unseen` 也能落库；显式 itemId 必须匹配完整的绑定身份（账号/内容/revision/taskRef），重新绑定被拒绝且事务不改任何记录。每次写入追加不可变 revision：旧范围（scopeVersion）的覆盖保留为历史来源而非被静默覆盖；导出逐项标注自身范围版本，旧范围记录标“待复核”，页尾当前版本不替代项版本。`taskRefKey` 对任意合法字符串单射（research_task 用长度前缀元组编码，question_matrix 保留可读形式）。完成判定、body/media/评论执行与跨批次聚合留给 GET-60/95。
+覆盖按**逐内容定位**存储：`CoverageLocator` = accountId + 稳定 sourceId + sourceRevision，唯一键为（locator + taskRef）。同一案例的两个账号、同一账号的两篇内容、同一内容的两个 sourceRevision 永不共用一条记录，跨账号数据不混用。`recordSourceRevision` 即可建立定位，所以无证据的 `unseen` 也能落库；显式 itemId 必须匹配完整的绑定身份（账号/内容/revision/taskRef），重新绑定被拒绝且事务不改任何记录。每次写入追加不可变 revision：旧范围（scopeVersion）的覆盖保留为历史来源而非被静默覆盖；导出逐项标注自身范围版本，旧范围记录标“待复核”，页尾当前版本不替代项版本。`taskRefKey` 对任意合法字符串单射（research_task 用长度前缀元组编码，question_matrix 保留可读形式）。覆盖视图分别保存范围新鲜度（`scopeValidity`）与证据依赖有效性（`dependencyValidity`）：支持或反证撤回、缺失、角色不符或属于其他账号时，JSON/Markdown 都标记证据待复核，原覆盖状态和历史修订保持不变。完成判定、body/media/评论执行与跨批次聚合留给 GET-60/95。
 
 ## 遗留数据
 
