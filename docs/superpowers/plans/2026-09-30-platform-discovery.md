@@ -64,10 +64,10 @@
 - `mergePublicRules(imports: PublicRuleImport[]): PublicRuleUnion` produces platform/instance/template union with all source refs; conflicting detection predicates remain separate.
 - `PublicDiscoveryRule` includes stable ruleId, platform/instance/accountKind, allowed HTTPS request template, profile template, supported detection predicate, rate bound and source refs. It is data; never arbitrary JS or unbounded regex.
 
-- [ ] **1. Add tests:** synthetic Maigret and WMN inputs with overlapping request, different predicates, duplicate names across domains, unsupported request method/template, disabled rules, malicious regex/code, missing license and malformed bytes. Assert independent counts reconcile raw=loaded+excluded and both provenance refs survive overlap.
-- [ ] **2. Run:** `node --import tsx --test src/tests/public-rules.test.ts`; confirm meaningful red state.
-- [ ] **3. Implement importer and one explicit maintenance import:** retrieve full official source datasets, freeze commit/hash, check fixed-version licenses, preserve MIT/CC BY-SA attribution and modification notices. Incorporate entire admissible union into new catalog version; list all exclusions instead of replacing the dataset with samples. Maintenance networking is separate from offline checks and never fetches人物 fixture pages.
-- [ ] **4. Verify:** offline parser tests plus catalog tests; compare manifest counts against the fixed source files through an independent JSON count, check license/attribution and reproducible hashes. Build reads normalized data without any startup download.
+- [x] **1. Add tests:** synthetic Maigret and WMN inputs with overlapping request, different predicates, duplicate names across domains, unsupported request method/template, disabled rules, malicious regex/code, missing license and malformed bytes. Assert independent counts reconcile raw=loaded+excluded and both provenance refs survive overlap.
+- [x] **2. Run:** `node --import tsx --test src/tests/public-rules.test.ts`; confirm meaningful red state.
+- [x] **3. Implement importer and one explicit maintenance import:** retrieve full official source datasets, freeze commit/hash, check fixed-version licenses, preserve MIT/CC BY-SA attribution and modification notices. Incorporate entire admissible union into new catalog version; list all exclusions instead of replacing the dataset with samples. Maintenance networking is separate from offline checks and never fetches人物 fixture pages.
+- [x] **4. Verify:** offline parser tests plus catalog tests; compare manifest counts against the fixed source files through an independent JSON count, check license/attribution and reproducible hashes. Build reads normalized data without any startup download.
 - [ ] **5. Commit:** `feat(discovery): import versioned public account rules (GET-91)`. GET-91 remains open until Task 3 execution acceptance also passes.
 
 ## Task 3: 受控规则执行和请求复用（GET-91）
@@ -80,10 +80,10 @@
 - `executeDiscoveryRequest(request: PlannedDiscoveryRequest, context: DiscoveryRequestContext): Promise<DiscoveryRequestOutcome>` accepts signal, bounded transport, authority check, timeout/bytes/rate/cache/receipt ports. No model-supplied key/budget/authority.
 - `DiscoveryRequestOutcome` retains original response receipt and observation time; a shared response can feed multiple predicates without another request.
 
-- [ ] **1. Add tests:** one response for two rules; present/missing markers; soft 404, generic placeholder and CAPTCHA never candidates/no-match; 429 Retry-After, timeout, byte cap, cancellation, unsupported URL, private IPv4/IPv6 and DNS-change defense; cached response retains old observedAt and zero new provider requests.
-- [ ] **2. Run:** `node --import tsx --test src/tests/discovery-rule-executor.test.ts`; ensure no real fetch/DNS in tests.
-- [ ] **3. Implement:** approved public HTTPS requests, reject unsafe URL/addresses and unauthorized redirects; literal/restricted predicates only. Unknown-host rate defaults to serial, configured per-origin bound and global existing discovery limits both apply. Supply pure fake clock/transport hooks for tests. Persistent reuse/unknown recovery handled by Task 5 ports.
-- [ ] **4. Verify:** rule-executor, public-rules, existing discovery-adapters/regressions tests, typecheck/build. Verify every paid/unknown request outcome has a receipt; unsupported/authority refusal dispatches zero requests. Do not promote rule documentation to live verification.
+- [x] **1. Add tests:** one response for two rules; present/missing markers; soft 404, generic placeholder and CAPTCHA never candidates/no-match; 429 Retry-After, timeout, byte cap, cancellation, unsupported URL, private IPv4/IPv6 and DNS-change defense; cached response retains old observedAt and zero new provider requests.
+- [x] **2. Run:** `node --import tsx --test src/tests/discovery-rule-executor.test.ts`; ensure no real fetch/DNS in tests.
+- [x] **3. Implement:** approved public HTTPS requests, reject unsafe URL/addresses and unauthorized redirects; literal/restricted predicates only. Unknown-host rate defaults to serial, configured per-origin bound and global existing discovery limits both apply. Supply pure fake clock/transport hooks for tests. Persistent reuse/unknown recovery handled by Task 5 ports.
+- [x] **4. Verify:** rule-executor, public-rules, existing discovery-adapters/regressions tests, typecheck/build. Verify every paid/unknown request outcome has a receipt; unsupported/authority refusal dispatches zero requests. Do not promote rule documentation to live verification.
 - [ ] **5. Commit:** `feat(discovery): execute public rules with bounded requests (GET-91)`; independently review and deliver GET-91 after full import and executor acceptance, retaining any unmet live claims as unverified.
 
 ## Task 4: 路线、请求键与账号键（GET-92）
@@ -146,4 +146,4 @@
 
 spec §1–4 → Task 1；§5 → Task 2/3；§6 → Task 4；§7 → Task 5/6；§8 → Task 6；§9 → all verification steps and Delivery Gate。五个 Review Focus 已分配明确测试。模块名/签名一致，GET-62 合并和 Figwright grounding 保留为真实执行条件。
 
-2026-09-30：规范与计划均已获用户批准。Task 1 已实施；typecheck、build、design check 与完整离线 Web 测试（414/414，无跳过）通过，独立审查的源码问题已修复并复核。Git/Docker 公共数据白名单已补齐，当前进入最终提交审查与 PR/CI 交付；GET-90 尚未完成合并和合并后验收，保持进行中。Task 2–6 尚未实施，GET-62 已合并契约和 Figwright 目标文件连接仍是后续明确依赖。
+2026-09-30：规范与计划均已获用户批准。Task 1 已实施并经 GET-90 交付（PR20 合并、8 CI + 合并后 37/37、GET-90 Done）。Task 2 与 Task 3（GET-91）已在同一隔离 worktree 顺序实施完成：固定字节全量导入（Maigret 6206 / WhatsMyName 717，raw=loaded+excluded 逐行回执）、组合目录身份与有界分页 API、独立受限执行器（未接线）；实现完成后按独立审查确认的 P1/P2 做了集中修复（marker 字节保真、组合身份/游标、模板末尾斜杠/fragment、严格规则包加载器、逐路线溯源、IANA 地址策略、deadline/abort 覆盖重定向 DNS、权威/评估/队列/TTL/回执语义），并保留回归证据（修复前 RED、修复后 GREEN）。当前状态：GET-91 **实现完成、待交付门禁**（父级独立审查/CI/合并/Done 归父级）；各任务 step 5 的 commit 由父级执行。Task 4–6 尚未实施；GET-62 已合并契约仍是 GET-63 的依赖。Figwright 设计副本及交互状态已单独准备，尚未接入生产 Web。

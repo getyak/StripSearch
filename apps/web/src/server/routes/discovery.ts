@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { LIMITS } from '../../shared/limits.js';
 import type {
   DiscoveryAuthorization,
@@ -68,6 +68,111 @@ function optionalText(value: unknown, max: number): string | null {
   return trimmed.slice(0, max);
 }
 
+/* ------------------------------------------------------------------ */
+/* Large-catalog platform detail paging                                */
+/*                                                                     */
+/* The authoritative snapshot and summary stay whole; platform DETAIL   */
+/* pages are bounded (max 100) with an explicit total and an opaque     */
+/* registry-bound cursor. The cursor is a REAL server-bound token: an   */
+/* HMAC over (full composed registry identity, offset) keyed by a       */
+/* server-owned secret (process-scoped; callers cannot forge payloads), */
+/* so tampered cursors are `invalid_cursor` and cursors from another    */
+/* registry/bundle identity are `stale_cursor`. Because the key is      */
+/* process-scoped, restarts/multi-instance deployments intentionally    */
+/* invalidate old cursors (clients resume from the first page).         */
+
+const CATALOG_CURSOR_TAG = 'get91-catalog-cursor/v2';
+const CATALOG_PAGE_MAX = 100;
+const CATALOG_PAGE_DEFAULT = 100;
+const CATALOG_CURSOR_MAX_LENGTH = 512;
+const CATALOG_LIMIT_MAX_LENGTH = 4;
+
+const CATALOG_CURSOR_KEY: Buffer = randomBytes(32);
+
+interface CatalogIdentity {
+  registryVersion: string;
+  contentHash: string;
+}
+
+function cursorMac(payload: string): string {
+  return createHmac('sha256', CATALOG_CURSOR_KEY).update(`${CATALOG_CURSOR_TAG}\n${payload}`, 'utf8').digest('base64url');
+}
+
+export function encodeCatalogCursor(catalog: CatalogIdentity, offset: number): string {
+  const payload = JSON.stringify({ v: catalog.registryVersion, h: catalog.contentHash, o: offset });
+  return Buffer.from(JSON.stringify({ p: payload, m: cursorMac(payload) }), 'utf8').toString('base64url');
+}
+
+export function decodeCatalogCursor(cursor: string, catalog: CatalogIdentity, total: number): number {
+  const invalid = (): never => {
+    throw new HttpError(400, 'invalid_cursor', '目录分页游标无效，请从第一页重新读取。');
+  };
+  if (cursor.length === 0 || cursor.length > CATALOG_CURSOR_MAX_LENGTH) return invalid();
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+  } catch {
+    return invalid();
+  }
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return invalid();
+  const { p, m } = envelope as { p?: unknown; m?: unknown };
+  if (typeof p !== 'string' || typeof m !== 'string' || p.length > 1024) return invalid();
+  // Constant-time-ish comparison of the server-bound MAC.
+  const expected = cursorMac(p);
+  if (expected.length !== m.length) return invalid();
+  let diff = 0;
+  for (let index = 0; index < expected.length; index += 1) diff |= expected.charCodeAt(index) ^ m.charCodeAt(index);
+  if (diff !== 0) return invalid();
+  let payload: unknown;
+  try {
+    payload = JSON.parse(p);
+  } catch {
+    return invalid();
+  }
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return invalid();
+  const { v, h, o } = payload as { v?: unknown; h?: unknown; o?: unknown };
+  if (typeof v !== 'string' || typeof h !== 'string') return invalid();
+  if (typeof o !== 'number' || !Number.isInteger(o) || o < 0) return invalid();
+  if (o >= total) return invalid();
+  if (v !== catalog.registryVersion || h !== catalog.contentHash) {
+    throw new HttpError(400, 'stale_cursor', '目录分页游标属于旧版目录快照（含公共规则包身份），请从第一页重新读取。');
+  }
+  return o;
+}
+
+/** Query values must be single bounded strings — arrays/objects are refused. */
+function singleQueryString(value: unknown, field: string, maxLength: number): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'string') {
+    throw new HttpError(400, field === 'platformLimit' ? 'invalid_limit' : 'invalid_cursor', `${field} 必须是单个字符串。`);
+  }
+  if (value.length === 0 || value.length > maxLength) {
+    throw new HttpError(400, field === 'platformLimit' ? 'invalid_limit' : 'invalid_cursor', `${field} 取值非法。`);
+  }
+  return value;
+}
+
+function catalogPageWindow(
+  req: Request,
+  catalog: PlatformCatalogSnapshot
+): { limit: number; offset: number } {
+  const rawLimit = singleQueryString(req.query.platformLimit, 'platformLimit', CATALOG_LIMIT_MAX_LENGTH);
+  let limit = CATALOG_PAGE_DEFAULT;
+  if (rawLimit !== null) {
+    if (!/^[0-9]{1,4}$/.test(rawLimit)) {
+      throw new HttpError(400, 'invalid_limit', 'platformLimit 必须是十进制正整数。');
+    }
+    const parsed = Number(rawLimit);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new HttpError(400, 'invalid_limit', 'platformLimit 必须是正整数。');
+    }
+    limit = Math.min(parsed, CATALOG_PAGE_MAX);
+  }
+  const rawCursor = singleQueryString(req.query.platformCursor, 'platformCursor', CATALOG_CURSOR_MAX_LENGTH);
+  const offset = rawCursor !== null ? decodeCatalogCursor(rawCursor, catalog, catalog.entries.length) : 0;
+  return { limit, offset };
+}
+
 function taskSummary(task: DiscoveryTaskRecord): Record<string, unknown> {
   return {
     taskId: task.id,
@@ -99,9 +204,12 @@ export function registerDiscoveryRoutes(router: Router, deps: DiscoveryRouteDeps
    * when a catalog is wired its versioned snapshot and explicit gaps extend
    * the response without changing old caller behavior.
    */
-  router.get('/discovery/registry', (_req: Request, res: Response) => {
+  router.get('/discovery/registry', (req: Request, res: Response) => {
     const body: Record<string, unknown> = { registry, summary: registrySummary(registry) };
     if (catalog) {
+      const { limit, offset } = catalogPageWindow(req, catalog);
+      const page = catalog.entries.slice(offset, offset + limit);
+      const nextOffset = offset + page.length;
       body.catalog = {
         schemaVersion: catalog.schemaVersion,
         registryVersion: catalog.registryVersion,
@@ -111,7 +219,11 @@ export function registerDiscoveryRoutes(router: Router, deps: DiscoveryRouteDeps
         // Safe public provenance only: versions/hashes/licenses/state of the
         // checked sources. No credentials, owner data or local paths.
         sources: catalog.sources,
-        platforms: catalog.entries.map((entry) => ({
+        // Bounded platform detail page: explicit total + registry-bound
+        // cursor. The first page is NEVER a full-coverage claim.
+        platformsTotal: catalog.entries.length,
+        platformsNextCursor: nextOffset < catalog.entries.length ? encodeCatalogCursor(catalog, nextOffset) : null,
+        platforms: page.map((entry) => ({
           platformId: entry.platformId,
           name: entry.name,
           cohort: entry.cohort,
@@ -177,7 +289,8 @@ export function registerDiscoveryRoutes(router: Router, deps: DiscoveryRouteDeps
             requires: route.requires,
             availability: route.availability,
             reason: route.reason,
-            sourceRefs: route.sourceRefs
+            sourceRefs: route.sourceRefs,
+            ruleIds: route.ruleIds ?? []
           })),
           gaps: platformGaps(entry)
         }))

@@ -1,12 +1,14 @@
 # 版本化平台目录（GET-90）
 
-状态：2026-09-30 已实施目录契约、初始数据与三个投影。本文描述已落地的数据与接口，不代表任何平台已 live 验证，也不启用或导入任何发现规则。
+状态：2026-09-30 已实施目录契约、初始数据与三个投影（GET-90），并由 GET-91 导入公共规则并集组成组合快照。本文描述已落地的数据与接口；**不代表任何平台已 live 验证**。原始 curated 目录（`catalog.json`）本身不内嵌发现规则——规则在独立的 `data/platforms/public-rules/` 归一化包（GET-91 已按固定字节全量导入，见 [`public-account-rules.md`](public-account-rules.md)），加载器按需组合。
 
 数据：[`apps/web/data/platforms/catalog.json`](../apps/web/data/platforms/catalog.json)（目录）与 [`manifest.json`](../apps/web/data/platforms/manifest.json)（独立核对清单）。代码：共享契约 [`platform-catalog.ts`](../apps/web/src/shared/platform-catalog.ts)、加载器与投影 [`catalog.ts`](../apps/web/src/server/platforms/catalog.ts)、维护生成器 [`generate-platform-catalog.mjs`](../apps/web/scripts/generate-platform-catalog.mjs)。测试全部离线：[`platform-catalog.test.ts`](../apps/web/src/tests/platform-catalog.test.ts)。
 
 ## 目录内容
 
-一份快照（`PlatformCatalogSnapshot`）带 `schemaVersion`、`registryVersion`（`2026-09-30.1`）、内容 SHA-256（`contentHash`）、生成时间、来源清单与 entries。`manifest.json` 另记 `catalog.json` 的文件字节 hash，加载器两级都校验：内容被改动会以 `content_hash_mismatch` 或 `file_hash_mismatch` 拒绝加载，不会静默修复。
+一份快照（`PlatformCatalogSnapshot`）带 `schemaVersion`、`registryVersion`、内容 SHA-256（`contentHash`）、生成时间、来源清单、entries 与 `mode`。`manifest.json` 另记 `catalog.json` 的文件字节 hash 并声明 `requiresPublicRuleBundle`，加载器两级都校验：内容被改动会以 `content_hash_mismatch` 或 `file_hash_mismatch` 拒绝加载，不会静默修复。
+
+身份分两层（GET-91）：curated 目录保持 `2026-09-30.1` / 原 `contentHash`；携带公共规则包的**组合快照**（`mode: 'public_rule_union'`）另有确定性全量身份 `registryVersion = 2026-09-30.1+pr.<hash12>`、`contentHash = sha256(curated hash + curated 版本 + 规则包 manifest hash + 计数)`，不同规则包/排除/许可 artifact 绝不共用身份（旧 cursor 因此失效）。curated-only 夹具必须显式声明 `requiresPublicRuleBundle: false`（`mode: 'curated_only'`，身份即原 hash）；生产数据缺必需规则包确定性失败，不回退。
 
 | 群组 | 数量 | 说明 |
 | --- | --- | --- |
@@ -15,7 +17,7 @@
 | 个人网站 | 1 | 作为原作/自链入口登记（`homepage_url` 输入），不与出版账号或自然人合并 |
 | legacy_only | 3 | DEV Community、npm、PyPI：旧探测规则基线保留，防止 legacy 投影丢失规则；不在上表 50 平台清单内 |
 
-平台数量与路线数量分开计数（当前 54 平台 / 91 路线 / 8 来源 / 378 条能力记录）；微信搜一搜只登记为微信条目上的辅助路线（`wechat_search`），不算第 21 个内容平台。
+平台数量与路线数量分开计数。**原始 curated 目录（GET-90 冻结）**：54 平台 / 91 路线 / 8 来源 / 378 条能力记录；**权威组合快照（GET-91，含公共规则并集）**：4421 entries（54 curated + 4367 生成）/ 4502 路线 / 30947 条能力记录，逐维证据全部 documented_only、价格 null（null ≠ 免费）。微信搜一搜只登记为微信条目上的辅助路线（`wechat_search`），不算第 21 个内容平台。
 
 ## 七项能力、四个独立维度、逐维证据
 
@@ -33,7 +35,7 @@
 
 **访问与费用属于具体操作/路线**：同一平台不同维度可以不同（Reddit 的匿名单页 listing 维度是 `public`，TikHub 游标分页是 `credentials_required` + TikHub 价格依据）；没有已建立操作的维度记 `unknown` + 显式依据。所有价格都是显式 `null` + 公开依据（TikHub 公开价格目录按端点列 `endpoint_cost`，未标币种/计量单位，未选定端点；目录响应的 request_id/time 不是费用回执）；**null 不等于免费**。
 
-## 来源清单（元数据冻结，未导入）
+## 来源清单（GET-90 冻结元数据表，GET-91 已验证全量导入见下）
 
 | 来源 | 版本/哈希 | 许可 | 状态 |
 | --- | --- | --- | --- |
@@ -42,7 +44,7 @@
 | TikHub OpenAPI | V5.3.2，sha256 `b97eb0f6…`，抓取 2026-09-30T05:29:49Z | — | `frozen`（仅元数据） |
 | TikHub 价格元数据 | sha256 `859e6687…`，抓取 2026-09-30T05:29:52Z | — | `frozen`（仅元数据） |
 
-两个公共长尾来源只冻结元数据（版本/hash/抓取/许可），**没有导入、没有启用任何规则**；`counts.raw/loaded/excluded` 保持 `null`，来源数据集的站点记录数（Maigret 6206、WhatsMyName 717）只是来源记录数，不是导入数。规则编译、完整导入与排除计数属 GET-91；导入时保留 MIT / CC BY-SA 4.0 归属与修改说明。来源字节不入库，本仓库不复制第三方文档或数据全文。
+两个公共长尾来源已在 GET-91 以固定字节完整导入（Maigret 6206 = 3952 + 2254、WhatsMyName 717 = 651 + 66，逐行载入/排除回执见 [`public-account-rules.md`](public-account-rules.md) 与 `data/platforms/public-rules/`）；`catalog.json` 内的来源记录仍保留 GET-90 冻结的元数据事实（`counts` 为 null、`metadata_only_not_imported`），组合快照把验证过的导入计数/版本合入 sources（`imported_pinned_bytes`，不重复 sourceId）。来源字节不入库，本仓库只提交归一化规则、排除回执（rowId/hash/reason）、归属/许可/修改说明与 manifest，不复制第三方全文。衍生数据集许可（MIT / CC BY-SA 4.0）与代码许可分开，见 `data/platforms/public-rules/LICENSE-DATASETS.md`。
 
 ## 三个投影（同版携带）
 
@@ -55,14 +57,14 @@
 
 ## 加载、打包与运行
 
-`loadPlatformCatalog(dataDir)` 校验文件 hash、内容 hash、重复 ID、冲突别名（别名不得与任何 platformId 或其他别名重复）、来源引用与完整形状（七维度齐全、枚举合法、价格 null/正数、documented 必有逐维证据、路由非空且带理由）。快照深冻结并深拷贝：后续改动输入不会改变已冻结快照；版本/hash 变化只影响新 round，旧 snapshot 不变。
+`loadPlatformCatalog(dataDir)` 校验文件 hash、内容 hash、重复 ID、冲突别名（别名不得与任何 platformId 或其他别名重复）、来源引用与完整形状（七维度齐全、枚举合法、价格 null/正数、documented 必有逐维证据、路由非空且带理由）；携带 `public-rules/` 时还严格校验规则包（每文件 hash/大小、逐来源 LICENSE/NOTICE 必需且 licenseHash 与字节一致、检测谓词/标记/布尔/速率/头/规则引用全形状、空正向标记或缺 bounded 标志即拒）。快照深冻结并深拷贝：后续改动输入不会改变已冻结快照；版本/hash 变化只影响新 round，旧 snapshot 不变。
 
-生产数据路径是模块相对且显式的：编译产物读 `<dist>/data/platforms`（`npm run build:data` 只把 `data/platforms` 复制进 `dist/data/platforms`，先用 lstat 拒绝源码子树与生成目录祖先中的符号链接/非普通条目（拒绝时源/旁路/旧产物一律不动），再把生成的公共命名空间 `dist`、`dist/data`、bundle 目录归一化为 755/644，保证非属主可读；`data/` 同时是本地 SQLite/用户研究存储位置，**绝不整体复制**，打包回归用合成 canary 验证旁路数据不进 dist、源目录权限不变）；源码运行读 `apps/web/data/platforms`。不做祖先目录回退：production bundle 缺失时即使源码目录存在也确定性抛 `data_not_found`（编译产物回归覆盖两种情况）。因此编译产物在任意 cwd（含 Docker runtime，经现有 dist 复制打包）都读自带数据，不依赖仓库目录。测试注入构造器/加载结果，全部离线。
+生产数据路径是模块相对且显式的：编译产物读 `<dist>/data/platforms`（`npm run build:data` 只把 `data/platforms`（含 `public-rules/` 子树）复制进 `dist/data/platforms`，先用 lstat 拒绝源码子树与生成目录祖先中的符号链接/非普通条目，缺失必需文件（目录/manifest/规则/回执/许可/声明）拒绝打包，复制前还逐文件核对规则包归一化 hash（拒绝时源/旁路/旧产物一律不动），再把生成的公共命名空间归一化为 755/644；`data/` 同时是本地 SQLite/用户研究存储位置，**绝不整体复制**）；源码运行读 `apps/web/data/platforms`。不做祖先目录回退：production bundle 缺失时即使源码目录存在也确定性抛 `data_not_found` / `public_rules_missing`。编译产物在任意 cwd 都读自带数据；独立回归用拷贝到仓库外的 production build 加载规则包并验 hash。
 
-`GET /api/discovery/registry` 在保留原有 `registry` / `summary` 字段与行为的前提下，附加 `catalog`：版本、hash、汇总、来源清单（版本/hash/许可/状态等公开溯源）、逐平台能力（含 docUrls、endpoints、sourceLocator、sourceRefs、verificationRef、评论/分页详情、费用依据与条件）、路线与缺口。缺口显式列出：无 adapter 能力、未 live 验证能力、费用未知（null ≠ 免费）、访问受限能力。不注入目录时响应保持旧形状；不暴露任何凭据或 owner 访问上下文。
+`GET /api/discovery/registry` 在保留原有 `registry` / `summary` 字段与行为的前提下，附加 `catalog`：版本、hash、汇总、来源清单（版本/hash/许可/状态等公开溯源）、**有界平台详情分页**（默认/最大 100）、显式 `platformsTotal` 与 `platformsNextCursor`（服务端 HMAC 绑定全组合身份+offset 的游标：篡改 → `invalid_cursor`，跨注册表/规则包身份 → `stale_cursor`，数组/对象/空/非十进制/超长 query 一律 400）、逐平台能力（含 docUrls、endpoints、sourceLocator、sourceRefs、ruleIds、verificationRef、评论/分页详情、费用依据与条件）、路线与缺口（随分页，不藏全局大数组）。第一页计数永不冒充全量覆盖；不注入目录时响应保持旧形状；不暴露任何凭据或 owner 访问上下文。
 
 ## 未做与边界
 
-- 没有任何真实端点请求、live 验证或费用回执；文档核对不提升验证等级，通用文档链接不构成能力证据。
-- 路线是登记（operation、adapterId、端点、所需条件、不可执行原因），GET-92 才做规划与受控执行；站点定向搜索、自链抽取、微信搜一搜均未接入。
+- 没有任何真实端点请求、live 验证或费用回执；文档核对不提升验证等级，通用文档链接不构成能力证据。公共规则条目的能力全部 documented_only + 未接线（独立受限执行器离线可用但未进 legacy/model 运行时），没有 GET-59 `supported`。
+- 路线是登记（operation、adapterId、端点、所需条件、不可执行原因），GET-92 才做规划与受控执行；站点定向搜索、自链抽取、微信搜一搜均未接入。公共规则路线带 ruleIds（逐路线 sourceRefs 只列本请求规则的来源），执行语义与边界见 [`public-account-rules.md`](public-account-rules.md)。
 - Telegram 频道/个人账号、Threads 无效游标、出版账号与自然人的边界在条目 notes 与 accountKinds 中保留；缺失可信依据一律记 unknown，不补造数值。

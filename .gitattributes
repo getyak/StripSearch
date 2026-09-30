@@ -1,0 +1,2 @@
+apps/web/data/platforms/public-rules/** -text
+apps/web/data/platforms/public-rules/whatsmyname-LICENSE.txt whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

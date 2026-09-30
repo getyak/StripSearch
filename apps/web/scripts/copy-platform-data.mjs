@@ -24,7 +24,8 @@
  * Usage: `node scripts/copy-platform-data.mjs` (run by `npm run build:data`).
  */
 
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -73,11 +74,89 @@ function assertCleanSourceTree(dir, label) {
 // 1. Validate the SOURCE subtree first: no writes happen before this passes.
 assertRealDirectory(path.join(packageRoot, 'data'), 'source data ancestor');
 assertCleanSourceTree(sourceDir, 'source data');
-for (const name of ['catalog.json', 'manifest.json']) {
+const REQUIRED_FILES = [
+  'catalog.json',
+  'manifest.json',
+  // GET-91 normalized public rule bundle (rules, receipts, attribution).
+  'public-rules/manifest.json',
+  'public-rules/rules.json',
+  'public-rules/exclusions.json',
+  'public-rules/maigret-NOTICE.md',
+  'public-rules/maigret-LICENSE.txt',
+  'public-rules/whatsmyname-NOTICE.md',
+  'public-rules/whatsmyname-LICENSE.txt',
+  'public-rules/LICENSE-DATASETS.md'
+];
+const PUBLIC_RULE_FILES = REQUIRED_FILES.filter((name) => name.startsWith('public-rules/'));
+for (const name of REQUIRED_FILES) {
   const required = path.join(sourceDir, name);
   if (!existsSync(required) || !lstatSync(required).isFile()) {
     refuse(`required public catalog file is missing: ${name}`);
   }
+}
+
+// Normalized public rule hash verification: every file pinned by the rule
+// manifest must match its recorded byte hash before anything is copied.
+{
+  const manifestPath = path.join(sourceDir, 'public-rules', 'manifest.json');
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    refuse(`public-rules manifest is unreadable: ${error.message}`);
+  }
+  if (!manifest || !Array.isArray(manifest.files) || manifest.files.length === 0) {
+    refuse('public-rules manifest must pin its generated files');
+  }
+  const seenPaths = new Set();
+  for (const file of manifest.files) {
+    if (typeof file.path !== 'string' || file.path !== path.basename(file.path) || file.path.includes('..') || file.path.startsWith('/')) {
+      refuse(`public-rules manifest path must be a plain safe file name: ${String(file.path)}`);
+    }
+    if (!PUBLIC_RULE_FILES.includes(`public-rules/${file.path}`)) {
+      refuse(`public-rules manifest pins an unknown file: ${file.path}`);
+    }
+    if (seenPaths.has(file.path)) {
+      refuse(`public-rules manifest pins a duplicate file: ${file.path}`);
+    }
+    seenPaths.add(file.path);
+    const target = path.join(sourceDir, 'public-rules', file.path);
+    if (!existsSync(target) || !lstatSync(target).isFile()) {
+      refuse(`public-rules file pinned by the manifest is missing: ${file.path}`);
+    }
+    const bytes = readFileSync(target);
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    if (hash !== file.sha256 || bytes.byteLength !== file.bytes) {
+      refuse(`public-rules file failed normalized hash verification: ${file.path}`);
+    }
+  }
+}
+
+// Fixed public inventory: unknown source entries refuse the copy BEFORE any
+// mutation, so a mis-staged raw source/private file can never ship.
+const INVENTORY_FILES = [
+  'catalog.json',
+  'manifest.json',
+  ...PUBLIC_RULE_FILES
+];
+{
+  const allowed = new Set(INVENTORY_FILES);
+  const walk = (dir, prefix) => {
+    for (const name of readdirSync(dir)) {
+      const rel = prefix ? `${prefix}/${name}` : name;
+      const target = path.join(dir, name);
+      const info = lstatSync(target);
+      if (info.isDirectory()) {
+        if (!allowed.has(`${rel}/`) && !INVENTORY_FILES.some((file) => file.startsWith(`${rel}/`))) {
+          refuse(`unknown entry in the public source inventory: ${rel}/`);
+        }
+        walk(target, rel);
+      } else if (!allowed.has(rel)) {
+        refuse(`unknown entry in the public source inventory: ${rel}`);
+      }
+    }
+  };
+  walk(sourceDir, '');
 }
 
 // 2. Validate the generated public namespace: root/ancestors/target must be
@@ -92,10 +171,15 @@ for (const [target, label] of [[distRoot, 'dist root'], [distData, 'dist/data'],
   }
 }
 
-// 3. Only now touch the artifact.
+// 3. Only now touch the artifact: copy the FIXED public inventory only.
 rmSync(distTarget, { recursive: true, force: true });
 mkdirSync(distData, { recursive: true });
-cpSync(sourceDir, distTarget, { recursive: true });
+for (const name of INVENTORY_FILES) {
+  const from = path.join(sourceDir, name);
+  const to = path.join(distTarget, name);
+  mkdirSync(path.dirname(to), { recursive: true });
+  cpSync(from, to);
+}
 
 /**
  * Normalize ONLY the generated public namespace to 755/644 so a non-owner

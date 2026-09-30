@@ -44,6 +44,7 @@ import {
   toLegacyRegistry
 } from '../server/platforms/catalog.js';
 import { BUILTIN_PLATFORM_REGISTRY, registrySummary } from '../server/platforms/registry.js';
+import { decodeCatalogCursor, encodeCatalogCursor } from '../server/routes/discovery.js';
 import type { CapabilitySnapshot as Get59CapabilitySnapshot } from '../server/research/research-tool-dispatch.js';
 import { startTestServer } from './harness.js';
 
@@ -265,6 +266,9 @@ function writeCatalogDir(raw: Record<string, unknown>, manifestMutate?: (m: Reco
   const manifest: Record<string, unknown> = {
     schemaVersion: 'stripsearch/platform-catalog-manifest/v1',
     registryVersion: raw.registryVersion,
+    // Synthetic curated-only fixtures declare the absent bundle explicitly;
+    // shipped production data requires it.
+    requiresPublicRuleBundle: false,
     files: [{ path: 'catalog.json', sha256: fileHash }],
     counts: { platforms: (raw.entries as unknown[]).length }
   };
@@ -308,7 +312,83 @@ test('spec cohorts register 20 TikHub platforms, 30 alternatives, the personal w
   // The legacy probe registry keeps devto / npm / pypi rules; they are
   // registered separately instead of silently dropped from the projection.
   assert.equal(summary.cohorts.legacy_only, 3);
-  assert.equal(summary.platformCount, 54);
+  // GET-91 composes the full imported public-rule union on top of the curated
+  // catalog; the curated 54 stay exact and are asserted separately below.
+  assert.equal(
+    summary.cohorts.tikhub + summary.cohorts.alternative + summary.cohorts.personal_website + summary.cohorts.legacy_only,
+    54
+  );
+  assert.equal(summary.platformCount, 54 + summary.cohorts.public_rule);
+  assert.ok(summary.cohorts.public_rule > 4000, 'the full imported union is composed (no default-500 sample)');
+  assert.equal(summary.publicRuleSourceRows, 6923, 'pinned source rows: 6206 Maigret + 717 WhatsMyName');
+  assert.equal(summary.publicRuleCount + summary.publicRuleExcludedCount, summary.publicRuleSourceRows, 'raw = loaded + excluded');
+});
+
+test('shipped production data declares the required public-rule bundle and cursors die with composition changes', () => {
+  const manifest = JSON.parse(readFileSync(path.join(sourceDataDir, 'manifest.json'), 'utf8')) as {
+    requiresPublicRuleBundle?: unknown;
+  };
+  assert.equal(manifest.requiresPublicRuleBundle, true, 'the shipped manifest must require the bundle');
+
+  // Cursor binding follows the FULL composed identity: a cursor minted for
+  // one composition is refused by the next one (different bundle hash).
+  const composed = loadSourceCatalog();
+  const staleIdentity = { registryVersion: composed.registryVersion, contentHash: `sha256:${'a'.repeat(64)}` };
+  const cursor = encodeCatalogCursor(staleIdentity, 0);
+  assert.throws(
+    () => decodeCatalogCursor(cursor, composed, composed.entries.length),
+    (error: unknown) => (error as { code?: string }).code === 'stale_cursor',
+    'a cursor bound to another bundle identity must be refused'
+  );
+  const fresh = encodeCatalogCursor(composed, 3);
+  assert.equal(decodeCatalogCursor(fresh, composed, composed.entries.length), 3);
+});
+
+test('GET-91 composition preserves the curated 54 entries and the legacy 13 rules exactly', () => {
+  const composed = loadSourceCatalog();
+  const rawCatalog = JSON.parse(readFileSync(path.join(sourceDataDir, 'catalog.json'), 'utf8')) as { entries: unknown[] };
+  const snapshotFromJson = catalogSnapshotFromJson(
+    JSON.parse(readFileSync(path.join(sourceDataDir, 'catalog.json'), 'utf8'))
+  );
+  const curated = composed.entries.filter((entry) => entry.cohort !== 'public_rule');
+  assert.equal(curated.length, 54, 'the curated entries survive unchanged');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(curated)),
+    rawCatalog.entries,
+    'curated entries stay byte-equivalent to the frozen catalog data'
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(curated)),
+    JSON.parse(JSON.stringify(snapshotFromJson.entries)),
+    'composition never mutates curated entry shapes'
+  );
+  // The legacy projection is unaffected: 13 old rules, deep-equal.
+  const legacy = toLegacyRegistry(composed);
+  assert.equal(legacy.rules.length, 13);
+  assert.deepEqual(
+    legacy.rules,
+    toLegacyRegistry(snapshotFromJson).rules,
+    'legacy projection rules are byte-identical with or without the union'
+  );
+  assert.equal(legacy.version, composed.registryVersion, 'the legacy projection reports the full snapshot identity');
+  const builtinById = new Map(BUILTIN_PLATFORM_REGISTRY.rules.map((rule) => [rule.platformId, rule]));
+  for (const rule of legacy.rules) {
+    assert.deepEqual(rule, builtinById.get(rule.platformId), `legacy rule ${rule.platformId} must stay EXACT`);
+  }
+  assert.deepEqual(
+    legacy.rules.map((rule) => rule.platformId).sort(),
+    BUILTIN_PLATFORM_REGISTRY.rules.map((rule) => rule.platformId).sort(),
+    'the 13 legacy probe rules stay EXACT'
+  );
+  // Generated union entries never claim legacy rules, adapters or live proof.
+  for (const entry of composed.entries.filter((candidate) => candidate.cohort === 'public_rule')) {
+    assert.equal(entry.legacy, null);
+    for (const record of entry.capabilities) {
+      assert.notEqual(record.verification, 'live_verified');
+      assert.notEqual(record.integration, 'integrated');
+    }
+    for (const route of entry.routes) assert.ok((route.ruleIds ?? []).length > 0, 'routes link shared rule ids');
+  }
 });
 
 test('every catalog entry carries exactly the seven capability dimensions', () => {
@@ -390,17 +470,32 @@ test('public source manifests keep independently frozen versions, hashes and ret
     assert.equal(source.kind, 'public_rule_dataset');
     assert.equal(source.license, expected.license);
     assert.equal(source.licenseHash, expected.licenseHash);
-    assert.equal(source.upstreamState, 'metadata_only_not_imported');
-    assert.equal(source.importerVersion, null);
-    // Import counts stay null: the Task 2 compiler has not run. Source dataset
-    // record counts are NOT import counts and must not land in `counts`.
-    assert.deepEqual(source.counts, { raw: null, loaded: null, excluded: null });
-    const notes = source.notes.join(' ');
+    // The composed snapshot carries the ACTUAL import facts merged from the
+    // verified bundle; the frozen catalog.json source records stay the GET-90
+    // metadata-only facts (asserted below).
+    assert.equal(source.upstreamState, 'imported_pinned_bytes');
+    assert.equal(source.importerVersion, 'get91-public-rule-importer/1');
+    assert.equal(source.counts.raw, expected.sourceRecords, 'import counts equal the pinned source rows');
+    assert.equal(source.counts.raw, (source.counts.loaded ?? 0) + (source.counts.excluded ?? 0), 'raw = loaded + excluded');
+    assert.ok(!source.url?.includes('/Users/'), 'no local paths in public metadata');
+  }
+
+  // The shipped catalog.json source records keep the frozen metadata-only
+  // facts verbatim (never rewritten by the import).
+  const rawCatalog = JSON.parse(readFileSync(path.join(sourceDataDir, 'catalog.json'), 'utf8')) as {
+    sources: Array<{ sourceId: string; upstreamState: string; importerVersion: string | null; counts: { raw: number | null; loaded: number | null; excluded: number | null }; notes: string[]; url: string | null }>;
+  };
+  for (const raw of rawCatalog.sources.filter((source) => source.sourceId === 'maigret' || source.sourceId === 'whatsmyname')) {
+    const expected = EXPECTED_SOURCES[raw.sourceId as 'maigret' | 'whatsmyname'];
+    assert.equal(raw.upstreamState, 'metadata_only_not_imported');
+    assert.equal(raw.importerVersion, null);
+    assert.deepEqual(raw.counts, { raw: null, loaded: null, excluded: null });
+    const notes = raw.notes.join(' ');
     assert.match(notes, new RegExp(String(expected.sourceRecords)), 'source record count is recorded as source metadata');
     assert.match(notes, /不是导入数/, 'source record count must be labeled as not an import count');
     assert.match(notes, /未导入|没有导入/, 'not imported');
     assert.doesNotMatch(notes, /已启用|已导入|enabled/i, 'no enabled/imported claim');
-    assert.ok(!source.url?.includes('/Users/'), 'no local paths in public metadata');
+    assert.ok(!raw.url?.includes('/Users/'), 'no local paths in public metadata');
   }
 
   const pricing = byId.get('tikhub-endpoint-pricing')!;
@@ -1169,7 +1264,9 @@ test('GET /api/discovery/registry keeps old fields and adds the catalog gap surf
     catalog: {
       registryVersion: string;
       contentHash: string;
-      summary: { platformCount: number; routeCount: number; sourceCount: number };
+      platformsTotal: number;
+      platformsNextCursor: string | null;
+      summary: { platformCount: number; routeCount: number; sourceCount: number; publicRuleSourceRows: number; publicRuleCount: number; publicRuleExcludedCount: number };
       sources: Array<{
         sourceId: string;
         upstreamVersion: string | null;
@@ -1208,7 +1305,8 @@ test('GET /api/discovery/registry keeps old fields and adds the catalog gap surf
   assert.ok(body.catalog);
   assert.equal(body.catalog.registryVersion, body.registry.version, 'all projections carry the same version');
   assert.match(body.catalog.contentHash, /^sha256:[0-9a-f]{64}$/);
-  assert.equal(body.catalog.summary.platformCount, 54);
+  assert.ok(body.catalog.summary.platformCount > 54, 'the composed public-rule union is part of the summary');
+  assert.equal(body.catalog.platformsTotal, body.catalog.summary.platformCount, 'the explicit total is the full catalog size');
   assert.ok(body.catalog.summary.routeCount > 54);
   assert.equal(body.catalog.summary.sourceCount, 8);
 
@@ -1219,8 +1317,20 @@ test('GET /api/discovery/registry keeps old fields and adds the catalog gap surf
   assert.equal(maigret?.contentHash, EXPECTED_SOURCES.maigret.contentHash);
   assert.equal(maigret?.license, 'MIT');
   assert.equal(maigret?.licenseHash, EXPECTED_SOURCES.maigret.licenseHash);
-  assert.equal(maigret?.upstreamState, 'metadata_only_not_imported');
-  assert.deepEqual(maigret?.counts, { raw: null, loaded: null, excluded: null });
+  assert.equal(maigret?.upstreamState, 'imported_pinned_bytes');
+  // The composed sources carry the verified bundle's real import counts.
+  assert.equal(maigret?.counts.raw, EXPECTED_SOURCES.maigret.sourceRecords);
+  assert.equal(
+    maigret?.counts.raw,
+    (maigret?.counts.loaded ?? 0) + (maigret?.counts.excluded ?? 0),
+    'raw = loaded + excluded through the API too'
+  );
+  assert.ok((maigret?.counts.loaded ?? 0) > 0 && (maigret?.counts.excluded ?? 0) > 0);
+  assert.equal(body.catalog.summary.publicRuleSourceRows, 6923);
+  assert.equal(
+    body.catalog.summary.publicRuleCount + body.catalog.summary.publicRuleExcludedCount,
+    body.catalog.summary.publicRuleSourceRows
+  );
   assert.equal(sourcesById.get('tikhub-openapi')?.upstreamVersion, 'V5.3.2');
   assert.equal(sourcesById.get('tikhub-openapi')?.contentHash, EXPECTED_SOURCES['tikhub-openapi'].contentHash);
 
@@ -1290,6 +1400,126 @@ test('GET /api/discovery/registry without a catalog stays byte-compatible for ol
 });
 
 /* ------------------------------------------------------------------ */
+/* Large-catalog platform detail paging (registry-bound cursors)        */
+/* ------------------------------------------------------------------ */
+
+test('GET /api/discovery/registry pages platform details with an explicit total and registry-bound cursor', async (t) => {
+  const catalog = loadSourceCatalog();
+  const server = await startTestServer({ discoveryCatalog: catalog });
+  t.after(async () => {
+    await server.close();
+  });
+  await server.client.signUp('catalog-paging@example.test');
+
+  type Page = {
+    catalog: {
+      registryVersion: string;
+      contentHash: string;
+      platformsTotal: number;
+      platformsNextCursor: string | null;
+      summary: { platformCount: number };
+      platforms: Array<{ platformId: string }>;
+    };
+  };
+  type ErrorBody = { error: { code: string } };
+
+  const first = await server.client.json<Page>('/api/discovery/registry?platformLimit=100');
+  assert.equal(first.status, 200);
+  assert.equal(first.body.catalog.platformsTotal, catalog.entries.length, 'total is the full catalog size');
+  assert.ok(first.body.catalog.platforms.length <= 100, 'platform detail pages are capped at 100');
+  assert.ok(
+    first.body.catalog.platforms.length < first.body.catalog.platformsTotal,
+    'the first page is never presented as full coverage'
+  );
+  assert.ok(first.body.catalog.platformsNextCursor, 'more pages carry an explicit next cursor');
+
+  // Oversized limits are clamped to the documented bound.
+  const clamped = await server.client.json<Page>('/api/discovery/registry?platformLimit=5000');
+  assert.equal(clamped.status, 200);
+  assert.ok(clamped.body.catalog.platforms.length <= 100, 'limit never exceeds 100');
+
+  // Iterate every page and reconstruct the full entry list.
+  const collected: string[] = first.body.catalog.platforms.map((platform) => platform.platformId);
+  let cursor: string | null = first.body.catalog.platformsNextCursor;
+  let pages = 1;
+  while (cursor) {
+    const next: { status: number; body: Page } = await server.client.json<Page>(
+      `/api/discovery/registry?platformLimit=100&platformCursor=${encodeURIComponent(cursor)}`
+    );
+    assert.equal(next.status, 200);
+    assert.ok(next.body.catalog.platforms.length <= 100);
+    collected.push(...next.body.catalog.platforms.map((platform) => platform.platformId));
+    cursor = next.body.catalog.platformsNextCursor;
+    pages += 1;
+    assert.ok(pages < 500, 'paging must terminate');
+  }
+  assert.equal(collected.length, catalog.entries.length, 'paging reconstructs every catalog entry');
+  assert.deepEqual(
+    collected,
+    catalog.entries.map((entry) => entry.platformId),
+    'paged order is the authoritative snapshot order'
+  );
+  assert.equal(new Set(collected).size, collected.length, 'pages never duplicate entries');
+
+  // A tampered cursor is refused (the token is a server-bound MAC: flipping
+  // any byte invalidates it — clients cannot recompute a valid signature).
+  const tampered = `${String(first.body.catalog.platformsNextCursor).slice(0, -4)}AAAA`;
+  const tamperedResponse = await server.client.json<ErrorBody>(
+    `/api/discovery/registry?platformCursor=${encodeURIComponent(tampered)}`
+  );
+  assert.equal(tamperedResponse.status, 400);
+  assert.equal(tamperedResponse.body.error.code, 'invalid_cursor');
+
+  // A payload whose offset was rewritten but whose MAC is kept is refused too.
+  const envelope = JSON.parse(
+    Buffer.from(String(first.body.catalog.platformsNextCursor), 'base64url').toString('utf8')
+  ) as { p: string; m: string };
+  const forgedPayload = JSON.stringify({ ...(JSON.parse(envelope.p) as Record<string, unknown>), o: 300 });
+  const forged = Buffer.from(JSON.stringify({ p: forgedPayload, m: envelope.m }), 'utf8').toString('base64url');
+  const forgedResponse = await server.client.json<ErrorBody>(
+    `/api/discovery/registry?platformCursor=${encodeURIComponent(forged)}`
+  );
+  assert.equal(forgedResponse.status, 400);
+  assert.equal(forgedResponse.body.error.code, 'invalid_cursor');
+
+  // A well-formed cursor bound to a DIFFERENT registry/bundle identity is
+  // stale, never applied.
+  const staleCursor = encodeCatalogCursor(
+    { registryVersion: 'other-registry', contentHash: `sha256:${'0'.repeat(64)}` },
+    0
+  );
+  const staleResponse = await server.client.json<ErrorBody>(
+    `/api/discovery/registry?platformCursor=${encodeURIComponent(staleCursor)}`
+  );
+  assert.equal(staleResponse.status, 400);
+  assert.equal(staleResponse.body.error.code, 'stale_cursor');
+
+  // An out-of-bounds offset is refused even with a valid MAC.
+  const outOfBounds = encodeCatalogCursor(catalog, catalog.entries.length + 10);
+  assert.throws(
+    () => decodeCatalogCursor(outOfBounds, catalog, catalog.entries.length),
+    (error: unknown) => (error as { code?: string }).code === 'invalid_cursor'
+  );
+
+  // Query values must be single bounded strings: arrays/objects/empty/
+  // non-decimal/giant inputs are rejected, never coerced into page one.
+  for (const query of [
+    'platformLimit=1&platformLimit=2',
+    'platformLimit=',
+    'platformLimit=1.5',
+    'platformLimit=0x10',
+    `platformLimit=${'9'.repeat(20)}`,
+    'platformCursor=',
+    'platformCursor=a&platformCursor=b',
+    `platformCursor=${'A'.repeat(600)}`
+  ]) {
+    const bad = await server.client.json<ErrorBody>(`/api/discovery/registry?${query}`);
+    assert.equal(bad.status, 400, `${query} must be rejected`);
+    assert.ok(['invalid_limit', 'invalid_cursor'].includes(bad.body.error.code), `${query}: ${bad.body.error.code}`);
+  }
+});
+
+/* ------------------------------------------------------------------ */
 /* Production data packaging (synthetic canary only)                   */
 /* ------------------------------------------------------------------ */
 
@@ -1333,7 +1563,12 @@ test('build:data normalizes the public bundle to world-readable modes without to
   chmodSync(path.join(pkg, 'data'), 0o700);
   chmodSync(path.join(pkg, 'data', 'platforms'), 0o700);
   for (const name of readdirSync(path.join(pkg, 'data', 'platforms'))) {
-    chmodSync(path.join(pkg, 'data', 'platforms', name), 0o600);
+    const target = path.join(pkg, 'data', 'platforms', name);
+    // Restrictive but owner-traversable: real directories need the x bit.
+    chmodSync(target, statSync(target).isDirectory() ? 0o700 : 0o600);
+    if (statSync(target).isDirectory()) {
+      for (const child of readdirSync(target)) chmodSync(path.join(target, child), 0o600);
+    }
   }
   chmodSync(path.join(pkg, 'data', 'private-canary.sqlite'), 0o600);
 
@@ -1350,11 +1585,20 @@ test('build:data normalizes the public bundle to world-readable modes without to
   assert.equal(statSync(path.join(pkg, 'dist', 'data')).mode & 0o777, 0o755, 'generated dist/data must be 755');
   assert.equal(statSync(bundleRoot).mode & 0o777, 0o755, 'bundle dir must be 755');
   for (const name of readdirSync(bundleRoot)) {
-    assert.equal(statSync(path.join(bundleRoot, name)).mode & 0o777, 0o644, `${name} must be 644`);
+    const target = path.join(bundleRoot, name);
+    const expected = statSync(target).isDirectory() ? 0o755 : 0o644;
+    assert.equal(statSync(target).mode & 0o777, expected, `${name} must be ${expected.toString(8)}`);
+    if (statSync(target).isDirectory()) {
+      for (const child of readdirSync(target)) {
+        assert.equal(statSync(path.join(target, child)).mode & 0o777, 0o644, `${name}/${child} must be 644`);
+      }
+    }
   }
   // Sources and private siblings keep their restrictive modes and stay put.
   assert.equal(statSync(path.join(pkg, 'data', 'platforms')).mode & 0o777, 0o700, 'source dir mode changed');
   assert.equal(statSync(path.join(pkg, 'data', 'platforms', 'catalog.json')).mode & 0o777, 0o600, 'source file mode changed');
+  assert.equal(statSync(path.join(pkg, 'data', 'platforms', 'public-rules')).mode & 0o777, 0o700, 'source rule dir mode changed');
+  assert.equal(statSync(path.join(pkg, 'data', 'platforms', 'public-rules', 'rules.json')).mode & 0o777, 0o600, 'source rule file mode changed');
   assert.equal(statSync(path.join(pkg, 'data', 'private-canary.sqlite')).mode & 0o777, 0o600, 'private sibling mode changed');
   assert.equal(existsSync(path.join(pkg, 'dist', 'data', 'private-canary.sqlite')), false);
 });
@@ -1598,9 +1842,9 @@ test(
       result.dataDir.startsWith(copyRoot),
       `production must read bundled data inside the copied build, got ${result.dataDir}`
     );
-    assert.equal(result.entries, 54);
-    assert.match(result.contentHash, /^sha256:[0-9a-f]{64}$/);
     const source = loadSourceCatalog();
+    assert.equal(result.entries, source.entries.length, 'compiled and source data copies agree on the composed entry count');
+    assert.match(result.contentHash, /^sha256:[0-9a-f]{64}$/);
     assert.equal(result.contentHash, source.contentHash, 'compiled and source data copies agree');
     assert.equal(result.registryVersion, source.registryVersion);
   }

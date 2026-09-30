@@ -60,7 +60,9 @@
 
 2026-09-30：[Search / Fetch 工具接口契约（GET-59）](research-tool-contracts.md) 已落地：Search 8 / Fetch 10 去重后 15 个工具的可执行注册表、`dispatch(trustedContext, modelCall, ports, signal)` 验证网关、统一返回封套、逐底层请求计量端口与 pending-only 提交端口；核验是 Fetch 阶段（仅 3 件工具）而非第三角色。它是离线接口契约地基，不代表 Search / Fetch 上线，旧 alpha 工具面保持不变。
 
-2026-09-30：[版本化平台目录（GET-90）](platform-catalog.md) 已落地：20 个 TikHub 平台、30 个替代平台、个人网站与保留旧规则的 legacy 条目全部登记，七项能力×四维度（文档/实现/访问/验证）按逐维证据分开记录，一份快照产出旧 probe / GET-60 完成 / GET-59 能力三个投影，并扩展 `/api/discovery/registry` 的目录缺口与公开溯源面。全部能力记 documented_only、价格显式 null + 公开依据（null ≠ 免费）；Maigret / WhatsMyName / TikHub 来源仅冻结元数据（commit/版本、sha256、抓取时间、许可），未导入、无导入计数（导入与规则执行属 GET-91），无任何 live 验证。
+2026-09-30：[版本化平台目录（GET-90）](platform-catalog.md) 已落地：20 个 TikHub 平台、30 个替代平台、个人网站与保留旧规则的 legacy 条目全部登记，七项能力×四维度（文档/实现/访问/验证）按逐维证据分开记录，一份快照产出旧 probe / GET-60 完成 / GET-59 能力三个投影，并扩展 `/api/discovery/registry` 的目录缺口与公开溯源面。全部能力记 documented_only、价格显式 null + 公开依据（null ≠ 免费）；GET-90 交付时 Maigret / WhatsMyName / TikHub 来源仅冻结元数据（commit/版本、sha256、抓取时间、许可），未导入、无导入计数，无任何 live 验证。GET-90 已随 PR20 合并交付（8 CI + 合并后 37/37），GET-91 随后导入公共规则（见下）。
+
+2026-09-30：[公共账号规则（GET-91）](public-account-rules.md) 实现已完成（待交付门禁）：固定字节完整导入 Maigret 6206 与 WhatsMyName 717 行（raw = loaded + excluded 逐行回执）、归一化受限规则 + 排除回执 + 逐来源归属/许可/修改说明 + manifest；组合目录扩至 4421 条 entry（curated 54 与 legacy 13 逐字保留；公共规则并集 4375 个平台/实例组与组合目录 4421 分列计数；组合身份绑定规则包 hash，旧 cursor 失效），`/api/discovery/registry` 平台详情有界分页（≤100 + 显式 total + 服务端 HMAC 游标）；独立受限执行器（DNS/地址策略、固定地址 HTTPS 传输、限流/缓存/回执/权威口）离线验证但**未接线**（接入属 GET-63，GET-59 网关不变），无任何 live 验证。
 
 ## 已采纳的设计基线
 

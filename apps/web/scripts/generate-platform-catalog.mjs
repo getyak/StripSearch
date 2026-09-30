@@ -1153,6 +1153,10 @@ const fileHash = createHash('sha256').update(catalogBytes).digest('hex');
 const manifest = {
   schemaVersion: MANIFEST_SCHEMA,
   registryVersion: VERSION,
+  // Production data REQUIRES the GET-91 normalized public-rule bundle
+  // (data/platforms/public-rules); only explicit curated-only fixtures may
+  // declare `false`. A missing required bundle fails closed at load.
+  requiresPublicRuleBundle: true,
   files: [{ path: 'catalog.json', sha256: fileHash }],
   counts: {
     platforms: entries.length,
