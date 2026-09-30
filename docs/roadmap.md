@@ -58,6 +58,8 @@
 
 2026-09-30：[研究范围与完成契约（GET-60）](research-completion-domain.md) 已落地：研究前冻结范围/完成规则（问题适用性、全目录发现、时间窗、正文/媒体/默认评论页/选定分支深度）、最小观测回执协议与追加式确定性评估；分母未知不显示假百分比。它仍是持久化政策地基，不是 GET94/95/99 自治运行时。
 
+2026-09-30：[Search / Fetch 工具接口契约（GET-59）](research-tool-contracts.md) 已落地：Search 8 / Fetch 10 去重后 15 个工具的可执行注册表、`dispatch(trustedContext, modelCall, ports, signal)` 验证网关、统一返回封套、逐底层请求计量端口与 pending-only 提交端口；核验是 Fetch 阶段（仅 3 件工具）而非第三角色。它是离线接口契约地基，不代表 Search / Fetch 上线，旧 alpha 工具面保持不变。
+
 ## 已采纳的设计基线
 
 | 决定 | 理由 | 什么会使它改变 |

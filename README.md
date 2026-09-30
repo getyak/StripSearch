@@ -31,6 +31,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 | 对外研究入口、Chat 与证据核查交互 | [Web 设计](docs/web-design.md) |
 | 身份 → 行动 → 经历 → 第三方观察 → 可修订判断 | [研究方法](docs/research-method.md) |
 | 范围冻结、完成判定与观测回执（地基） | [研究范围与完成契约](docs/research-completion-domain.md) |
+| Search / Fetch 工具接口、角色权限与返回封套（地基） | [工具接口契约](docs/research-tool-contracts.md) |
 | Agent、存档、证据依赖与失败恢复 | [系统架构](docs/architecture.md) |
 | MCP、可配置首屏、人物索引与返回契约 | [接口设计](docs/interfaces.md) |
 | 准确度、覆盖、数据集与对照实验 | [评估设计](docs/evaluation.md) |
