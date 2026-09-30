@@ -18,10 +18,10 @@
  *   GitHub research adapter never leak `live_verified` into new capabilities.
  * - An unknown price is an explicit `null` amount with a public basis.
  *   `null` never means "free".
- * - The two public longtail rule sources (Maigret / WhatsMyName) keep their
- *   actual known state: metadata frozen (commit/version, sha256, retrieval,
- *   license), NOT imported, null import counts — importing them is GET-91,
- *   and nothing here claims rules are enabled.
+ * - The GET-90 curated baseline froze public-rule source metadata only.
+ *   GET-91 public_rule_union snapshots include the imported bundle and
+ *   actual per-source counts; curated_only remains an explicit compatibility
+ *   mode. Importing rules does not claim production wiring or live checks.
  * - Applicability for completion is decided by accepted input kinds and the
  *   authorization policy, never by whether an adapter exists: no-adapter
  *   platforms stay in the frozen denominator with an explicit reason.
@@ -38,6 +38,7 @@ import type {
   ProbeVerification
 } from './platform-discovery.js';
 import type { PlatformRegistry as CompletionPlatformRegistryShape } from './research-completion.js';
+import type { PublicRuleUnion } from './public-discovery-rules.js';
 
 export const PLATFORM_CATALOG_SCHEMA_VERSION = 'stripsearch/platform-catalog/v1';
 
@@ -56,9 +57,11 @@ export type CatalogInputKind = 'username' | 'email' | 'homepage_url';
  * Which cohort an entry belongs to. The approved spec lists 20 TikHub
  * platforms, 30 alternative platforms and the personal website; `legacy_only`
  * retains pre-catalog probe rules (devto / npm / pypi) so the legacy
- * projection cannot lose old rules.
+ * projection cannot lose old rules. `public_rule` entries are the GET-91
+ * public-rule union for sites without a curated entry — generated from the
+ * imported rule bundle at load time, never hand-written.
  */
-export type CatalogCohort = 'tikhub' | 'alternative' | 'personal_website' | 'legacy_only';
+export type CatalogCohort = 'tikhub' | 'alternative' | 'personal_website' | 'legacy_only' | 'public_rule';
 
 export type CatalogInstanceScoping = 'required' | 'optional' | 'none';
 
@@ -311,6 +314,8 @@ export interface DiscoveryRoute {
   /** Frozen reason for the availability, or why no route exists. */
   reason: string;
   sourceRefs: string[];
+  /** GET-91 public rule ids behind this route (shared response request). */
+  ruleIds?: string[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -359,12 +364,30 @@ export interface CatalogSourceManifest {
 
 export interface PlatformCatalogSnapshot {
   schemaVersion: string;
+  /**
+   * Registry identity of THIS snapshot. For a composed GET-91 snapshot the
+   * version/hash cover the curated identity PLUS the exact normalized
+   * public-rule bundle (see `mode`), so a different bundle can never share
+   * the same identity and stale cursors are refused.
+   */
   registryVersion: string;
-  /** `sha256:<hex>` over the canonical content; verified at load. */
+  /** `sha256:<hex>` over the canonical content (composed identity when unioned). */
   contentHash: string;
   generatedAt: string;
   sources: CatalogSourceManifest[];
   entries: CatalogEntry[];
+  /**
+   * Snapshot mode: `curated_only` is an explicit compatibility mode declared
+   * by the manifest (`requiresPublicRuleBundle: false`); production data is
+   * `public_rule_union` and fails closed when the bundle is missing.
+   */
+  mode: 'curated_only' | 'public_rule_union';
+  /**
+   * GET-91 public-rule union derived from the bundled rule data (null in
+   * curated-only mode). The bundle carries its own pinned file hashes and
+   * import counts; the composed identity covers its exact manifest.
+   */
+  publicRules?: PublicRuleUnion | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -483,6 +506,18 @@ export interface CatalogSummary {
   legacyRuleCount: number;
   liveVerifiedCapabilityCount: number;
   unknownPriceCount: number;
+  /** Raw public-rule source rows (Maigret + WhatsMyName), never import counts. */
+  publicRuleSourceRows: number;
+  /** Compiled public rules (loaded rows; differing predicates stay separate). */
+  publicRuleCount: number;
+  /** Explicitly excluded source rows (raw = loaded + excluded per source). */
+  publicRuleExcludedCount: number;
+  /** Distinct catalog platform ids covered by the public-rule union. */
+  unionPlatformCount: number;
+  /** Distinct platform + instance pairs in the union. */
+  unionInstanceCount: number;
+  /** Distinct shared request templates contributed by the union. */
+  unionRouteCount: number;
 }
 
 export type CatalogGapKind = 'no_adapter' | 'unverified_capability' | 'unknown_price' | 'access_limited';

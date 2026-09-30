@@ -53,6 +53,13 @@ import type {
   PlatformCatalogSnapshot
 } from '../../shared/platform-catalog.js';
 import { threadStateFor } from '../../shared/platform-catalog.js';
+import type { PublicRuleUnion } from '../../shared/public-discovery-rules.js';
+import {
+  knownPlatformTemplateMap,
+  loadPublicRuleBundle,
+  publicRuleCatalogEntries,
+  unionFromBundle
+} from './public-rules.js';
 import type { PlatformRule } from '../../shared/platform-discovery.js';
 import type { CapabilitySnapshot } from '../research/research-tool-dispatch.js';
 
@@ -146,7 +153,7 @@ function requireStringArray(value: unknown, where: string): string[] {
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const HASH_RE = /^sha256:[0-9a-f]{64}$/;
 
-const COHORTS = ['tikhub', 'alternative', 'personal_website', 'legacy_only'] as const;
+const COHORTS = ['tikhub', 'alternative', 'personal_website', 'legacy_only', 'public_rule'] as const;
 const INPUT_KINDS = ['username', 'email', 'homepage_url'] as const;
 const INSTANCE_VALUES = ['required', 'optional', 'none'] as const;
 const ACCOUNT_KINDS = ['person', 'publication', 'channel', 'organization', 'unknown'] as const;
@@ -378,6 +385,8 @@ function validateRoute(raw: unknown, where: string, sourceIds: Set<string>): Dis
   for (const ref of sourceRefs) {
     if (!sourceIds.has(ref)) fail('source_ref', `${where} references unknown source ${ref}`);
   }
+  const ruleIdsRaw = raw.ruleIds ?? [];
+  const ruleIds = requireStringArray(ruleIdsRaw, `${where}.ruleIds`);
   return {
     routeId: requireString(raw.routeId, `${where}.routeId`),
     kind: requireEnum(raw.kind, ROUTE_KINDS, `${where}.kind`),
@@ -387,7 +396,8 @@ function validateRoute(raw: unknown, where: string, sourceIds: Set<string>): Dis
     requires: requires as DiscoveryRoute['requires'],
     availability: requireEnum(raw.availability, ROUTE_AVAILABILITY, `${where}.availability`),
     reason: requireString(raw.reason, `${where}.reason`),
-    sourceRefs
+    sourceRefs,
+    ...(ruleIds.length > 0 ? { ruleIds } : {})
   };
 }
 
@@ -638,7 +648,9 @@ export function catalogSnapshotFromJson(raw: unknown): PlatformCatalogSnapshot {
     contentHash,
     generatedAt,
     sources,
-    entries
+    entries,
+    mode: 'curated_only',
+    publicRules: null
   }));
 }
 
@@ -647,6 +659,121 @@ export function catalogSnapshotFromJson(raw: unknown): PlatformCatalogSnapshot {
 /* ------------------------------------------------------------------ */
 
 export function loadPlatformCatalog(dataDir: string): PlatformCatalogSnapshot {
+  const snapshot = loadCuratedCatalog(dataDir);
+  const manifestRaw = loadCuratedManifest(dataDir);
+  const requirement = manifestRaw.requiresPublicRuleBundle;
+  if (typeof requirement !== 'boolean') {
+    fail(
+      'manifest_invalid',
+      'manifest must declare requiresPublicRuleBundle (true for shipped data; false only for explicit curated-only fixtures)'
+    );
+  }
+  const hasBundle = existsSync(path.join(dataDir, 'public-rules', 'manifest.json'));
+  if (!requirement) {
+    if (hasBundle) fail('manifest_invalid', 'a curated-only manifest must not be combined with a public-rule bundle');
+    return deepFreeze(structuredClone({ ...snapshot, mode: 'curated_only', publicRules: null }));
+  }
+  if (!hasBundle) {
+    // Production data REQUIRES the bundle: a missing bundle is a
+    // deterministic failure, never a silent 54-entry fallback identity.
+    fail('public_rules_missing', `required public-rule bundle missing under ${path.join(dataDir, 'public-rules')}`);
+  }
+  return withPublicRuleBundle(snapshot, dataDir);
+}
+
+function loadCuratedManifest(dataDir: string): Record<string, unknown> {
+  const manifestPath = path.join(dataDir, 'manifest.json');
+  try {
+    const raw: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    return isRecord(raw) ? raw : fail('manifest_invalid', 'manifest must be an object');
+  } catch (error) {
+    return fail('manifest_invalid', `cannot read ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * GET-91 composition: the union entries are appended to the curated
+ * snapshot, and the composed snapshot gets its OWN deterministic identity
+ * covering the curated identity plus the exact normalized bundle manifest
+ * (which pins rules, exclusions, notices and license artifacts). Curated
+ * entries and the legacy projection stay byte-exact; a different bundle can
+ * never share the same identity, so stale cursors are refused.
+ */
+function withPublicRuleBundle(snapshot: PlatformCatalogSnapshot, dataDir: string): PlatformCatalogSnapshot {
+  const bundle = loadPublicRuleBundle(dataDir);
+  const sources = mergeImportedSourceFacts(snapshot.sources, bundle.sources);
+  const union = unionFromBundle(bundle, knownPlatformTemplateMap(snapshot.entries));
+  const generated = publicRuleCatalogEntries(union, sources);
+  const curatedIds = new Set(snapshot.entries.map((entry) => entry.platformId));
+  for (const entry of generated) {
+    if (curatedIds.has(entry.platformId)) fail('platform_id_collision', `public rule entry collides with ${entry.platformId}`);
+    curatedIds.add(entry.platformId);
+  }
+  const combined = createHash('sha256')
+    .update(
+      [
+        snapshot.contentHash,
+        snapshot.registryVersion,
+        bundle.manifestHash,
+        `${bundle.counts.sourceRows}:${bundle.counts.loaded}:${bundle.counts.excluded}`
+      ].join('\n'),
+      'utf8'
+    )
+    .digest('hex');
+  return deepFreeze(structuredClone({
+    ...snapshot,
+    registryVersion: `${snapshot.registryVersion}+pr.${combined.slice(0, 12)}`,
+    contentHash: `sha256:${combined}`,
+    mode: 'public_rule_union',
+    sources,
+    entries: [...snapshot.entries, ...generated],
+    publicRules: union
+  }));
+}
+
+/** Merge verified bundle source facts/counts into the curated sources. */
+function mergeImportedSourceFacts(
+  curated: CatalogSourceManifest[],
+  imported: Array<import('../../shared/public-discovery-rules.js').PublicRuleSourceRecord>
+): CatalogSourceManifest[] {
+  const importedById = new Map(imported.map((source) => [source.sourceId, source]));
+  const merged: CatalogSourceManifest[] = curated.map((source) => {
+    const facts = importedById.get(source.sourceId as 'maigret' | 'whatsmyname');
+    if (!facts) return source;
+    return {
+      ...source,
+      upstreamState: 'imported_pinned_bytes',
+      importerVersion: facts.importerVersion,
+      counts: { raw: facts.counts.raw, loaded: facts.counts.loaded, excluded: facts.counts.excluded },
+      notes: [
+        ...source.notes,
+        `GET-91 实际导入（固定字节）：raw ${facts.counts.raw} = loaded ${facts.counts.loaded} + excluded ${facts.counts.excluded}；逐行排除原因见 data 平台 public-rules 排除回执`
+      ]
+    };
+  });
+  for (const facts of imported) {
+    if (curated.some((source) => source.sourceId === facts.sourceId)) continue;
+    merged.push({
+      sourceId: facts.sourceId,
+      kind: 'public_rule_dataset',
+      title: facts.repository,
+      url: facts.repository,
+      license: facts.license,
+      licenseHash: facts.licenseHash,
+      upstreamVersion: facts.commit,
+      upstreamState: 'imported_pinned_bytes',
+      capturedAt: facts.retrievedAt,
+      contentHash: facts.contentHash,
+      bytes: facts.bytes,
+      importerVersion: facts.importerVersion,
+      counts: { raw: facts.counts.raw, loaded: facts.counts.loaded, excluded: facts.counts.excluded },
+      notes: []
+    });
+  }
+  return merged;
+}
+
+function loadCuratedCatalog(dataDir: string): PlatformCatalogSnapshot {
   const manifestPath = path.join(dataDir, 'manifest.json');
   const catalogPath = path.join(dataDir, 'catalog.json');
   let manifestRaw: unknown;
@@ -866,12 +993,13 @@ export function toCapabilitySnapshot(
 }
 
 /** Counts platforms, routes and source records separately. */
-export function catalogSummary(snapshot: PlatformCatalogSnapshot): CatalogSummary {
+export function catalogSummary(snapshot: PlatformCatalogSnapshot, unionOverride?: PublicRuleUnion | null): CatalogSummary {
   const cohorts: CatalogSummary['cohorts'] = {
     tikhub: 0,
     alternative: 0,
     personal_website: 0,
-    legacy_only: 0
+    legacy_only: 0,
+    public_rule: 0
   };
   let routeCount = 0;
   let capabilityRecordCount = 0;
@@ -886,6 +1014,7 @@ export function catalogSummary(snapshot: PlatformCatalogSnapshot): CatalogSummar
       if (record.cost.amount === null) unknownPriceCount += 1;
     }
   }
+  const union = unionOverride ?? snapshot.publicRules ?? null;
   return {
     registryVersion: snapshot.registryVersion,
     contentHash: snapshot.contentHash,
@@ -896,7 +1025,13 @@ export function catalogSummary(snapshot: PlatformCatalogSnapshot): CatalogSummar
     cohorts,
     legacyRuleCount: snapshot.entries.filter((entry) => entry.legacy !== null).length,
     liveVerifiedCapabilityCount,
-    unknownPriceCount
+    unknownPriceCount,
+    publicRuleSourceRows: union ? union.counts.sourceRows : 0,
+    publicRuleCount: union ? union.counts.loaded : 0,
+    publicRuleExcludedCount: union ? union.counts.excluded : 0,
+    unionPlatformCount: union ? union.counts.unionPlatforms : 0,
+    unionInstanceCount: union ? union.counts.unionInstances : 0,
+    unionRouteCount: union ? union.counts.unionRoutes : 0
   };
 }
 

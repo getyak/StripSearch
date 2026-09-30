@@ -1,0 +1,120 @@
+{
+ "schemaVersion": "stripsearch/public-rules-manifest/v1",
+ "importerVersion": "get91-public-rule-importer/1",
+ "generatedAt": "2026-09-30T05:31:03.956135+00:00",
+ "files": [
+  {
+   "path": "rules.json",
+   "sha256": "6f7163ea51b9630dbf5b3135da03aba1f3f220952f51bfd3682bef01b9a1c574",
+   "bytes": 3945372
+  },
+  {
+   "path": "exclusions.json",
+   "sha256": "72e69e290c8f04e44777e6d03c2cef25a68d350af6b2eac94471ae46c0fc0183",
+   "bytes": 395234
+  },
+  {
+   "path": "maigret-LICENSE.txt",
+   "sha256": "9748c279c95c58e64cc9e538e8c717ae9dce66bbed1d69e7d3e77e431d7e582d",
+   "bytes": 1067
+  },
+  {
+   "path": "whatsmyname-LICENSE.txt",
+   "sha256": "3eab49aa5cabc24918c11aab97dfe8873e0641317b898d989c993c4283a4d84b",
+   "bytes": 309
+  },
+  {
+   "path": "maigret-NOTICE.md",
+   "sha256": "d3d802e74eb4fce83bcfb3733dbf46de60c7714c2f988365d4083996887dbfa7",
+   "bytes": 1340
+  },
+  {
+   "path": "whatsmyname-NOTICE.md",
+   "sha256": "06439489142c35508ff074ae793c0020a975ffd2143991ea03e5d1fd83ccce23",
+   "bytes": 1336
+  },
+  {
+   "path": "LICENSE-DATASETS.md",
+   "sha256": "3ad428d57565d7c97cec815fb3886933be0a560d4c0c20e57d0ffdd19068ab7c",
+   "bytes": 1033
+  }
+ ],
+ "sources": [
+  {
+   "sourceId": "maigret",
+   "kind": "maigret_sites",
+   "repository": "https://github.com/soxoj/maigret",
+   "sourceUrl": "https://raw.githubusercontent.com/soxoj/maigret/b6642744988e7e6c2d21f75db60ec3093019ba25/maigret/resources/data.json",
+   "commit": "b6642744988e7e6c2d21f75db60ec3093019ba25",
+   "retrievedAt": "2026-09-30T05:30:59.298392+00:00",
+   "contentHash": "3ac973e44f765c1c2b851571bd165f45145d0a00231c8ea97fb479e93f6aa289",
+   "bytes": 2496965,
+   "license": "MIT",
+   "licenseUrl": "https://github.com/soxoj/maigret/blob/b6642744988e7e6c2d21f75db60ec3093019ba25/LICENSE",
+   "licenseHash": "9748c279c95c58e64cc9e538e8c717ae9dce66bbed1d69e7d3e77e431d7e582d",
+   "importerVersion": "get91-public-rule-importer/1",
+   "counts": {
+    "raw": 6206,
+    "loaded": 3952,
+    "excluded": 2254
+   },
+   "exclusionsByReason": {
+    "missing_template_substitution": 600,
+    "unsupported_regex_predicate": 750,
+    "disabled_rule": 698,
+    "non_https_template": 96,
+    "unsupported_error_url": 18,
+    "unsafe_header": 28,
+    "unsupported_id_kind": 25,
+    "unsupported_protocol": 12,
+    "unsupported_similar_search": 9,
+    "unsupported_method": 7,
+    "activation_required": 5,
+    "unsupported_check_type": 6
+   },
+   "notice": "maigret-NOTICE.md",
+   "licenseFile": "maigret-LICENSE.txt"
+  },
+  {
+   "sourceId": "whatsmyname",
+   "kind": "whatsmyname_sites",
+   "repository": "https://github.com/WebBreacher/WhatsMyName",
+   "sourceUrl": "https://raw.githubusercontent.com/WebBreacher/WhatsMyName/062bcfe48df79fa618e96edc79dc9673f3fe5643/wmn-data.json",
+   "commit": "062bcfe48df79fa618e96edc79dc9673f3fe5643",
+   "retrievedAt": "2026-09-30T05:31:03.956135+00:00",
+   "contentHash": "507d2f8aa5b1297ae2d713634ccc7ce08357fed85b1d40130585810f456c1cfe",
+   "bytes": 259104,
+   "license": "CC BY-SA 4.0",
+   "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+   "licenseHash": "3eab49aa5cabc24918c11aab97dfe8873e0641317b898d989c993c4283a4d84b",
+   "importerVersion": "get91-public-rule-importer/1",
+   "counts": {
+    "raw": 717,
+    "loaded": 651,
+    "excluded": 66
+   },
+   "exclusionsByReason": {
+    "unsupported_post_body": 23,
+    "unsafe_header": 12,
+    "non_https_template": 7,
+    "unsupported_username_transform": 23,
+    "credential_bearing_template": 1
+   },
+   "notice": "whatsmyname-NOTICE.md",
+   "licenseFile": "whatsmyname-LICENSE.txt"
+  }
+ ],
+ "counts": {
+  "sourceRows": 6923,
+  "loaded": 4603,
+  "excluded": 2320
+ },
+ "union": {
+  "platforms": 4375,
+  "instances": 4375,
+  "routes": 4422,
+  "generatedPlatforms": 4367,
+  "knownMappedGroups": 8,
+  "knownTemplates": 9
+ }
+}

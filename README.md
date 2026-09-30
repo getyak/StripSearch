@@ -33,6 +33,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 | 范围冻结、完成判定与观测回执（地基） | [研究范围与完成契约](docs/research-completion-domain.md) |
 | Search / Fetch 工具接口、角色权限与返回封套（地基） | [工具接口契约](docs/research-tool-contracts.md) |
 | 版本化平台目录、逐能力状态与三个投影（地基） | [平台目录契约](docs/platform-catalog.md) |
+| 公共账号规则导入、组合身份与独立受限执行器（地基） | [公共账号规则](docs/public-account-rules.md) |
 | Agent、存档、证据依赖与失败恢复 | [系统架构](docs/architecture.md) |
 | MCP、可配置首屏、人物索引与返回契约 | [接口设计](docs/interfaces.md) |
 | 准确度、覆盖、数据集与对照实验 | [评估设计](docs/evaluation.md) |
@@ -40,7 +41,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 | 平台发现、身份校正与帖子追踪（holehe / maigret 接入） | [平台发现提案](docs/design/platform-discovery-2026-09-27/README.md) |
 | 分阶段交付与验收 | [开发 brief / 路线](docs/roadmap.md) |
 
-下一阶段（未实施提案）：[人物研究 Agent 设计稿](docs/superpowers/specs/2026-09-29-person-research-agent-design.md) · [交互与架构阅读页](design/explorations/agent-research-2026-09-29/README.md)。2026-09-30 已按用户批准的 Search / Fetch 长研究设计同步：Search / Fetch 两个 Agent 角色 + 持久程序控制器、首次发现冻结 PlatformRegistry 的目录级平台发现、分批深读与默认评论覆盖、总额 + 分批两级预算、范围撤回传播。X / Reddit / GitHub / 个人网站只是首批深读验证样本，不是发现上限。同日已落地[版本化平台目录](docs/platform-catalog.md)（GET-90）：20 个 TikHub 平台、30 个替代平台与个人网站全部登记并带诚实缺口；这只是文档/目录地基，不代表任何平台已接入或已 live 验证，公共长尾规则（Maigret / WhatsMyName）仅冻结来源元数据（版本/hash/许可），尚未导入。以上能力均未上线，当前代码仍是上文的预算受限 Web alpha。
+下一阶段（未实施提案）：[人物研究 Agent 设计稿](docs/superpowers/specs/2026-09-29-person-research-agent-design.md) · [交互与架构阅读页](design/explorations/agent-research-2026-09-29/README.md)。2026-09-30 已按用户批准的 Search / Fetch 长研究设计同步：Search / Fetch 两个 Agent 角色 + 持久程序控制器、首次发现冻结 PlatformRegistry 的目录级平台发现、分批深读与默认评论覆盖、总额 + 分批两级预算、范围撤回传播。X / Reddit / GitHub / 个人网站只是首批深读验证样本，不是发现上限。同日已落地[版本化平台目录](docs/platform-catalog.md)（GET-90，PR20 合并交付）与[公共账号规则](docs/public-account-rules.md)（GET-91）：20 个 TikHub 平台、30 个替代平台与个人网站全部登记并带诚实缺口；Maigret / WhatsMyName 公共规则已按固定字节全量导入（逐行载入/排除回执、MIT / CC BY-SA 归属）并入目录，独立受限执行器离线可用但未接入运行时。以上能力均未上线、无任何 live 验证，当前代码仍是上文的预算受限 Web alpha。
 
 先看一份[合成报告](examples/report.md)，再对照[同一份 JSON](examples/report.json)和[请求配置](examples/request.json)。样例域名 `example.org` 是占位标识，不应抓取。
 

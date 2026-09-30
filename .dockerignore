@@ -13,4 +13,13 @@
 !apps/web/data/platforms/
 !apps/web/data/platforms/catalog.json
 !apps/web/data/platforms/manifest.json
+!apps/web/data/platforms/public-rules/
+!apps/web/data/platforms/public-rules/manifest.json
+!apps/web/data/platforms/public-rules/rules.json
+!apps/web/data/platforms/public-rules/exclusions.json
+!apps/web/data/platforms/public-rules/maigret-NOTICE.md
+!apps/web/data/platforms/public-rules/maigret-LICENSE.txt
+!apps/web/data/platforms/public-rules/whatsmyname-NOTICE.md
+!apps/web/data/platforms/public-rules/whatsmyname-LICENSE.txt
+!apps/web/data/platforms/public-rules/LICENSE-DATASETS.md
 !Dockerfile
