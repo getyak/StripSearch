@@ -2,7 +2,7 @@
 
 日期：2026-09-30。范围：GET-90、GET-91、GET-92、GET-63。
 
-状态：用户已认可分批方向；本文待书面审阅。本文描述拟实施行为，不代表已接入、已运行或任务已完成。
+状态：用户于 2026-09-30 批准本规范及对应实施计划。本文约定分批交付行为；各任务的实际完成状态以实施计划和验收记录为准。
 
 ## 1. 用户目标与成功条件
 
@@ -156,4 +156,4 @@ Figma 仅使用 Figwright：先确认目标文件和插件连接，再用 get_de
 
 公开规则依据：[Maigret](https://github.com/soxoj/maigret)、[WhatsMyName](https://github.com/WebBreacher/WhatsMyName)。平台入口依据：[TikHub OpenAPI](https://api.tikhub.io/openapi.json)、[TikHub 端点价格元数据](https://api.tikhub.io/api/v1/tikhub/user/get_all_endpoints_info)、[GitHub REST](https://docs.github.com/en/rest)。公开页面是来源入口；实际导入需在实现维护步骤保存版本/hash，不把可变 main 当冻结版本。
 
-本次仅完成设计文档。Figwright 的插件连接、逐节点参数、优化 frame 与生产 UI 尚待后续验证；书面设计批准后进入实施计划，再按选定执行方式开发。
+规范与实施计划已获批准，按既定 Pi/MiMo 实现与独立审查流程推进。Figwright 目标文件连接、逐节点参数、优化 frame 与生产 UI 尚待后续验证，不计入 GET-90 的目录交付。
