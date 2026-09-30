@@ -15,7 +15,13 @@ import { DiscoveryRunner } from './services/discovery-runner.js';
 import { ReviewStore } from './review-store.js';
 import { DiscoveryStore } from './discovery-store.js';
 import { BUILTIN_PLATFORM_REGISTRY } from './platforms/registry.js';
+import {
+  defaultCatalogDataDir,
+  loadPlatformCatalog,
+  toLegacyRegistry
+} from './platforms/catalog.js';
 import type { PlatformRegistry } from '../shared/platform-discovery.js';
+import type { PlatformCatalogSnapshot } from '../shared/platform-catalog.js';
 import { Store } from './store.js';
 import type { ResearchTools } from './research/tool-contracts.js';
 import { createResearchTools } from './research/toolkit.js';
@@ -28,6 +34,12 @@ export interface BootstrapOverrides {
   transport?: HttpTransport;
   clientDir?: string;
   discoveryRegistry?: PlatformRegistry;
+  /**
+   * Versioned platform catalog. Left undefined, the bundled catalog copy is
+   * loaded from the module-relative data dir; `null` disables the catalog
+   * surface entirely (legacy callers).
+   */
+  discoveryCatalog?: PlatformCatalogSnapshot | null;
   researchTools?: ResearchTools;
   researchPlanner?: ResearchPlanner;
 }
@@ -74,7 +86,16 @@ export async function bootstrap(
     }),
     researchPlanner: overrides.researchPlanner
   });
-  const discoveryRegistry = overrides.discoveryRegistry ?? BUILTIN_PLATFORM_REGISTRY;
+  const discoveryCatalog =
+    overrides.discoveryCatalog === null
+      ? null
+      : (overrides.discoveryCatalog ?? loadPlatformCatalog(defaultCatalogDataDir()));
+  // One catalog snapshot produces the legacy probe registry projection; the
+  // frozen builtin rules stay the fallback for catalog-less callers. Tests
+  // assert the projection keeps every old rule's probe/posts/verification
+  // semantics, so this does not change legacy behavior.
+  const discoveryRegistry =
+    overrides.discoveryRegistry ?? (discoveryCatalog ? toLegacyRegistry(discoveryCatalog) : BUILTIN_PLATFORM_REGISTRY);
   const discoveryRunner = new DiscoveryRunner({
     store: discoveryStore,
     transport,
@@ -88,6 +109,7 @@ export async function bootstrap(
     discoveryStore,
     discoveryRunner,
     discoveryRegistry,
+    discoveryCatalog,
     auth,
     runner,
     clientDir

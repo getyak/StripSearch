@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "stripsearch/platform-catalog-manifest/v1",
+  "registryVersion": "2026-09-30.1",
+  "files": [
+    {
+      "path": "catalog.json",
+      "sha256": "d276f342e0053ec4800a9a240b6adf9e27575fd962edf9c1ad38abefb246768c"
+    }
+  ],
+  "counts": {
+    "platforms": 54,
+    "tikhub": 20,
+    "alternative": 30,
+    "personal_website": 1,
+    "legacy_only": 3,
+    "routes": 91,
+    "capabilityRecords": 378,
+    "sources": 8
+  },
+  "notes": [
+    "counts 为本目录的独立机器核对入口；平台数量与路线数量分开计数。",
+    "maigret / whatsmyname 只冻结来源元数据（版本/hash/许可），未导入、无导入计数；GET-91 才填写 raw/loaded/excluded。"
+  ]
+}
