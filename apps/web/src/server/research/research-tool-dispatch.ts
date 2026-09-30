@@ -1665,6 +1665,8 @@ export async function dispatch(
   // 11. Cursor issuance through the trusted port (binding lives server-side).
   let envelopeCursor: CursorState = { token: cursorToken, nativeCursor };
   if (contract.usesCursor) {
+    // A successful terminal page must not advertise its consumed input cursor.
+    if (output !== null) envelopeCursor = { token: null, nativeCursor: null };
     const nextNative = (output as Record<string, unknown> | null)?.nativeCursor;
     if (typeof nextNative === 'string' && nextNative.length > 0) {
       if (ports.cursors) {

@@ -305,7 +305,7 @@ export const envelopeV: Validator<ToolEnvelope> = obj({
 
 const localMeta = (reason: string): Validator<ContentMetadata> => (value, path) => {
   const meta = contentMetadata(value, path);
-  if (meta.applicable !== false) fail(path, `expected inapplicable metadata with reason ${reason}`);
+  if (meta.applicable !== false || meta.reason !== reason) fail(path, `expected inapplicable metadata with reason ${reason}`);
   return meta;
 };
 
@@ -326,6 +326,7 @@ export const capabilitiesOutputV = obj({
 export const discoverAccountsOutputV = obj({
   discoveryStatus: enumOf(['checked_no_match', 'candidates', 'needs_input', 'inaccessible', 'unsupported', 'deferred'] as const),
   stopReason: strNull(200),
+  nativeCursor: strNull(2000),
   items: arr(obj({
     candidateRef: str(200),
     platform: str(200),
@@ -398,7 +399,8 @@ export const saveFindingsOutputV = obj({
   submitted: arr(obj({
     pendingRef: strNull(200),
     findingKind: enumOf(['collected_finding', 'verification_check'] as const),
-    accountIds: arr(str(200), 50),
+    // One finding allows 100 support + 100 counter + 100 coverage accounts.
+    accountIds: arr(str(200), 300),
     dependencyEvidenceIds: arr(str(200), 200)
   }), 50),
   notSubmitted: arr(obj({ index: int(0, 1000), reason: str(2000) }), 50),

@@ -24,6 +24,7 @@ import type { DB } from '../server/db/index.js';
 import { Store } from '../server/store.js';
 import {
   TOOL_NAMES,
+  loadSkillOutputV,
   envelopeV,
   toolAllowedFor,
   type ContentMetadata,
@@ -812,7 +813,7 @@ test('legitimate third-party comment and thread authors are preserved and never 
 test('discovery timeouts are never recorded as checked_no_match', async () => {
   const fx = fixture({
     handlers: {
-      discover_accounts: async () => ({ discoveryStatus: 'checked_no_match', stopReason: 'timeout', items: [] })
+      discover_accounts: async () => ({ discoveryStatus: 'checked_no_match', stopReason: 'timeout', nativeCursor: null, items: [] })
     }
   });
   const envelope = await call(trusted({ role: 'search', phase: 'search' }), 'discover_accounts', inputFixtures.discover_accounts(), fx);
@@ -821,7 +822,7 @@ test('discovery timeouts are never recorded as checked_no_match', async () => {
 
   const ok = fixture({
     handlers: {
-      discover_accounts: async () => ({ discoveryStatus: 'inaccessible', stopReason: 'timeout', items: [] })
+      discover_accounts: async () => ({ discoveryStatus: 'inaccessible', stopReason: 'timeout', nativeCursor: null, items: [] })
     }
   });
   const honest = await call(trusted({ role: 'search', phase: 'search' }), 'discover_accounts', inputFixtures.discover_accounts(), ok);
@@ -1820,5 +1821,69 @@ test('long handler errors preserve settled receipts in a valid failure envelope'
     assert.equal(receipts[0]?.state, 'completed');
     assert.equal(fx.settleCalls.get(receipts[0]!.actionId!), 1);
     assert.ok(envelopeV(result, 'envelope'));
+  }
+});
+
+
+test('discovery issues a bound next-page cursor and refuses changed query or rules', async () => {
+  const seen: (string | null)[] = [];
+  const fx = fixture({ handlers: { discover_accounts: async (ctx) => {
+    seen.push(ctx.cursor.nativeCursor);
+    await ctx.requests.run({ endpoint: 'discovery.page', note: 'synthetic' }, ctx.signal);
+    return { discoveryStatus: 'candidates', stopReason: null, nativeCursor: seen.length === 1 ? 'native-next' : null, items: [] };
+  } } });
+  const context = trusted({ role: 'search', phase: 'search' });
+  const input = { platform: 'synthetic', query: 'ada', rules: 'public-profile' };
+  const first = await call(context, 'discover_accounts', input, fx);
+  assert.equal(first.status, 'success', first.reason ?? '');
+  assert.ok(first.cursor.token);
+  const second = await call(context, 'discover_accounts', { ...input, cursor: first.cursor.token }, fx);
+  assert.equal(second.status, 'success', second.reason ?? '');
+  assert.deepEqual(seen, [null, 'native-next']);
+  assert.deepEqual(second.cursor, { token: null, nativeCursor: null }, 'terminal page has no continuation');
+  for (const changed of [{ query: 'other' }, { rules: 'different' }]) {
+    const refused = await call(context, 'discover_accounts', { ...input, ...changed, cursor: first.cursor.token }, fx);
+    assert.equal(refused.status, 'blocked');
+  }
+  assert.equal(fx.executorCalls.length, 2);
+  assert.ok(envelopeV(first, 'envelope'));
+});
+
+test('a maximum-capacity multi-account finding preserves its accepted receipt', async () => {
+  const fx = fixture({ submissions: 'ok' });
+  const context = trusted();
+  const accounts = Array.from({ length: 300 }, (_, i) => ({ accountId: `acct-${i}`, platform: 'synthetic', handle: `h${i}`, allowedScope: 'public_history' as const }));
+  context.accounts = accounts;
+  fx.stateSnap.current.accounts = accounts;
+  const base = fakeEvidencePort();
+  fx.ports.evidence = { ...base, readEvidence(req) {
+    const result = base.readEvidence(req);
+    const index = Number(req.evidenceId.slice(3));
+    return { ...result, evidence: { ...result.evidence!, evidenceId: req.evidenceId, accountId: `acct-${index}`, role: index < 100 ? 'factual_support' : 'factual_counterevidence' } };
+  } };
+  const result = await call(context, 'save_findings', { findings: [{
+    kind: 'collected_finding', statement: 'Synthetic synthesis.',
+    supportEvidenceIds: Array.from({ length: 100 }, (_, i) => `ev-${i}`),
+    counterEvidenceIds: Array.from({ length: 100 }, (_, i) => `ev-${100 + i}`),
+    coverageDelta: Array.from({ length: 100 }, (_, i) => ({
+      locator: { accountId: `acct-${200 + i}`, sourceId: 'src-1', sourceRevision: 1 },
+      taskRef: { kind: 'question_matrix', slot: 'work' }, status: 'evidence_found'
+    }))
+  }] }, fx);
+  assert.equal(result.status, 'success', result.reason ?? '');
+  assert.equal(result.staged, true);
+  assert.equal(fx.commits.length, 1);
+  const submitted = (result.content as { submitted: { pendingRef: string; accountIds: string[]; dependencyEvidenceIds: string[] }[] }).submitted;
+  assert.equal(submitted[0]?.pendingRef, 'pending-1');
+  assert.equal(submitted[0]?.accountIds.length, 300);
+  assert.equal(submitted[0]?.dependencyEvidenceIds.length, 200);
+  assert.ok(envelopeV(result, 'envelope'));
+});
+
+test('local skill metadata requires its declared reason', () => {
+  const output = { skillId: 'skill', version: 'v1', hash: 'h', body: 'body', dependencies: [], metadata: { applicable: false, reason: 'local_skill' } };
+  assert.ok(loadSkillOutputV(output, 'output'));
+  for (const reason of ['', 'controller_ack']) {
+    assert.throws(() => loadSkillOutputV({ ...output, metadata: { applicable: false, reason } }, 'output'));
   }
 });
