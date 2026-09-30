@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
+import { CompletionStore } from './research/completion-store.js';
 import type {
   AnswerSectionDraft,
   CanonicalView,
@@ -241,9 +242,12 @@ export interface CreateRunInput {
 export class Store {
   readonly research: ResearchStore;
   readonly cases: CaseStore;
+  /** GET-60 frozen scope / completion policy foundations (same lifetime). */
+  readonly completion: CompletionStore;
   constructor(private readonly db: DB) {
     this.research = new ResearchStore(db);
     this.cases = new CaseStore(db);
+    this.completion = new CompletionStore(db, this.cases);
   }
 
   insertRun(input: CreateRunInput): RunRecord {
