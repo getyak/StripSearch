@@ -53,7 +53,7 @@
 - [x] **2. Run:** from `apps/web`, `node --import tsx --test src/tests/platform-catalog.test.ts`; confirm failures come from missing module/behavior, not environment.
 - [x] **3. Implement the interfaces and data:** use separate documentation/integration/access/verification axes. Record public source URLs/date/hash and historical uncertainty; no fabricated endpoint availability. Extend `/api/discovery/registry` compatibly with a versioned catalog surface. Add data-copy step to existing build and a compiled-runtime read test.
 - [x] **4. Verify:** targeted test, existing platform-discovery/research-completion/research-tool-contracts tests, `npm run typecheck`, `npm run build`; assert data loads outside repository cwd with a temporary copied production build. `python3 scripts/check_design.py` from repo root.
-- [ ] **5. Commit:** `feat(platforms): add versioned capability catalog (GET-90)`; review and deliver GET-90 independently using Delivery Gate below. Its acceptance is directory/documentation honesty, not all platforms live.
+- [x] **5. Commit:** `feat(platforms): add versioned capability catalog (GET-90)`; review and deliver GET-90 independently using Delivery Gate below. Its acceptance is directory/documentation honesty, not all platforms live.（父级已交付：PR20 合并、8 CI + 合并后 37/37、GET-90 Done。）
 
 ## Task 2: 固定版本规则导入与合并（GET-91）
 
@@ -68,7 +68,7 @@
 - [x] **2. Run:** `node --import tsx --test src/tests/public-rules.test.ts`; confirm meaningful red state.
 - [x] **3. Implement importer and one explicit maintenance import:** retrieve full official source datasets, freeze commit/hash, check fixed-version licenses, preserve MIT/CC BY-SA attribution and modification notices. Incorporate entire admissible union into new catalog version; list all exclusions instead of replacing the dataset with samples. Maintenance networking is separate from offline checks and never fetches人物 fixture pages.
 - [x] **4. Verify:** offline parser tests plus catalog tests; compare manifest counts against the fixed source files through an independent JSON count, check license/attribution and reproducible hashes. Build reads normalized data without any startup download.
-- [ ] **5. Commit:** `feat(discovery): import versioned public account rules (GET-91)`. GET-91 remains open until Task 3 execution acceptance also passes.
+- [x] **5. Commit:** `feat(discovery): import versioned public account rules (GET-91)`. GET-91 remains open until Task 3 execution acceptance also passes.（父级已交付：PR21 合并 `27f1075`、8 exact-head CI、合并后验证通过。）
 
 ## Task 3: 受控规则执行和请求复用（GET-91）
 
@@ -84,7 +84,7 @@
 - [x] **2. Run:** `node --import tsx --test src/tests/discovery-rule-executor.test.ts`; ensure no real fetch/DNS in tests.
 - [x] **3. Implement:** approved public HTTPS requests, reject unsafe URL/addresses and unauthorized redirects; literal/restricted predicates only. Unknown-host rate defaults to serial, configured per-origin bound and global existing discovery limits both apply. Supply pure fake clock/transport hooks for tests. Persistent reuse/unknown recovery handled by Task 5 ports.
 - [x] **4. Verify:** rule-executor, public-rules, existing discovery-adapters/regressions tests, typecheck/build. Verify every paid/unknown request outcome has a receipt; unsupported/authority refusal dispatches zero requests. Do not promote rule documentation to live verification.
-- [ ] **5. Commit:** `feat(discovery): execute public rules with bounded requests (GET-91)`; independently review and deliver GET-91 after full import and executor acceptance, retaining any unmet live claims as unverified.
+- [x] **5. Commit:** `feat(discovery): execute public rules with bounded requests (GET-91)`; independently review and deliver GET-91 after full import and executor acceptance, retaining any unmet live claims as unverified.（父级已交付：PR21 合并 `27f1075`，合并后 build、目录 181 pass / 1 环境跳过、来源审计 4 项、design 及 main CI 通过，GET-91 Done。）
 
 ## Task 4: 路线、请求键与账号键（GET-92）
 
@@ -96,11 +96,11 @@
 - `canonicalAccountKey(candidate: DiscoveredAccountIdentity): string | null` uses native ID, else platform-specific URL, else handle with instance/accountKind and platform case rules. `mergeCandidateOrigins(existing: CandidateDraft, incoming: CandidateDraft): CandidateDraft` keeps distinct origins/conflicts.
 - `CatalogDiscoveryInput` is accepted public classification plus server-owned input reference; an authorized email remains unsupported with no provider dispatch.
 
-- [ ] **1. Add tests:** no-route platform remains present; no four-platform cap; selflink/username/platform/official/site-search ordering; missing credentials gives explicit reason; email dispatch zero; same canonical request key dedupes but different owner/input/page does not. Account tests cover Mastodon instances, two same-platform accounts, organization/publication/person, native ID vs URL evidence, case-sensitive handle and allowed/identity-bearing URL parameters.
-- [ ] **2. Run:** route-planner/account-key tests and confirm red state.
-- [ ] **3. Implement:** enumerate full catalog first, then choose admissible implemented operations; retain why each route is unavailable. Existing search adapters only through their real implemented API and receipts; no new provider integration or bypass fallback. Extract only traceable selflinks; results remain candidate clues.
-- [ ] **4. Verify:** targeted tests, catalog/rule-executor tests and GET-59 contracts; inspect strict envelope mappings (timeouts via failed/partial+gaps, no_adapter via not_implemented/unsupported) without new ToolName. Run typecheck/build.
-- [ ] **5. Commit:** `feat(discovery): plan catalog routes and deduplicate accounts (GET-92)`; independently review/deliver GET-92.
+- [x] **1. Add tests:** no-route platform remains present; no four-platform cap; selflink/username/platform/official/site-search ordering; missing credentials gives explicit reason; email dispatch zero; same canonical request key dedupes but different owner/input/page does not. Account tests cover Mastodon instances, two same-platform accounts, organization/publication/person, native ID vs URL evidence, case-sensitive handle and allowed/identity-bearing URL parameters.
+- [x] **2. Run:** route-planner/account-key tests and confirm red state.（行为红已记录：30 项失败 + 目录投影/加载器 2 项失败，均为行为缺失而非环境问题。）
+- [x] **3. Implement:** enumerate full catalog first, then choose admissible implemented operations; retain why each route is unavailable. Existing search adapters only through their real implemented API and receipts; no new provider integration or bypass fallback. Extract only traceable selflinks; results remain candidate clues.
+- [x] **4. Verify:** targeted tests, catalog/rule-executor tests and GET-59 contracts; inspect strict envelope mappings (timeouts via failed/partial+gaps, no_adapter via not_implemented/unsupported) without new ToolName. Run typecheck/build.
+- [ ] **5. Commit:** `feat(discovery): plan catalog routes and deduplicate accounts (GET-92)`; independently review/deliver GET-92.（实现完成、待交付门禁；commit/独立审查/CI/合并/Done 归父级。）
 
 ## Task 5: 发现轮存储与调度（GET-63，GET-62 合并后）
 
@@ -146,4 +146,4 @@
 
 spec §1–4 → Task 1；§5 → Task 2/3；§6 → Task 4；§7 → Task 5/6；§8 → Task 6；§9 → all verification steps and Delivery Gate。五个 Review Focus 已分配明确测试。模块名/签名一致，GET-62 合并和 Figwright grounding 保留为真实执行条件。
 
-2026-09-30：规范与计划均已获用户批准。Task 1 已实施并经 GET-90 交付（PR20 合并、8 CI + 合并后 37/37、GET-90 Done）。Task 2 与 Task 3（GET-91）已在同一隔离 worktree 顺序实施完成：固定字节全量导入（Maigret 6206 / WhatsMyName 717，raw=loaded+excluded 逐行回执）、组合目录身份与有界分页 API、独立受限执行器（未接线）；实现完成后按独立审查确认的 P1/P2 做了集中修复（marker 字节保真、组合身份/游标、模板末尾斜杠/fragment、严格规则包加载器、逐路线溯源、IANA 地址策略、deadline/abort 覆盖重定向 DNS、权威/评估/队列/TTL/回执语义），并保留回归证据（修复前 RED、修复后 GREEN）。当前状态：GET-91 **实现完成、待交付门禁**（父级独立审查/CI/合并/Done 归父级）；各任务 step 5 的 commit 由父级执行。Task 4–6 尚未实施；GET-62 已合并契约仍是 GET-63 的依赖。Figwright 设计副本及交互状态已单独准备，尚未接入生产 Web。
+2026-09-30：规范与计划均已获用户批准。Task 1 已实施并经 GET-90 交付（PR20 合并、8 CI + 合并后 37/37、GET-90 Done）。Task 2 与 Task 3（GET-91）已在隔离 worktree 顺序实施完成：固定字节全量导入（Maigret 6206 / WhatsMyName 717，raw=loaded+excluded 逐行回执）、组合目录身份与有界分页 API、独立受限执行器（未接线）；实现后按独立审查确认的 P1/P2 做了集中修复并保留回归证据；**GET-91 已交付**（PR21 合并 `27f1075`，8 项 exact-head CI；合并后 build、目录测试 181 pass / 1 环境门控 skip、来源审计 4 项、design 检查及 main CI 通过，GET-91 Done）。Task 4（GET-92）已在同一隔离 worktree 实施完成（step 1–4）：共享契约 `shared/discovery-plan.ts`（平台义务 `platformObligation` 与 name_query 语义）、纯全目录计划器 `planDiscoveryRound`、不透明请求键 `discoveryRequestKey`、保守账号键 `canonicalAccountKey` / `mergeCandidateOrigins`。初版行为红 30 项 + 目录红 2 项 → 全绿后送独立 native 审查，结论 **REQUEST CHANGES**（5 P1：过期键误并、冲突丢失、空证据证明、凭据 body、点号用户名定位；5 P2：fragment 去重口径、静态 URL 预检、name 义务诚实性、email 提前拒收、canonicalJson 非 plain）；repair1 集中修复并保留 10 项行为 RED；父级补充冻结旧版 canonicalJson 的负向对照及复审残留的凭据元数据回归（4 项行为 RED），再次修复，并补充历史 URL 冲突的拒收与原样保留回归。最终目标套件 322 项 = 321 pass / 1 环境跳过 / 0 fail；最终源全套 Web 一次 603 项 = 602 pass / 1 环境跳过 / 0 fail（含 3 项真实 Chromium PDF；初版历史全套的 1 次 PDF 失败根因未确认，不作为已解释）；typecheck / build / design 直实退出码全 0。**step 5 commit 与交付门禁待父级：GET-92 待独立复审确认全部 P1/P2 关闭 + 当前 head CI + 合并 + 合并后验收，尚未交付**（不预claim Task 4 delivered，也不预claim Task 5/6）。Task 5–6 尚未实施；GET-62 已合并契约仍是 GET-63 的依赖。Figwright 设计副本及交互状态已单独准备，尚未接入生产 Web。

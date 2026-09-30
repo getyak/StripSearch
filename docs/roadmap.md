@@ -62,7 +62,9 @@
 
 2026-09-30：[版本化平台目录（GET-90）](platform-catalog.md) 已落地：20 个 TikHub 平台、30 个替代平台、个人网站与保留旧规则的 legacy 条目全部登记，七项能力×四维度（文档/实现/访问/验证）按逐维证据分开记录，一份快照产出旧 probe / GET-60 完成 / GET-59 能力三个投影，并扩展 `/api/discovery/registry` 的目录缺口与公开溯源面。全部能力记 documented_only、价格显式 null + 公开依据（null ≠ 免费）；GET-90 交付时 Maigret / WhatsMyName / TikHub 来源仅冻结元数据（commit/版本、sha256、抓取时间、许可），未导入、无导入计数，无任何 live 验证。GET-90 已随 PR20 合并交付（8 CI + 合并后 37/37），GET-91 随后导入公共规则（见下）。
 
-2026-09-30：[公共账号规则（GET-91）](public-account-rules.md) 实现已完成（待交付门禁）：固定字节完整导入 Maigret 6206 与 WhatsMyName 717 行（raw = loaded + excluded 逐行回执）、归一化受限规则 + 排除回执 + 逐来源归属/许可/修改说明 + manifest；组合目录扩至 4421 条 entry（curated 54 与 legacy 13 逐字保留；公共规则并集 4375 个平台/实例组与组合目录 4421 分列计数；组合身份绑定规则包 hash，旧 cursor 失效），`/api/discovery/registry` 平台详情有界分页（≤100 + 显式 total + 服务端 HMAC 游标）；独立受限执行器（DNS/地址策略、固定地址 HTTPS 传输、限流/缓存/回执/权威口）离线验证但**未接线**（接入属 GET-63，GET-59 网关不变），无任何 live 验证。
+2026-09-30：[公共账号规则（GET-91）](public-account-rules.md) 已交付：PR21 合并为 `27f1075`（8 项 exact-head CI 通过；合并后 build、目录测试 181 pass / 1 环境门控 skip、来源审计 4 项、design 检查及 main CI 通过）。实现内容：固定字节完整导入 Maigret 6206 与 WhatsMyName 717 行（raw = loaded + excluded 逐行回执）、归一化受限规则 + 排除回执 + 逐来源归属/许可/修改说明 + manifest；组合目录扩至 4421 条 entry（curated 54 与 legacy 13 逐字保留；公共规则并集 4375 个平台/实例组与组合目录 4421 分列计数；组合身份绑定规则包 hash，旧 cursor 失效），`/api/discovery/registry` 平台详情有界分页（≤100 + 显式 total + 服务端 HMAC 游标）；独立受限执行器（DNS/地址策略、固定地址 HTTPS 传输、限流/缓存/回执/权威口）离线验证但**未接线**（接入属 GET-63，GET-59 网关不变），无任何 live 验证。
+
+2026-09-30：[发现路线规划、请求键与账号键（GET-92）](discovery-route-planning.md) 实现已完成（含独立审查 REQUEST CHANGES 后的 repair1：5 P1 + 5 P2 全部修复并加回归；仍待独立复审 + 当前 head CI + 合并 + 合并后验收，均归父级）：纯全目录路线计划器（4421 条逐一计划、显式 no_adapter/name_query 缺口、分母不缩小；义务与 handler 准备度分离）、不透明请求键（绑定 owner/case/input/registry/rule/policy/authority/access，拒绝 URL/query/fragment/body 凭据）与保守账号键（native ID 发行方命名空间优先、URL/handle 保守回退、快照与过期键拒收、双侧冲突/出处整体保留）；默认操作清单只有 GET-91 独立受限执行器（明示未接线），不发任何请求、无 live 验证。
 
 ## 已采纳的设计基线
 

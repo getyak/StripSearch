@@ -1,6 +1,6 @@
 # 公共账号规则（GET-91）
 
-状态：2026-09-30 已实施（Task 2 导入/目录 + Task 3 独立受限执行器），实现完成、待父级独立审查与交付门禁；不代表任何站点 live 验证。所有测试离线（合成输入、fake DNS/transport），无启动/CI 下载，无付费请求。
+状态：2026-09-30 已实施（Task 2 导入/目录 + Task 3 独立受限执行器）并已交付：PR21 合并为 `27f1075`（8 项 exact-head CI 通过；合并后 build、目录测试 181 pass / 1 环境门控 skip、来源审计 4 项、design 检查及 main CI 通过）；不代表任何站点 live 验证。所有测试离线（合成输入、fake DNS/transport），无启动/CI 下载，无付费请求。
 
 数据：[`apps/web/data/platforms/public-rules/`](../apps/web/data/platforms/public-rules/)（归一化规则、排除回执、逐来源归属/许可/修改说明、manifest）。代码：共享契约 [`public-discovery-rules.ts`](../apps/web/src/shared/public-discovery-rules.ts)、编译器/加载器 [`public-rules.ts`](../apps/web/src/server/platforms/public-rules.ts)、维护导入 CLI [`import-public-rules.ts`](../apps/web/scripts/import-public-rules.ts)、目标策略 [`request-policy.ts`](../apps/web/src/server/discovery/request-policy.ts)、固定地址传输 [`pinned-transport.ts`](../apps/web/src/server/discovery/pinned-transport.ts)、评估/执行 [`rule-executor.ts`](../apps/web/src/server/discovery/rule-executor.ts)。
 
@@ -48,4 +48,4 @@
 - 合成回归（`public-rules*.test.ts`、`discovery-rule-executor*.test.ts`）+ 固定字节审计（`public-rules-source-audit.test.ts`：常驻常量核对 raw=loaded+excluded 与逐行回执完整性；`PUBLIC_RULE_SOURCE_DIR` 指向本地缓存时额外逐字节重编译并要求与提交产物字节一致——该字节审计是维护者步骤，不设私有路径入 Git）。
 - 离线验证：typecheck、生产 build 与 `python3 scripts/check_design.py` 均通过；目标测试 181 pass / 1 skip（182 项，skip 为环境门控的维护者字节审计），全套 Web 测试 550 pass / 0 fail / 0 skip。另行使用固定本地来源运行维护者审计 4/4 无 skip，两次实际导入 CLI 生成产物逐字节一致。第四轮修复前行为回归为 3 pass / 6 fail / 0 cancel / 0 skip，修复后转绿。另补初次/重定向租约同回合 grant/abort 的两项回归：修复前 0 pass / 2 fail，修复后 2/2，通过共享一次释放包装器避免重复释放。
 - 没有任何 live 验证：目录能力保持 documented_only/未接线，无 GET-59 `supported`、无假回执；真实端点验证单列后续任务。
-- Git 字节检查：窄 `.gitattributes` 保留数据及原许可字节；实际索引导出、生产构建、仓库外默认目录加载与全部 manifest 文件 hash 核对通过，WhatsMyName 原许可保持 309 字节。独立复审、当前 PR head CI、合并及合并后验收仍遵守交付门禁。
+- Git 字节检查：窄 `.gitattributes` 保留数据及原许可字节；实际索引导出、生产构建、仓库外默认目录加载与全部 manifest 文件 hash 核对通过，WhatsMyName 原许可保持 309 字节。GET-91 已按交付门禁完成：独立复审、PR21 head CI（8 项）与合并（`27f1075`）后验证（build、目录 181 pass / 1 环境门控 skip、来源审计 4 项、design）及 main CI 均读回通过。GET-92 的纯规划/请求键/账号键见 [`discovery-route-planning.md`](discovery-route-planning.md)（未接线、无 live 验证）。

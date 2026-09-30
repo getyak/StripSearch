@@ -53,6 +53,7 @@ import type {
   PlatformCatalogSnapshot
 } from '../../shared/platform-catalog.js';
 import { threadStateFor } from '../../shared/platform-catalog.js';
+import { platformObligation } from '../../shared/discovery-plan.js';
 import type { PublicRuleUnion } from '../../shared/public-discovery-rules.js';
 import {
   knownPlatformTemplateMap,
@@ -154,7 +155,7 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const HASH_RE = /^sha256:[0-9a-f]{64}$/;
 
 const COHORTS = ['tikhub', 'alternative', 'personal_website', 'legacy_only', 'public_rule'] as const;
-const INPUT_KINDS = ['username', 'email', 'homepage_url'] as const;
+const INPUT_KINDS = ['username', 'email', 'homepage_url', 'name_query'] as const;
 const INSTANCE_VALUES = ['required', 'optional', 'none'] as const;
 const ACCOUNT_KINDS = ['person', 'publication', 'channel', 'organization', 'unknown'] as const;
 const AUTHORIZATIONS = ['self', 'consent_obtained', 'public_professional'] as const;
@@ -871,30 +872,20 @@ interface ApplicabilityDecision {
 }
 
 function applicabilityFor(entry: CatalogEntry, input: CatalogApplicabilityInput): ApplicabilityDecision {
-  const kinds = input.acceptedKinds.filter((kind) => entry.inputKinds.includes(kind));
-  if (kinds.length === 0) {
-    return {
-      applicability: 'not_applicable',
-      reason: `输入种类不匹配：目录支持 ${entry.inputKinds.join('/')}，本轮输入 ${input.acceptedKinds.join('/') || '（空）'}`
-    };
-  }
-  if (entry.instance === 'required' && !input.instanceHints[entry.platformId]) {
-    return {
-      applicability: 'not_applicable',
-      reason: `实例限定平台缺少实例提示（${entry.platformId}）`
-    };
-  }
-  const authorizations = entry.applicability.authorizations;
-  if (authorizations.length > 0 && !authorizations.includes(input.authorization)) {
-    return {
-      applicability: 'not_applicable',
-      reason: `授权策略不满足：需要 ${authorizations.join('/')}，当前 ${input.authorization}`
-    };
-  }
-  return {
-    applicability: 'applicable',
-    reason: `目录内适用平台：输入 ${kinds.join('/')}，授权 ${input.authorization}，冻结为发现义务`
-  };
+  // One shared authority (shared/discovery-plan.ts) for the planner and this
+  // projection: applicability follows input kinds / instance hints /
+  // authorization policy only — never adapter existence. `name_query` rounds
+  // keep every public-account obligation with explicit gaps instead of
+  // collapsing the denominator; other kinds keep the frozen GET-90/91
+  // reasons verbatim.
+  const decision = platformObligation(entry, {
+    acceptedKinds: input.acceptedKinds,
+    instanceHints: input.instanceHints,
+    authorization: input.authorization,
+    nameQueryRound: input.acceptedKinds.includes('name_query'),
+    accountKinds: null
+  });
+  return { applicability: decision.state, reason: decision.reason };
 }
 
 /**

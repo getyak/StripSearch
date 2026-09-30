@@ -51,7 +51,14 @@ export type CompletionPlatformRegistry = CompletionPlatformRegistryShape;
 /* Entries                                                             */
 /* ------------------------------------------------------------------ */
 
-export type CatalogInputKind = 'username' | 'email' | 'homepage_url';
+/**
+ * Accepted input kinds. `name_query` is a GET-92 discovery-plan obligation
+ * meaning (see `shared/discovery-plan.ts`): no frozen catalog entry claims
+ * it in its data, because operation-level accepted input lives on the route
+ * contract — a name/text query must never collapse the completion
+ * denominator to zero nor be coerced into a username template.
+ */
+export type CatalogInputKind = 'username' | 'email' | 'homepage_url' | 'name_query';
 
 /**
  * Which cohort an entry belongs to. The approved spec lists 20 TikHub
