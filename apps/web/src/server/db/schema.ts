@@ -472,4 +472,79 @@ CREATE TABLE IF NOT EXISTS research_case_item_coverage_revisions (
   created_at TEXT NOT NULL,
   PRIMARY KEY (item_id, revision)
 );
+
+-- GET-60 completion policy foundations (shared/research-completion.ts).
+-- Additive only. Frozen scope specifications are immutable rules (questions
+-- with applicability reasons, full platform registry snapshot, account range,
+-- time window, body/media/default comment/thread depth), never a hand-picked
+-- corpus. One row per authoritative case scopeVersion; the first freeze binds
+-- the version in effect and later edits advance the version through the
+-- shared case-level scope path and append a new row. The account slice is
+-- copied and hashed in the same transaction (scope_event_id anchors the
+-- journal row), so old scope is never reconstructed from current account rows.
+CREATE TABLE IF NOT EXISTS research_case_completion_scopes (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  scope_version INTEGER NOT NULL,
+  registry_version TEXT NOT NULL,
+  registry_hash TEXT NOT NULL,
+  spec_hash TEXT NOT NULL,
+  spec_json TEXT NOT NULL,
+  account_slice_json TEXT NOT NULL,
+  account_slice_hash TEXT NOT NULL,
+  scope_event_id INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(case_id, scope_version)
+);
+CREATE INDEX IF NOT EXISTS research_case_completion_scopes_case ON research_case_completion_scopes(case_id, created_at);
+
+-- Immutable observation/attempt receipts bound to case + frozen spec +
+-- obligation. Structured action/result/stop reason/access boundary/remaining
+-- unknown plus validated account/source/evidence/coverage references. A free
+-- text note can never establish completion; unattempted, budget exhaustion,
+-- permission failure and unsupported stay distinct recorded states.
+CREATE TABLE IF NOT EXISTS research_case_completion_observations (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  scope_spec_id TEXT NOT NULL REFERENCES research_case_completion_scopes(id) ON DELETE CASCADE,
+  scope_version INTEGER NOT NULL,
+  obligation_key TEXT NOT NULL,
+  obligation_json TEXT NOT NULL,
+  action TEXT NOT NULL,
+  result TEXT NOT NULL,
+  attempt_state TEXT NOT NULL,
+  stop_reason TEXT,
+  access_boundary TEXT,
+  remaining_unknown TEXT,
+  note TEXT,
+  payload_json TEXT NOT NULL,
+  refs_json TEXT NOT NULL,
+  synthetic INTEGER NOT NULL,
+  provenance_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_case_completion_obs_case
+  ON research_case_completion_observations(case_id, scope_spec_id, seq);
+
+-- Append-only assessments: each stores the exact selected input snapshot, the
+-- original deterministic verdict and policyVersion/scopeVersion/
+-- evidenceRevision/inputHash. Historical verdicts are never rewritten;
+-- current validity is derived separately at read time.
+CREATE TABLE IF NOT EXISTS research_case_completion_assessments (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  scope_spec_id TEXT NOT NULL REFERENCES research_case_completion_scopes(id) ON DELETE CASCADE,
+  scope_version INTEGER NOT NULL,
+  policy_version TEXT NOT NULL,
+  evidence_revision TEXT NOT NULL,
+  input_hash TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  evaluation_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_case_completion_assessments_case
+  ON research_case_completion_assessments(case_id, created_at, id);
 `;

@@ -26,7 +26,7 @@
 
 ## 范围变更：原子、可回读、不可绕过
 
-`applyScopeChange`（批量，一次提交）与 `updateAccountFacets` 涉及 `userSelection` / `allowedScope` 的补丁走**同一条**原子路径：同一事务内写入真实的逐账号 before/after 选择与允许范围快照并推进 `scopeVersion`。旧 `expectedScopeVersion` 的写入被拒绝（StaleScopeError）；混合有效/无效的批量整体回滚。`addAccount` 只记录 `unanswered` 基线；带用户选择的创建必须走 `applyScopeChange`。范围快照追加不可变，推进新版本并重开数据库后仍可回读旧范围。
+`applyScopeChange`（批量，一次提交）与 `updateAccountFacets` 涉及 `userSelection` / `allowedScope` 的补丁走**同一条**原子路径：同一事务内写入真实的逐账号 before/after 选择与允许范围快照并推进 `scopeVersion`。旧 `expectedScopeVersion` 的写入被拒绝（StaleScopeError）；混合有效/无效的批量整体回滚。`addAccount` 只记录 `unanswered` 基线；带用户选择的创建必须走 `applyScopeChange`。范围快照追加不可变，推进新版本并重开数据库后仍可回读旧范围。GET-60 的完成范围冻结/修订复用同一 case 级原子路径（`applyCaseScopeMutation`，无账号必需、不造假账号），冻结与修订事件进入同一 journal 并作为冻结记录的锚点。
 
 ## 撤回与导出
 
@@ -34,7 +34,7 @@
 
 ## 逐帖覆盖记录（ItemCoverage）
 
-覆盖按**逐内容定位**存储：`CoverageLocator` = accountId + 稳定 sourceId + sourceRevision，唯一键为（locator + taskRef）。同一案例的两个账号、同一账号的两篇内容、同一内容的两个 sourceRevision 永不共用一条记录，跨账号数据不混用。`recordSourceRevision` 即可建立定位，所以无证据的 `unseen` 也能落库；显式 itemId 必须匹配完整的绑定身份（账号/内容/revision/taskRef），重新绑定被拒绝且事务不改任何记录。每次写入追加不可变 revision：旧范围（scopeVersion）的覆盖保留为历史来源而非被静默覆盖；导出逐项标注自身范围版本，旧范围记录标“待复核”，页尾当前版本不替代项版本。`taskRefKey` 对任意合法字符串单射（research_task 用长度前缀元组编码，question_matrix 保留可读形式）。覆盖视图分别保存范围新鲜度（`scopeValidity`）与证据依赖有效性（`dependencyValidity`）：支持或反证撤回、缺失、角色不符或属于其他账号时，JSON/Markdown 都标记证据待复核，原覆盖状态和历史修订保持不变。完成判定、body/media/评论执行与跨批次聚合留给 GET-60/95。
+覆盖按**逐内容定位**存储：`CoverageLocator` = accountId + 稳定 sourceId + sourceRevision，唯一键为（locator + taskRef）。同一案例的两个账号、同一账号的两篇内容、同一内容的两个 sourceRevision 永不共用一条记录，跨账号数据不混用。`recordSourceRevision` 即可建立定位，所以无证据的 `unseen` 也能落库；显式 itemId 必须匹配完整的绑定身份（账号/内容/revision/taskRef），重新绑定被拒绝且事务不改任何记录。每次写入追加不可变 revision：旧范围（scopeVersion）的覆盖保留为历史来源而非被静默覆盖；导出逐项标注自身范围版本，旧范围记录标“待复核”，页尾当前版本不替代项版本。`taskRefKey` 对任意合法字符串单射（research_task 用长度前缀元组编码，question_matrix 保留可读形式）。覆盖视图分别保存范围新鲜度（`scopeValidity`）与证据依赖有效性（`dependencyValidity`）：支持或反证撤回、缺失、角色不符或属于其他账号时，JSON/Markdown 都标记证据待复核，原覆盖状态和历史修订保持不变。范围/完成政策、最小观测回执与追加式评估见 [GET-60 研究范围与完成契约](research-completion-domain.md)；body/media/评论执行与跨批次聚合留给 GET-95。
 
 ## 遗留数据
 

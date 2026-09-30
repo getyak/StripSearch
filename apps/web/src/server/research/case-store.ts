@@ -190,6 +190,23 @@ export interface ScopeChangeResult {
   accounts: AccountSelection[];
 }
 
+/** Case-level scope mutation input: no account is required (GET-60 freeze path). */
+export interface CaseScopeMutationInput {
+  ownerId: string;
+  caseId: string;
+  expectedScopeVersion: ScopeVersion;
+  reason: string;
+  /** Advance the authoritative scope version exactly once (revision path). */
+  advance: boolean;
+}
+
+export interface CaseScopeMutationResult {
+  case: ResearchCase;
+  snapshot: ScopeVersionRecord;
+  /** Journal row id of the event written here; a stable anchor for later freezes. */
+  eventId: number;
+}
+
 interface CaseRow {
   id: string;
   owner_id: string;
@@ -552,16 +569,19 @@ export class CaseStore {
     reason: string,
     before: ScopeAccountSnapshot[],
     after: ScopeAccountSnapshot[]
-  ): ScopeVersionRecord {
+  ): { record: ScopeVersionRecord; eventId: number } {
     const createdAt = nowIso();
-    this.db
+    const info = this.db
       .prepare(
         `INSERT INTO research_case_scope_versions
           (case_id, scope_version, reason, before_json, after_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(caseId, scopeVersion, reason, JSON.stringify(before), JSON.stringify(after), createdAt);
-    return { caseId, scopeVersion: asScopeVersion(scopeVersion), reason, createdAt, before, after };
+    return {
+      record: { caseId, scopeVersion: asScopeVersion(scopeVersion), reason, createdAt, before, after },
+      eventId: Number(info.lastInsertRowid)
+    };
   }
 
   /** Atomic scope commit: journal before/after state, then advance the version. */
@@ -570,14 +590,14 @@ export class CaseStore {
     current: CaseRow,
     reason: string,
     before: ScopeAccountSnapshot[]
-  ): { case: ResearchCase; snapshot: ScopeVersionRecord } {
+  ): { case: ResearchCase; snapshot: ScopeVersionRecord; eventId: number } {
     const after = this.scopeSnapshot(caseId);
     const next = nextScopeVersion(asScopeVersion(current.scope_version));
     this.db
       .prepare('UPDATE research_cases SET scope_version = ?, updated_at = ? WHERE id = ?')
       .run(next, nowIso(), caseId);
-    const snapshot = this.recordScopeEvent(caseId, next, reason, before, after);
-    return { case: mapCase(this.db.prepare('SELECT * FROM research_cases WHERE id = ?').get(caseId) as CaseRow), snapshot };
+    const { record: snapshot, eventId } = this.recordScopeEvent(caseId, next, reason, before, after);
+    return { case: mapCase(this.db.prepare('SELECT * FROM research_cases WHERE id = ?').get(caseId) as CaseRow), snapshot, eventId };
   }
 
   private mapClaim(row: ClaimRow): CaseClaim {
@@ -675,6 +695,42 @@ export class CaseStore {
       const row = this.validate(ctx);
       return this.commitScopeMutation(ctx.caseId, row, reason, this.scopeSnapshot(ctx.caseId)).case;
     });
+  }
+
+  /**
+   * The shared case-level scope mutation path (GET-60): one atomic write that
+   * journals the actual per-account selection/allowedScope slice and either
+   * advances the authoritative scope version exactly once (`advance: true`) or
+   * records an event at the version in effect (`advance: false`, used by the
+   * first completion-scope freeze). No account is required and none is
+   * invented. Any failure rolls back the version and journal together.
+   */
+  applyCaseScopeMutation(input: CaseScopeMutationInput): CaseScopeMutationResult {
+    return this.write(() => {
+      const row = this.validateCaseScope(input.ownerId, input.caseId, input.expectedScopeVersion);
+      const before = this.scopeSnapshot(input.caseId);
+      if (input.advance) {
+        return this.commitScopeMutation(input.caseId, row, input.reason, before);
+      }
+      const { record: snapshot, eventId } = this.recordScopeEvent(
+        input.caseId,
+        row.scope_version,
+        input.reason,
+        before,
+        this.scopeSnapshot(input.caseId)
+      );
+      return {
+        case: mapCase(this.db.prepare('SELECT * FROM research_cases WHERE id = ?').get(input.caseId) as CaseRow),
+        snapshot,
+        eventId
+      };
+    });
+  }
+
+  /** Current per-account scope slice, deep-copied (GET-60 freeze anchor input). */
+  accountScopeSlice(ownerId: string, caseId: string): ScopeAccountSnapshot[] {
+    if (!this.getCase(ownerId, caseId)) return [];
+    return this.scopeSnapshot(caseId);
   }
 
   /**

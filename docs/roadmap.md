@@ -56,6 +56,8 @@
 
 2026-09-30：[研究案例领域契约（GET-58）](research-case-domain.md) 已落地：`ResearchCase / AccountSelection / ScopeVersion / SourceRevision / EvidenceRef / ItemCoverage` 共享契约、原子范围快照与增量 SQLite 案例持久化。它是后续任务的地基，未启用 Search / Fetch 运行时。
 
+2026-09-30：[研究范围与完成契约（GET-60）](research-completion-domain.md) 已落地：研究前冻结范围/完成规则（问题适用性、全目录发现、时间窗、正文/媒体/默认评论页/选定分支深度）、最小观测回执协议与追加式确定性评估；分母未知不显示假百分比。它仍是持久化政策地基，不是 GET94/95/99 自治运行时。
+
 ## 已采纳的设计基线
 
 | 决定 | 理由 | 什么会使它改变 |
