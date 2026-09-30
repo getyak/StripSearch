@@ -45,6 +45,7 @@ import {
 } from '../server/platforms/catalog.js';
 import { BUILTIN_PLATFORM_REGISTRY, registrySummary } from '../server/platforms/registry.js';
 import { decodeCatalogCursor, encodeCatalogCursor } from '../server/routes/discovery.js';
+import { planDiscoveryRound } from '../server/discovery/route-planner.js';
 import type { CapabilitySnapshot as Get59CapabilitySnapshot } from '../server/research/research-tool-dispatch.js';
 import { startTestServer } from './harness.js';
 
@@ -1160,6 +1161,66 @@ test('completion projection keeps no-adapter platforms and freezes applicability
   assert.ok(hintedMastodon?.applicabilityReason.trim().length > 0);
 });
 
+test('name_query completion keeps every public-account obligation with explicit gaps instead of collapsing the denominator', () => {
+  const snapshot = loadSourceCatalog();
+  const registry = toCompletionRegistry(snapshot, {
+    acceptedKinds: ['name_query'],
+    instanceHints: {},
+    authorization: 'self'
+  });
+  assert.equal(registry.registryVersion, snapshot.registryVersion);
+  assert.equal(registry.entries.length, snapshot.entries.length, 'no entry may leave the name_query denominator');
+  for (const entry of registry.entries) {
+    assert.equal(entry.applicability, 'applicable', `${entry.platformId} keeps its name_query discovery obligation`);
+    assert.ok(entry.applicabilityReason.trim().length > 0);
+    assert.match(entry.applicabilityReason, /缺口/, 'gaps stay explicit instead of shrinking the denominator');
+  }
+  // Missing instance and missing name handlers are explicit gaps.
+  const mastodon = registry.entries.find((entry) => entry.platformId === 'mastodon');
+  assert.match(mastodon?.applicabilityReason ?? '', /实例/);
+  const usernameOnly = registry.entries.find((entry) => entry.platformId.startsWith('pub-'));
+  assert.match(usernameOnly?.applicabilityReason ?? '', /name_query_no_handler/);
+
+  // Explicit authorization constraints stay explicit under name_query too.
+  const strict = toCompletionRegistry(snapshot, {
+    acceptedKinds: ['name_query'],
+    instanceHints: {},
+    authorization: 'public_professional'
+  });
+  const excluded = strict.entries.filter((entry) => entry.applicability === 'not_applicable');
+  assert.deepEqual(excluded.map((entry) => entry.platformId).sort(), ['line', 'whatsapp']);
+  assert.match(excluded[0]?.applicabilityReason ?? '', /授权/);
+
+  // A round that also accepts names keeps obligations even when only
+  // username operations exist.
+  const mixed = toCompletionRegistry(snapshot, {
+    acceptedKinds: ['username', 'name_query'],
+    instanceHints: {},
+    authorization: 'self'
+  });
+  assert.equal(
+    mixed.entries.filter((entry) => entry.applicability === 'applicable').length,
+    snapshot.entries.length,
+    'name_query presence never collapses the denominator'
+  );
+});
+
+test('the loader accepts the name_query accepted-input kind without rewriting frozen catalog data', () => {
+  const raw = syntheticRaw((document) => {
+    const entries = document.entries as Array<Record<string, unknown>>;
+    const first = entries[0];
+    assert.ok(first);
+    first.inputKinds = ['name_query'];
+  });
+  rehash(raw);
+  const snapshot = catalogSnapshotFromJson(raw);
+  assert.deepEqual(snapshot.entries[0]?.inputKinds, ['name_query']);
+  // …while the shipped frozen artifact keeps its exact identity.
+  const shipped = loadSourceCatalog();
+  assert.equal(shipped.registryVersion, '2026-09-30.1+pr.810481dbf9fd');
+  assert.equal(shipped.contentHash, 'sha256:810481dbf9fd4a66f163ffd60e6d1ef12f2b9d9948014f4fa45a67842a280084');
+});
+
 test('capability projection maps GET-59 supported / unsupported / unverified exactly', () => {
   const grant = (over: { credentials?: boolean; authorization?: boolean } = {}) => ({
     credentials: false,
@@ -1849,3 +1910,50 @@ test(
     assert.equal(result.registryVersion, source.registryVersion);
   }
 );
+
+test('name_query projection never claims handler readiness it did not judge', () => {
+  const snapshot = loadSourceCatalog();
+  const registry = toCompletionRegistry(snapshot, {
+    acceptedKinds: ['name_query'],
+    instanceHints: {},
+    authorization: 'self'
+  });
+  const plan = planDiscoveryRound(
+    snapshot,
+    {
+      inputRevision: 'input-name',
+      authorization: 'self',
+      instanceHints: {},
+      accountKinds: null,
+      hints: [],
+      classification: 'name_query',
+      nameQuery: 'Synthetic Person'
+    },
+    { grants: {} }
+  );
+
+  let contradictions = 0;
+  for (const entry of registry.entries) {
+    // The projection must never claim an empty gap list just because a route
+    // kind exists: handler readiness is not judged here.
+    assert.ok(!entry.applicabilityReason.includes('显式缺口：无'), `${entry.platformId} claims empty gaps`);
+    assert.match(entry.applicabilityReason, /不在本投影判定/, `${entry.platformId} must defer readiness`);
+    const row = plan.platforms.find((platform) => platform.platformId === entry.platformId);
+    assert.ok(row);
+    const plannedRequest = row.routes.some((route) => route.status === 'admissible');
+    if (!plannedRequest && /缺口[:：]\s*无/.test(entry.applicabilityReason)) {
+      contradictions += 1;
+    }
+    if (row.status === 'no_executable_route') {
+      assert.ok(row.reasonCode.length > 0 && row.reason.trim().length > 0);
+    }
+  }
+  assert.equal(contradictions, 0, 'no projection row claims clean gaps while the planner found none executable');
+
+  // All 4421 name obligations stay in both projections.
+  assert.equal(registry.entries.filter((entry) => entry.applicability === 'applicable').length, 4421);
+  assert.equal(plan.totals.obligations, 4421);
+  assert.equal(plan.platforms.length, 4421);
+  assert.equal(plan.totals.planned, 0, 'no name handler exists — nothing is silently planned');
+  assert.ok((plan.totals.gapCounts.name_query_no_handler ?? 0) > 0, 'planner keeps the real structured gaps');
+});

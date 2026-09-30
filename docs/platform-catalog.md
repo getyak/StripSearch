@@ -49,7 +49,7 @@
 ## 三个投影（同版携带）
 
 1. **旧 probe registry**（`toLegacyRegistry`）：13 条旧规则的 probe / posts / 限速 / 验证标签逐字保留（含 GitHub 的 `live_verified` 标签与 x/Instagram/哔哩哔哩的 `probe: null`），与 `BUILTIN_PLATFORM_REGISTRY` 逐条 deep-equal 由测试锁定；作为探测引擎的默认注册表。
-2. **GET-60 完成注册表**（`toCompletionRegistry`）：适用性只由输入种类、实例提示与授权策略决定，不由 adapter 是否存在决定——无 adapter 平台仍在冻结分母里并带确定性理由；无 adapter ≠ not_applicable。
+2. **GET-60 完成注册表**（`toCompletionRegistry`）：适用性只由输入种类、实例提示与授权策略决定，不由 adapter 是否存在决定——无 adapter 平台仍在冻结分母里并带确定性理由；无 adapter ≠ not_applicable。`name_query` 轮保留全部公共账号义务：无 name 处理器/缺实例提示是显式缺口（理由中点名），不缩小分母；语义见 [`discovery-route-planning.md`](discovery-route-planning.md) 的共享契约。
 3. **GET-59 能力快照**（`toCapabilitySnapshot`）：每平台映射 7 个 GET-59 操作（`discover_accounts` / `read_profile` / `list_posts` / `read_post` / `read_media` / `list_comments` / `read_thread`），`read_thread` 使用独立线程能力、访问条件与绑定回执（不借用评论列表证据），`list_*` 携带分页的排序/日期限制。状态映射是精确的：
    - `unsupported`：平台不提供该能力、项目无 adapter（GET-59 `not_implemented`）、不可访问、或当前缺凭据/授权；
    - `unverified`：访问条件 unknown，或 `documented_only` / `offline_verified`——**凭据不能把 documented_only 提升为 supported**；
@@ -66,5 +66,5 @@
 ## 未做与边界
 
 - 没有任何真实端点请求、live 验证或费用回执；文档核对不提升验证等级，通用文档链接不构成能力证据。公共规则条目的能力全部 documented_only + 未接线（独立受限执行器离线可用但未进 legacy/model 运行时），没有 GET-59 `supported`。
-- 路线是登记（operation、adapterId、端点、所需条件、不可执行原因），GET-92 才做规划与受控执行；站点定向搜索、自链抽取、微信搜一搜均未接入。公共规则路线带 ruleIds（逐路线 sourceRefs 只列本请求规则的来源），执行语义与边界见 [`public-account-rules.md`](public-account-rules.md)。
+- 路线是登记（operation、adapterId、端点、所需条件、不可执行原因）；GET-92 已实现**纯**规划、请求键与账号键（见 [`discovery-route-planning.md`](discovery-route-planning.md)），受控执行与运行时接线属 GET-63；站点定向搜索、自链抽取、微信搜一搜均未接入。公共规则路线带 ruleIds（逐路线 sourceRefs 只列本请求规则的来源），执行语义与边界见 [`public-account-rules.md`](public-account-rules.md)。
 - Telegram 频道/个人账号、Threads 无效游标、出版账号与自然人的边界在条目 notes 与 accountKinds 中保留；缺失可信依据一律记 unknown，不补造数值。
