@@ -372,7 +372,10 @@ function validateScopeSpec(spec: CompletionScopeSpec): void {
     if (range.accountIds.length === 0) fail('explicit account range must not be empty');
     if (new Set(range.accountIds).size !== range.accountIds.length) fail('explicit account range has duplicates');
   }
-  const { from, to } = spec.timeRange ?? { from: null, to: null };
+  if (!spec.timeRange || typeof spec.timeRange !== 'object' || Array.isArray(spec.timeRange)) {
+    fail('timeRange must explicitly provide from and to (ISO dates or null)');
+  }
+  const { from, to } = spec.timeRange;
   for (const [name, bound] of [['from', from], ['to', to]] as const) {
     if (bound !== null && (typeof bound !== 'string' || !ISO_DATE.test(bound))) {
       fail(`timeRange.${name} must be an ISO date or null`);

@@ -843,6 +843,7 @@ export function evaluateCompletion(snapshot: CompletionSnapshot): CompletionEval
   };
 
   const historyTotal = noAccounts ? 0 : inScope.size;
+  const historyNotApplicable = sliceAccounts.filter((account) => !inScope.has(account.accountId)).length;
   const mediaTotal = inWindowItems.filter((item) => item.hasMedia !== 'none').length;
   const applicableQuestions = spec.questions.filter((q) => q.applicability === 'applicable').length;
   const applicablePlatforms = registryEntries.filter((entry) => entry.applicability === 'applicable').length;
@@ -855,7 +856,7 @@ export function evaluateCompletion(snapshot: CompletionSnapshot): CompletionEval
       registryEntries.length - applicablePlatforms,
       null
     ),
-    buildReport('history_enumeration', history, historyTotal, true, 0, noAccounts ? 'no_accounts_in_scope' : null),
+    buildReport('history_enumeration', history, historyTotal, true, historyNotApplicable, noAccounts ? 'no_accounts_in_scope' : null),
     buildReport(
       'body',
       body,

@@ -2784,3 +2784,70 @@ test('evaluation inherits account boundaries with an (observationId, expectedAcc
     }
   }
 });
+
+test('scope timeRange is required and invalid freeze/revise leaves no mutation', (t) => {
+  for (const invalid of [undefined, null, 0, [], {}]) {
+    const { db, store } = memoryStore();
+    t.after(() => db.close());
+    const c = newCase(store);
+    const bad = minimalSpec({ timeRange: invalid as CompletionScopeSpec['timeRange'] });
+    const before = { version: currentVersion(store, c.caseId), history: store.cases.scopeHistory(OWNER, c.caseId) };
+    assert.throws(() => store.completion.freezeCompletionScope({
+      ownerId: OWNER, caseId: c.caseId, expectedScopeVersion: before.version, spec: bad
+    }), CompletionSpecError);
+    assert.equal(currentVersion(store, c.caseId), before.version);
+    assert.deepEqual(store.cases.scopeHistory(OWNER, c.caseId), before.history);
+    assert.deepEqual(store.completion.listCompletionScopes(OWNER, c.caseId), []);
+    store.completion.freezeCompletionScope({
+      ownerId: OWNER, caseId: c.caseId, expectedScopeVersion: before.version,
+      spec: minimalSpec({ timeRange: { from: null, to: null } })
+    });
+    const history = store.cases.scopeHistory(OWNER, c.caseId);
+    const scopes = store.completion.listCompletionScopes(OWNER, c.caseId);
+    assert.throws(() => store.completion.reviseCompletionScope({
+      ownerId: OWNER, caseId: c.caseId, expectedScopeVersion: before.version, spec: bad, reason: 'invalid window'
+    }), CompletionSpecError);
+    assert.equal(currentVersion(store, c.caseId), before.version);
+    assert.deepEqual(store.cases.scopeHistory(OWNER, c.caseId), history);
+    assert.deepEqual(store.completion.listCompletionScopes(OWNER, c.caseId), scopes);
+  }
+  // Exercise evaluation with a known publication date and an explicit unbounded window.
+  const x = setupComplete(t);
+  assert.notEqual(x.source.publishedAt, null);
+  const revised = x.store.completion.reviseCompletionScope({
+    ownerId: OWNER, caseId: x.record.caseId, expectedScopeVersion: currentVersion(x.store, x.record.caseId),
+    spec: { ...x.frozen.spec, timeRange: { from: null, to: null } }, reason: 'explicit unbounded window'
+  });
+  record(x.store, x.record.caseId, revised.scopeSpecId, receipt('enumerate_history', 'items_found', {
+    kind: 'account_history', accountId: x.account.accountId
+  }, { items: [{ sourceId: x.source.sourceId, sourceRevision: 1, hasMedia: 'none' }], nextCursor: null, knownGaps: [], stopReason: 'endpoint_exhausted' }));
+  const assessment = assess(x.store, x.record.caseId, revised.scopeSpecId);
+  assert.equal(dim(assessment, 'body').total, 1);
+  assert.equal(x.store.completion.replayCompletionAssessment(OWNER, x.record.caseId, assessment.assessmentId).verdictMatches, true);
+});
+
+test('history exclusions count accounts for mixed, explicit, all-excluded and empty scopes', (t) => {
+  for (const mode of ['mixed', 'explicit', 'excluded', 'empty'] as const) {
+    const { db, store } = memoryStore();
+    t.after(() => db.close());
+    const c = newCase(store);
+    const active = mode === 'mixed' || mode === 'explicit' ? seedResearchAccount(store, c, 'active') : null;
+    if (mode === 'mixed') {
+      const profile = seedResearchAccount(store, c, 'profile');
+      store.cases.applyScopeChange({ ownerId: OWNER, caseId: c.caseId, expectedScopeVersion: currentVersion(store, c.caseId),
+        reason: 'profile only', accounts: [{ accountId: profile.accountId, allowedScope: { state: 'profile_only', note: 'synthetic' } }] });
+    }
+    if (mode === 'explicit') seedResearchAccount(store, c, 'outside-explicit-range');
+    if (mode !== 'empty') store.cases.addAccount({ ownerId: OWNER, caseId: c.caseId, accountId: 'ignored', expectedScopeVersion: currentVersion(store, c.caseId) }, accountDraft({ handle: 'excluded' }));
+    const frozen = store.completion.freezeCompletionScope({ ownerId: OWNER, caseId: c.caseId,
+      expectedScopeVersion: currentVersion(store, c.caseId), spec: minimalSpec(mode === 'explicit' ? {
+        accountRange: { mode: 'explicit', accountIds: [active!.accountId] }
+      } : {}) });
+    const history = dim(assess(store, c.caseId, frozen.scopeSpecId), 'history_enumeration');
+    const included = active ? 1 : 0;
+    assert.equal(history.total, included, mode);
+    assert.equal(history.notApplicable, frozen.accountSlice.length - included, mode);
+    assert.equal((history.total ?? 0) + history.notApplicable, frozen.accountSlice.length, mode);
+    if (!active) assert.equal(history.percent, null, mode);
+  }
+});

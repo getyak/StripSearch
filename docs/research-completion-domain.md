@@ -26,6 +26,8 @@
 
 问题 / 时间窗 / 深度 / 账号范围的修改走 `reviseCompletionScope`：复用 GET-58 的 case 级原子 scope 路径（`CaseStore.applyCaseScopeMutation`），推进且只推进一版并追加新 spec；旧 spec 与旧 partial 评估永久可读。任何无效条目（如第二个账号引用 foreign）把版本、journal 与 spec 一起回滚。旧 context（旧 `expectedScopeVersion` 或旧 spec）的写入被拒绝。**难题不能事后删除**：修订必须保留此前冻结的每个问题 id（上一版按权威 `scope_version` 选取，同毫秒或时钟回拨都绕不过），最多标注 `not_applicable` 并给出冻结原因；缩小范围是新版本、新报告明确新 scope，不能冒称原约定完成。列表顺序按权威版本（评估按插入序），永不按墙钟或随机 ID 排序。
 
+时间窗必须显式提供 `{from, to}`（每项是日期或 `null`）；缺失、`null` 或非法结构在冻结/修订时整体拒绝，不持久化无法评估的范围。历史枚举的 `notApplicable` 统计实际排除的冻结账号；无账号这一说明不额外增加计数。
+
 ## 最小观测/尝试回执协议
 
 `recordCompletionObservation` 追加不可变回执，绑定 case + scopeSpec + obligation，结构化记录 action / result / attemptState / stopReason / accessBoundary / remainingUnknown / 显式 synthetic 出处，并校验 account / source / evidence（按支持与反证极性）/ coverage itemId+revision+locator / 前置 observation 引用；无效引用整体拒绝。自由文本 note 或调用者 "completed" 标志永远不能建立完成。`resolved_unknown` 只有在满足**冻结的调查资格协议**时才算已处理未知：前置动作必须是真正产出结果的调查（`isEligibleInvestigation`：非 note/answer/select 类动作、成功状态、产出型 result、无阻断 stopReason、无 accessBoundary）**且结构化 payload 显示工作真的完成**——thread 必须读满冻结深度且无未解除 blocker、枚举不得有游标/已知缺口（省略 stopReason 不能抹掉已记录的未完成）、required-check 必须覆盖冻结的必需条目（`observed` 标签本身不证明达标）——并携带当前有效的具体依赖（证据/覆盖/来源，经前置 observation 间接引用同样受检且继承账号边界）；`unsupported` / 权限 / 预算类回执或纯文本不能升级为已处理未知。`unattempted`、预算耗尽、权限失败、`unsupported`、`deferred`、`failed`、`cancelled`、`needs_input` 各自保留，绝不冒充 `no_match` 或已处理未知。缺父、删除、隐藏、截断上下文保持显式（缺失父链的分支义务只能 partial 并保留原因）。失败/取消/待输入的回答即使带结果与证据也不满足问题义务；后续有效成功可以解决，历史失败不会永久污染后续评估。
