@@ -30,17 +30,21 @@ import {
   validateSubject
 } from '../../shared/platform-discovery.js';
 import { isPublicHttpsUrl, validateSeedUrl } from '../../shared/validation.js';
+import type { PlatformCatalogSnapshot } from '../../shared/platform-catalog.js';
 import { HttpError } from '../http/errors.js';
 import { requireUser } from '../http/middleware.js';
 import type { DiscoveryStore, DiscoveryTaskRecord } from '../discovery-store.js';
 import type { DiscoveryRunner } from '../services/discovery-runner.js';
 import { fingerprintDiscoveryTask } from '../services/discovery-runner.js';
 import { registrySummary } from '../platforms/registry.js';
+import { catalogSummary, platformGaps } from '../platforms/catalog.js';
 
 export interface DiscoveryRouteDeps {
   store: DiscoveryStore;
   runner: DiscoveryRunner;
   registry: PlatformRegistry;
+  /** Versioned catalog surface; omitted from the response when null/absent. */
+  catalog?: PlatformCatalogSnapshot | null;
 }
 
 function readBody(req: Request): Record<string, unknown> {
@@ -87,11 +91,74 @@ function taskSummary(task: DiscoveryTaskRecord): Record<string, unknown> {
 }
 
 export function registerDiscoveryRoutes(router: Router, deps: DiscoveryRouteDeps): void {
-  const { store, runner, registry } = deps;
+  const { store, runner, registry, catalog } = deps;
 
-  /** Honest capability surface: which platforms exist and how verified each rule is. */
+  /**
+   * Honest capability surface: which platforms exist and how verified each
+   * rule is. The legacy registry and summary fields are preserved verbatim;
+   * when a catalog is wired its versioned snapshot and explicit gaps extend
+   * the response without changing old caller behavior.
+   */
   router.get('/discovery/registry', (_req: Request, res: Response) => {
-    res.json({ registry, summary: registrySummary(registry) });
+    const body: Record<string, unknown> = { registry, summary: registrySummary(registry) };
+    if (catalog) {
+      body.catalog = {
+        schemaVersion: catalog.schemaVersion,
+        registryVersion: catalog.registryVersion,
+        contentHash: catalog.contentHash,
+        generatedAt: catalog.generatedAt,
+        summary: catalogSummary(catalog),
+        // Safe public provenance only: versions/hashes/licenses/state of the
+        // checked sources. No credentials, owner data or local paths.
+        sources: catalog.sources,
+        platforms: catalog.entries.map((entry) => ({
+          platformId: entry.platformId,
+          name: entry.name,
+          cohort: entry.cohort,
+          aliases: entry.aliases,
+          inputKinds: entry.inputKinds,
+          instance: entry.instance,
+          accountKinds: entry.accountKinds,
+          profileUrlRule: entry.profileUrlRule,
+          capabilities: entry.capabilities.map((record) => ({
+            dimension: record.dimension,
+            documentation: record.documentation,
+            integration: record.integration,
+            access: record.access,
+            verification: record.verification,
+            verificationRef: record.verificationRef,
+            docUrls: record.docUrls,
+            endpoints: record.endpoints,
+            sourceLocator: record.sourceLocator,
+            sourceRefs: record.sourceRefs,
+            comments: record.comments ?? null,
+            pagination: record.pagination ?? null,
+            cost: {
+              provider: record.cost.provider,
+              unit: record.cost.unit,
+              currency: record.cost.currency,
+              amount: record.cost.amount,
+              asOf: record.cost.asOf,
+              source: record.cost.source,
+              basis: record.cost.basis,
+              conditions: record.cost.conditions
+            },
+            notes: record.notes
+          })),
+          routes: entry.routes.map((route) => ({
+            routeId: route.routeId,
+            kind: route.kind,
+            adapterId: route.adapterId,
+            endpoint: route.endpoint,
+            requires: route.requires,
+            availability: route.availability,
+            reason: route.reason
+          })),
+          gaps: platformGaps(entry)
+        }))
+      };
+    }
+    res.json(body);
   });
 
   router.post('/discovery/tasks', (req: Request, res: Response) => {

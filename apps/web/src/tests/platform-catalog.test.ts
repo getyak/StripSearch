@@ -1,0 +1,1030 @@
+/**
+ * GET-90 platform catalog contract tests: versioned catalog data, loader
+ * validation (hashes, duplicates, source refs, shapes, evidence rules), the
+ * three explicit projections (legacy probe registry, GET-60 completion
+ * registry, GET-59 capability snapshot), the extended
+ * `/api/discovery/registry` surface and production data packaging.
+ *
+ * Everything here is offline: the catalog is data on disk, no provider or
+ * public documentation is fetched while testing, and packaging tests use
+ * synthetic canary files only.
+ */
+
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+
+import {
+  CAPABILITY_DIMENSIONS,
+  capabilityStateFor
+} from '../shared/platform-catalog.js';
+import type {
+  CatalogAccessContext,
+  CatalogApplicabilityInput,
+  CatalogCapabilityState,
+  CapabilityRecord,
+  DiscoveryRoute,
+  PlatformCatalogSnapshot
+} from '../shared/platform-catalog.js';
+import {
+  CatalogLoadError,
+  catalogContentHash,
+  catalogSnapshotFromJson,
+  catalogSummary,
+  defaultCatalogDataDir,
+  loadPlatformCatalog,
+  platformGaps,
+  toCapabilitySnapshot,
+  toCompletionRegistry,
+  toLegacyRegistry
+} from '../server/platforms/catalog.js';
+import { BUILTIN_PLATFORM_REGISTRY, registrySummary } from '../server/platforms/registry.js';
+import type { CapabilitySnapshot as Get59CapabilitySnapshot } from '../server/research/research-tool-dispatch.js';
+import { startTestServer } from './harness.js';
+
+const appRoot = fileURLToPath(new URL('../..', import.meta.url));
+const sourceDataDir = path.join(appRoot, 'data', 'platforms');
+
+/* ------------------------------------------------------------------ */
+/* Independent expectations copied from the approved spec (§4)         */
+/* ------------------------------------------------------------------ */
+
+const SPEC_TIKHUB_IDS = [
+  'douyin', 'tiktok', 'xiaohongshu', 'lemon8', 'bilibili', 'kuaishou', 'pipixia', 'weibo',
+  'wechat-mp', 'wechat-channels', 'toutiao', 'xigua', 'instagram', 'youtube', 'x', 'threads',
+  'reddit', 'linkedin', 'telegram', 'zhihu'
+];
+
+const SPEC_ALTERNATIVE_IDS = [
+  'facebook', 'pinterest', 'snapchat', 'bluesky', 'mastodon', 'github', 'gitlab', 'hackernews',
+  'stackoverflow', 'huggingface', 'medium', 'substack', 'twitch', 'steam', 'naver', 'vk',
+  'spotify', 'soundcloud', 'kick', 'rumble', 'truth-social', 'linktree', 'quora', 'douban',
+  'baidu-tieba', 'jike', 'xiaoyuzhou', 'whatsapp', 'line', 'discord'
+];
+
+const SPEC_PERSONAL_WEBSITE_ID = 'personal-website';
+
+/* Independently frozen public-source values (retrieved by the parent task
+ * into the private cache; hardcoded here so the test cannot drift with the
+ * data it checks). */
+const EXPECTED_SOURCES = {
+  maigret: {
+    upstreamVersion: 'b6642744988e7e6c2d21f75db60ec3093019ba25',
+    contentHash: '3ac973e44f765c1c2b851571bd165f45145d0a00231c8ea97fb479e93f6aa289',
+    license: 'MIT',
+    licenseHash: '9748c279c95c58e64cc9e538e8c717ae9dce66bbed1d69e7d3e77e431d7e582d',
+    capturedAt: '2026-09-30T05:30:59.298392+00:00',
+    sourceRecords: 6206
+  },
+  whatsmyname: {
+    upstreamVersion: '062bcfe48df79fa618e96edc79dc9673f3fe5643',
+    contentHash: '507d2f8aa5b1297ae2d713634ccc7ce08357fed85b1d40130585810f456c1cfe',
+    license: 'CC BY-SA 4.0',
+    licenseHash: '3eab49aa5cabc24918c11aab97dfe8873e0641317b898d989c993c4283a4d84b',
+    capturedAt: '2026-09-30T05:31:03.956135+00:00',
+    sourceRecords: 717
+  },
+  'tikhub-openapi': {
+    upstreamVersion: 'V5.3.2',
+    contentHash: 'b97eb0f6331b5709da1ab789359d48efabe177c4ebdcd83078b7e57e9b8709c5',
+    capturedAt: '2026-09-30T05:29:49.939125+00:00'
+  },
+  'tikhub-endpoint-pricing': {
+    upstreamVersion: null,
+    contentHash: '859e6687762f4b4c54324f6d15165c85b0ae4d1668cd7b9d29601297b3cda882',
+    capturedAt: '2026-09-30T05:29:52.873261+00:00'
+  }
+};
+
+function loadSourceCatalog(): PlatformCatalogSnapshot {
+  return loadPlatformCatalog(sourceDataDir);
+}
+
+function entryById(snapshot: PlatformCatalogSnapshot, platformId: string) {
+  const found = snapshot.entries.find((entry) => entry.platformId === platformId);
+  assert.ok(found, `missing entry ${platformId}`);
+  return found;
+}
+
+function capabilityOf(entry: PlatformCatalogSnapshot['entries'][number], dimension: CapabilityRecord['dimension']): CapabilityRecord {
+  const found = entry.capabilities.find((record) => record.dimension === dimension);
+  assert.ok(found, `${entry.platformId} missing ${dimension}`);
+  return found;
+}
+
+/* ------------------------------------------------------------------ */
+/* Synthetic catalog fixture (test-only builder)                       */
+/* ------------------------------------------------------------------ */
+
+function costFixture(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    provider: null,
+    unit: null,
+    currency: null,
+    amount: null,
+    asOf: '2026-09-30',
+    source: null,
+    basis: '公开定价页未列出该项（2026-09-30 核对）',
+    conditions: null,
+    ...over
+  };
+}
+
+function capabilityFixture(
+  dimension: CapabilityRecord['dimension'],
+  over: Partial<CapabilityRecord> = {}
+): Record<string, unknown> {
+  return {
+    dimension,
+    documentation: 'documented',
+    docUrls: ['https://public.example.test/docs'],
+    endpoints: ['GET /fixture/endpoint'],
+    sourceLocator: 'fixture:doc',
+    integration: 'not_integrated',
+    access: 'public',
+    verification: 'documented_only',
+    verificationRef: null,
+    cost: costFixture(),
+    sourceRefs: ['src-public'],
+    notes: [],
+    ...(dimension === 'comments'
+      ? { comments: { authorReplies: 'unknown', parentChain: 'unknown' } }
+      : {}),
+    ...(dimension === 'pagination'
+      ? { pagination: { cursor: 'unknown', sortOptions: null, dateRange: 'unknown' } }
+      : {}),
+    ...over
+  };
+}
+
+function routeFixture(over: Partial<DiscoveryRoute> = {}): Record<string, unknown> {
+  return {
+    routeId: 'r-fixture',
+    kind: 'username_probe',
+    operation: 'probe:username',
+    adapterId: null,
+    endpoint: null,
+    requires: ['public_network'],
+    availability: 'not_integrated',
+    reason: '合成夹具路线，未接入。',
+    sourceRefs: ['src-public'],
+    ...over
+  };
+}
+
+function entryFixture(platformId: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    platformId,
+    name: `Synthetic ${platformId}`,
+    cohort: 'alternative',
+    aliases: [],
+    homepage: 'https://public.example.test',
+    profileUrlRule: 'https://public.example.test/{username}',
+    instance: 'none',
+    inputKinds: ['username'],
+    accountKinds: ['person'],
+    applicability: { authorizations: [], conditions: [] },
+    capabilities: CAPABILITY_DIMENSIONS.map((dimension) => capabilityFixture(dimension)),
+    routes: [routeFixture()],
+    legacy: null,
+    notes: [],
+    ...over
+  };
+}
+
+function syntheticRaw(mutate?: (raw: Record<string, unknown>) => void): Record<string, unknown> {
+  const content = {
+    schemaVersion: 'stripsearch/platform-catalog/v1',
+    registryVersion: 'synthetic-1',
+    generatedAt: '2026-09-30',
+    sources: [
+      {
+        sourceId: 'src-public',
+        kind: 'official_documentation',
+        title: 'Synthetic public source',
+        url: 'https://public.example.test/docs',
+        license: null,
+        licenseHash: null,
+        upstreamVersion: null,
+        upstreamState: 'checked_unfrozen',
+        capturedAt: '2026-09-30',
+        contentHash: null,
+        bytes: null,
+        importerVersion: null,
+        counts: { raw: null, loaded: null, excluded: null },
+        notes: []
+      }
+    ],
+    entries: [entryFixture('synthetic-one'), entryFixture('synthetic-two')]
+  };
+  const raw: Record<string, unknown> = {
+    ...content,
+    contentHash: catalogContentHash(content as never)
+  };
+  mutate?.(raw);
+  return raw;
+}
+
+function rehash(raw: Record<string, unknown>): void {
+  raw.contentHash = catalogContentHash({
+    schemaVersion: raw.schemaVersion,
+    registryVersion: raw.registryVersion,
+    generatedAt: raw.generatedAt,
+    sources: raw.sources,
+    entries: raw.entries
+  } as never);
+}
+
+function writeCatalogDir(raw: Record<string, unknown>, manifestMutate?: (m: Record<string, unknown>) => void): string {
+  const dir = mkdtempSync(path.join(tmpdir(), 'catalog-data-'));
+  const bytes = Buffer.from(`${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+  const fileHash = createHash('sha256').update(bytes).digest('hex');
+  const manifest: Record<string, unknown> = {
+    schemaVersion: 'stripsearch/platform-catalog-manifest/v1',
+    registryVersion: raw.registryVersion,
+    files: [{ path: 'catalog.json', sha256: fileHash }],
+    counts: { platforms: (raw.entries as unknown[]).length }
+  };
+  manifestMutate?.(manifest);
+  writeFileSync(path.join(dir, 'catalog.json'), bytes);
+  writeFileSync(path.join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  return dir;
+}
+
+function expectLoadError(fn: () => unknown, code: string): void {
+  try {
+    fn();
+  } catch (error) {
+    assert.ok(error instanceof CatalogLoadError, `expected CatalogLoadError, got ${String(error)}`);
+    assert.equal(error.code, code, `${error.code}: ${error.detail}`);
+    return;
+  }
+  assert.fail(`expected load to fail with ${code}`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Catalog data: independent cohort listing and per-entry shapes       */
+/* ------------------------------------------------------------------ */
+
+test('spec cohorts register 20 TikHub platforms, 30 alternatives, the personal website and the retained legacy platforms', () => {
+  const snapshot = loadSourceCatalog();
+  const byId = new Map(snapshot.entries.map((entry) => [entry.platformId, entry]));
+
+  for (const platformId of SPEC_TIKHUB_IDS) {
+    assert.equal(byId.get(platformId)?.cohort, 'tikhub', `missing TikHub platform ${platformId}`);
+  }
+  for (const platformId of SPEC_ALTERNATIVE_IDS) {
+    assert.equal(byId.get(platformId)?.cohort, 'alternative', `missing alternative platform ${platformId}`);
+  }
+  assert.equal(byId.get(SPEC_PERSONAL_WEBSITE_ID)?.cohort, 'personal_website');
+
+  const summary = catalogSummary(snapshot);
+  assert.equal(summary.cohorts.tikhub, 20);
+  assert.equal(summary.cohorts.alternative, 30);
+  assert.equal(summary.cohorts.personal_website, 1);
+  // The legacy probe registry keeps devto / npm / pypi rules; they are
+  // registered separately instead of silently dropped from the projection.
+  assert.equal(summary.cohorts.legacy_only, 3);
+  assert.equal(summary.platformCount, 54);
+});
+
+test('every catalog entry carries exactly the seven capability dimensions', () => {
+  const snapshot = loadSourceCatalog();
+  for (const entry of snapshot.entries) {
+    const dimensions = entry.capabilities.map((record) => record.dimension);
+    assert.deepEqual(
+      [...dimensions].sort(),
+      [...CAPABILITY_DIMENSIONS].sort(),
+      `${entry.platformId} capability dimensions`
+    );
+    assert.equal(new Set(dimensions).size, dimensions.length, `${entry.platformId} duplicate dimension`);
+    const comments = capabilityOf(entry, 'comments');
+    assert.ok(comments.comments, `${entry.platformId} comments record must note author replies / parent chain`);
+    const pagination = capabilityOf(entry, 'pagination');
+    assert.ok(pagination.pagination, `${entry.platformId} pagination record must note cursor / sort / date range`);
+  }
+});
+
+test('unknown prices are explicit null with a public basis and never claim free', () => {
+  const snapshot = loadSourceCatalog();
+  let unknownPrices = 0;
+  for (const entry of snapshot.entries) {
+    for (const record of entry.capabilities) {
+      const { amount, basis, source } = record.cost;
+      if (amount === null) {
+        unknownPrices += 1;
+        assert.ok(basis.trim().length > 0, `${entry.platformId}/${record.dimension}: null price needs an explicit public basis`);
+        assert.ok(
+          !['free', '免费', '0', '0.0', '0.00'].includes(basis.trim().toLowerCase()),
+          'unknown price must not be recorded as free'
+        );
+        assert.match(basis, /未知|未核对|未建立|无从|null/i, 'basis must state explicitly that the price is unknown');
+      } else {
+        assert.equal(typeof amount, 'number');
+        assert.ok(amount > 0, 'a recorded price is a real positive number');
+        assert.ok(basis.trim().length > 0 && source !== null, 'recorded prices cite a public source');
+      }
+    }
+  }
+  const summary = catalogSummary(snapshot);
+  assert.equal(summary.unknownPriceCount, summary.capabilityRecordCount, 'Task 1 ships no measured prices: all unknown');
+  assert.equal(summary.unknownPriceCount, unknownPrices);
+});
+
+test('catalog documents the frozen Telegram / Threads / publication-account boundaries', () => {
+  const snapshot = loadSourceCatalog();
+  const threadsNotes = entryById(snapshot, 'threads').notes.join(' ');
+  assert.match(threadsNotes, /游标/, 'Threads invalid-cursor limitation must survive');
+  const telegram = entryById(snapshot, 'telegram');
+  assert.ok((telegram.notes.join(' ') + telegram.capabilities.map((c) => c.notes.join(' ')).join(' ')).includes('频道'),
+    'Telegram channel vs person must stay explicit');
+  assert.ok((telegram.accountKinds ?? []).includes('channel') && (telegram.accountKinds ?? []).includes('person'));
+  assert.match(entryById(snapshot, 'wechat-mp').notes.join(' '), /出版账号|自然人/, 'publication vs person boundary must survive');
+  const threadsPagination = capabilityOf(entryById(snapshot, 'threads'), 'pagination');
+  assert.equal(threadsPagination.pagination?.cursor, 'invalid', 'Threads cursor limitation is recorded, not smoothed');
+  assert.match(threadsPagination.notes.join(' ') + (threadsPagination.sourceLocator ?? ''), /fetch_user_posts|无分页/, 'the limit cites its documented endpoint');
+});
+
+/* ------------------------------------------------------------------ */
+/* Frozen public-source metadata (independently asserted)               */
+/* ------------------------------------------------------------------ */
+
+test('public source manifests keep independently frozen versions, hashes and retrieval state', () => {
+  const snapshot = loadSourceCatalog();
+  const byId = new Map(snapshot.sources.map((source) => [source.sourceId, source]));
+
+  for (const [sourceId, expected] of Object.entries(EXPECTED_SOURCES)) {
+    const source = byId.get(sourceId);
+    assert.ok(source, `missing source ${sourceId}`);
+    assert.equal(source.upstreamVersion, expected.upstreamVersion, sourceId);
+    assert.equal(source.contentHash, expected.contentHash, sourceId);
+    assert.equal(source.capturedAt, expected.capturedAt, sourceId);
+  }
+
+  const maigret = byId.get('maigret')!;
+  const wmn = byId.get('whatsmyname')!;
+  for (const [source, expected] of [[maigret, EXPECTED_SOURCES.maigret], [wmn, EXPECTED_SOURCES.whatsmyname]] as const) {
+    assert.equal(source.kind, 'public_rule_dataset');
+    assert.equal(source.license, expected.license);
+    assert.equal(source.licenseHash, expected.licenseHash);
+    assert.equal(source.upstreamState, 'metadata_only_not_imported');
+    assert.equal(source.importerVersion, null);
+    // Import counts stay null: the Task 2 compiler has not run. Source dataset
+    // record counts are NOT import counts and must not land in `counts`.
+    assert.deepEqual(source.counts, { raw: null, loaded: null, excluded: null });
+    const notes = source.notes.join(' ');
+    assert.match(notes, new RegExp(String(expected.sourceRecords)), 'source record count is recorded as source metadata');
+    assert.match(notes, /不是导入数/, 'source record count must be labeled as not an import count');
+    assert.match(notes, /未导入|没有导入/, 'not imported');
+    assert.doesNotMatch(notes, /已启用|已导入|enabled/i, 'no enabled/imported claim');
+    assert.ok(!source.url?.includes('/Users/'), 'no local paths in public metadata');
+  }
+
+  const pricing = byId.get('tikhub-endpoint-pricing')!;
+  assert.match(pricing.notes.join(' '), /request_id/, 'the varying payload wrapper is documented as not a cost receipt');
+  for (const source of snapshot.sources) {
+    if (source.counts.raw !== null) {
+      assert.equal(source.counts.raw, (source.counts.loaded ?? 0) + (source.counts.excluded ?? 0), 'raw = loaded + excluded');
+    }
+  }
+});
+
+test('loader rejects documented capability claims without per-axis evidence', () => {
+  // A generic provider/developer doc link cannot establish a dimension.
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      const caps = entries[0]!.capabilities as Record<string, unknown>[];
+      for (const cap of caps) {
+        cap.documentation = 'documented';
+        cap.docUrls = ['https://public.example.test/docs'];
+        cap.endpoints = [];
+        cap.sourceLocator = null;
+      }
+    })),
+    'invalid_shape'
+  );
+  // A precise source locator is enough evidence for a documented claim.
+  const ok = catalogSnapshotFromJson(syntheticRaw((raw) => {
+    const entries = raw.entries as Record<string, unknown>[];
+    const caps = entries[0]!.capabilities as Record<string, unknown>[];
+    for (const cap of caps) {
+      cap.documentation = 'documented';
+      cap.endpoints = [];
+      cap.sourceLocator = 'doc:precise-locator';
+    }
+    rehash(raw);
+  }));
+  assert.equal(ok.entries[0]?.capabilities[0]?.sourceLocator, 'doc:precise-locator');
+});
+
+test('generic doc links never make all seven dimensions documented', () => {
+  const snapshot = loadSourceCatalog();
+  // Platforms with only a generic developer-doc entry point stay unknown.
+  for (const platformId of ['spotify', 'line', 'quora', 'snapchat']) {
+    const entry = entryById(snapshot, platformId);
+    for (const record of entry.capabilities) {
+      assert.notEqual(record.documentation, 'documented', `${platformId}/${record.dimension} has no per-axis evidence`);
+    }
+  }
+  // Every documented claim in the shipped data carries per-axis evidence.
+  for (const entry of snapshot.entries) {
+    for (const record of entry.capabilities) {
+      if (record.documentation === 'documented') {
+        assert.ok(
+          record.endpoints.length > 0 || (record.sourceLocator ?? '').length > 0,
+          `${entry.platformId}/${record.dimension}: documented without endpoints or precise locator`
+        );
+      }
+    }
+  }
+  // GitHub documents discovery/profile/list/pagination only — not body/media/comments.
+  const github = entryById(snapshot, 'github');
+  for (const dimension of ['body', 'media', 'comments'] as const) {
+    assert.notEqual(capabilityOf(github, dimension).documentation, 'documented', `github ${dimension}`);
+  }
+});
+
+test('canonical profile patterns stay null unless explicitly documented', () => {
+  const snapshot = loadSourceCatalog();
+  for (const platformId of ['spotify', 'youtube', 'telegram', 'zhihu', 'douban', 'bilibili', 'quora', 'devto', 'x']) {
+    assert.equal(entryById(snapshot, platformId).profileUrlRule, null, `${platformId} pattern is not documented; it must stay null`);
+  }
+  for (const platformId of ['gitlab', 'medium', 'hackernews', 'reddit', 'github', 'npm', 'pypi', 'mastodon', 'bluesky']) {
+    assert.ok(entryById(snapshot, platformId).profileUrlRule, `${platformId} has a documented pattern`);
+  }
+  // An explicitly null pattern is never synthesized by the loader.
+  const snapshotFromJson = catalogSnapshotFromJson(syntheticRaw((raw) => {
+    const entries = raw.entries as Record<string, unknown>[];
+    entries[1]!.profileUrlRule = null;
+    rehash(raw);
+  }));
+  assert.equal(snapshotFromJson.entries[1]?.profileUrlRule, null);
+});
+
+test('legacy existence probes do not imply profile reading', () => {
+  const snapshot = loadSourceCatalog();
+  for (const platformId of ['hackernews', 'npm', 'pypi', 'devto', 'gitlab', 'huggingface', 'bluesky', 'medium']) {
+    const entry = entryById(snapshot, platformId);
+    assert.equal(capabilityOf(entry, 'discovery').integration, 'integrated', `${platformId} has an existence probe`);
+    assert.notEqual(capabilityOf(entry, 'profile').integration, 'integrated', `${platformId}: existence probe is not a profile reader`);
+  }
+  // Concrete profile paths that DO exist stay new-path unverified.
+  const githubProfile = capabilityOf(entryById(snapshot, 'github'), 'profile');
+  assert.equal(githubProfile.integration, 'integrated');
+  assert.equal(githubProfile.verification, 'documented_only');
+  const xProfile = capabilityOf(entryById(snapshot, 'x'), 'profile');
+  assert.equal(xProfile.integration, 'integrated', 'TikHub X profile tool is a concrete path');
+  assert.equal(xProfile.verification, 'documented_only', 'the new execution path stays unverified');
+  // The GitHub research adapter reads first-page owned repos with caps.
+  const githubList = capabilityOf(entryById(snapshot, 'github'), 'list');
+  assert.equal(githubList.integration, 'integrated');
+  assert.match(githubList.notes.join(' '), /首页|上限|cap/i, 'its cap/pagination limits are recorded');
+});
+
+test('mixed-source platforms keep access and price per operation, never inherited', () => {
+  const snapshot = loadSourceCatalog();
+  const reddit = entryById(snapshot, 'reddit');
+  // Anonymous legacy probe route is public…
+  assert.equal(capabilityOf(reddit, 'discovery').access, 'public');
+  // …while the same platform's TikHub-backed dims need the provider key.
+  assert.equal(capabilityOf(reddit, 'body').access, 'credentials_required');
+  assert.equal(capabilityOf(reddit, 'body').cost.provider, 'tikhub');
+
+  // TikHub pricing is only attached to dims with actual TikHub endpoints.
+  for (const entry of snapshot.entries) {
+    for (const record of entry.capabilities) {
+      if (record.cost.provider === 'tikhub') {
+        assert.ok(record.endpoints.some((endpoint) => endpoint.includes('/api/v1/')), `${entry.platformId}/${record.dimension}: tikhub price without tikhub endpoint`);
+        assert.ok(record.sourceRefs.includes('tikhub-openapi'));
+      }
+    }
+  }
+  // A legacy-only platform has public discovery but unknown price basis.
+  const npm = entryById(snapshot, 'npm');
+  const npmDiscovery = capabilityOf(npm, 'discovery');
+  assert.equal(npmDiscovery.access, 'public');
+  assert.equal(npmDiscovery.cost.provider, null);
+  assert.equal(npmDiscovery.cost.amount, null);
+  assert.ok(npmDiscovery.cost.basis.trim().length > 0);
+  // Dims without an established operation are unknown, not public.
+  assert.equal(capabilityOf(npm, 'body').access, 'unknown');
+  // X is key-gated everywhere its concrete TikHub path runs.
+  const x = entryById(snapshot, 'x');
+  assert.equal(capabilityOf(x, 'profile').access, 'credentials_required');
+  assert.equal(capabilityOf(x, 'list').access, 'credentials_required');
+});
+
+/* ------------------------------------------------------------------ */
+/* Loader validation: hashes, duplicates, source refs, shapes          */
+/* ------------------------------------------------------------------ */
+
+test('loader rejects duplicate platform ids and conflicting aliases', () => {
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      (raw.entries as Record<string, unknown>[]).push(entryFixture('synthetic-one'));
+    })),
+    'duplicate_platform_id'
+  );
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      entries[0]!.aliases = ['same-alias'];
+      entries[1]!.aliases = ['same-alias'];
+    })),
+    'duplicate_alias'
+  );
+  // An alias colliding with another entry's platform id is also a conflict.
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      entries[0]!.aliases = ['synthetic-two'];
+    })),
+    'duplicate_alias'
+  );
+});
+
+test('loader validates content hashes, file hashes and source references', () => {
+  const good = syntheticRaw();
+  assert.equal(typeof catalogSnapshotFromJson(good).contentHash, 'string');
+
+  // Content mutated after hashing must not load.
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      (raw.entries as Record<string, unknown>[])[0]!.name = 'tampered';
+    })),
+    'content_hash_mismatch'
+  );
+
+  // Byte-level tampering is caught by the manifest file hash.
+  const dir = writeCatalogDir(good);
+  try {
+    const bytes = readFileSync(path.join(dir, 'catalog.json'), 'utf8');
+    writeFileSync(path.join(dir, 'catalog.json'), bytes.replace('synthetic-one', 'synthetic-1x'));
+    expectLoadError(() => loadPlatformCatalog(dir), 'file_hash_mismatch');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Unknown source refs fail closed.
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      const first = entries[0]!.capabilities as Record<string, unknown>[];
+      first[0]!.sourceRefs = ['no-such-source'];
+    })),
+    'source_ref'
+  );
+});
+
+test('loader validates shapes: seven dimensions, enum values, live_verified receipts and routes', () => {
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      entries[0]!.capabilities = (entries[0]!.capabilities as unknown[]).slice(0, 6);
+    })),
+    'invalid_shape'
+  );
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      (entries[0]!.capabilities as Record<string, unknown>[])[0]!.integration = 'sometimes';
+    })),
+    'invalid_shape'
+  );
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      (entries[0]!.capabilities as Record<string, unknown>[])[0]!.cost = costFixture({ amount: 'free' });
+    })),
+    'invalid_shape'
+  );
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      (entries[0]!.capabilities as Record<string, unknown>[])[0]!.verification = 'live_verified';
+    })),
+    'invalid_shape'
+  );
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      entries[0]!.routes = [];
+    })),
+    'invalid_shape'
+  );
+});
+
+test('frozen snapshots are isolated from and immune to input mutation', () => {
+  const raw = syntheticRaw();
+  const snapshot = catalogSnapshotFromJson(raw);
+
+  // Mutating the parsed input afterwards cannot reach the snapshot.
+  (raw.entries as Record<string, unknown>[])[0]!.name = 'mutated-later';
+  const firstAgain = snapshot.entries[0];
+  assert.ok(firstAgain);
+  assert.equal(firstAgain.name, 'Synthetic synthetic-one');
+
+  // The snapshot itself is deep frozen.
+  assert.equal(Object.isFrozen(snapshot), true);
+  assert.equal(Object.isFrozen(firstAgain), true);
+  assert.equal(Object.isFrozen(firstAgain.capabilities[0]), true);
+  assert.throws(() => {
+    (firstAgain as { name: string }).name = 'frozen';
+  });
+  assert.equal(firstAgain.name, 'Synthetic synthetic-one');
+
+  // A second load is an independent snapshot with its own version/hash.
+  const other = catalogSnapshotFromJson(syntheticRaw((r) => {
+    r.registryVersion = 'synthetic-2';
+    const content = {
+      schemaVersion: r.schemaVersion,
+      registryVersion: r.registryVersion,
+      generatedAt: r.generatedAt,
+      sources: r.sources,
+      entries: r.entries
+    };
+    r.contentHash = catalogContentHash(content as never);
+  }));
+  assert.equal(other.registryVersion, 'synthetic-2');
+  assert.notEqual(other.contentHash, snapshot.contentHash);
+  assert.equal(snapshot.registryVersion, 'synthetic-1');
+});
+
+/* ------------------------------------------------------------------ */
+/* Projections                                                         */
+/* ------------------------------------------------------------------ */
+
+test('legacy projection keeps every old rule, probe, posts and verification semantic', () => {
+  const snapshot = loadSourceCatalog();
+  const legacy = toLegacyRegistry(snapshot);
+  const expected = new Map(BUILTIN_PLATFORM_REGISTRY.rules.map((rule) => [rule.platformId, rule]));
+  assert.equal(legacy.rules.length, BUILTIN_PLATFORM_REGISTRY.rules.length);
+  for (const rule of legacy.rules) {
+    assert.deepEqual(rule, expected.get(rule.platformId), `legacy rule ${rule.platformId} changed`);
+  }
+  // Labels stay where they were: GitHub's old rule keeps its live_verified
+  // note while the three import-only platforms keep probe: null.
+  assert.equal(legacy.rules.find((rule) => rule.platformId === 'github')?.verification, 'live_verified');
+  for (const platformId of ['x', 'instagram', 'bilibili']) {
+    assert.equal(legacy.rules.find((rule) => rule.platformId === platformId)?.probe, null);
+  }
+  assert.equal(catalogSummary(snapshot).legacyRuleCount, 13);
+  assert.deepEqual(
+    { ...registrySummary(legacy), version: null, generatedAt: null },
+    { ...registrySummary(BUILTIN_PLATFORM_REGISTRY), version: null, generatedAt: null },
+    'legacy rule counts unchanged'
+  );
+  // All projections carry the same catalog version.
+  assert.equal(legacy.version, snapshot.registryVersion);
+});
+
+test('catalog capabilities never inherit live_verified from documented rules or the old GitHub adapter', () => {
+  const snapshot = loadSourceCatalog();
+  for (const entry of snapshot.entries) {
+    for (const record of entry.capabilities) {
+      assert.notEqual(record.verification, 'live_verified', `${entry.platformId}/${record.dimension} has no live receipt`);
+      if (record.verification === 'documented_only') {
+        assert.equal(record.verificationRef, null);
+      }
+    }
+  }
+  assert.equal(catalogSummary(snapshot).liveVerifiedCapabilityCount, 0);
+  // …while the legacy projection still preserves the old GitHub label as-is.
+  assert.equal(
+    toLegacyRegistry(snapshot).rules.find((rule) => rule.platformId === 'github')?.verification,
+    'live_verified'
+  );
+});
+
+test('completion projection keeps no-adapter platforms and freezes applicability reasons', () => {
+  const snapshot = loadSourceCatalog();
+  const input: CatalogApplicabilityInput = {
+    acceptedKinds: ['username'],
+    instanceHints: {},
+    authorization: 'public_professional'
+  };
+  const registry = toCompletionRegistry(snapshot, input);
+  assert.equal(registry.registryVersion, snapshot.registryVersion);
+  assert.equal(registry.entries.length, snapshot.entries.length, 'every catalog item stays represented');
+
+  const byId = new Map(registry.entries.map((entry) => [entry.platformId, entry]));
+  // A platform without any adapter is still an applicable discovery obligation.
+  const discord = byId.get('discord');
+  assert.ok(discord);
+  assert.equal(discord.applicability, 'applicable');
+  assert.ok(discord.applicabilityReason.trim().length > 0);
+
+  // Instance-scoped platforms need their instance hint.
+  const mastodon = byId.get('mastodon');
+  assert.equal(mastodon?.applicability, 'not_applicable');
+  assert.match(mastodon?.applicabilityReason ?? '', /实例/);
+
+  // Private-communication platforms stay out of public-professional rounds.
+  const whatsapp = byId.get('whatsapp');
+  assert.equal(whatsapp?.applicability, 'not_applicable');
+  assert.match(whatsapp?.applicabilityReason ?? '', /授权/);
+
+  // Personal website accepts a homepage input, not a bare username.
+  assert.equal(byId.get('personal-website')?.applicability, 'not_applicable');
+
+  // The projection is deterministic and the reasons are frozen strings.
+  assert.deepEqual(toCompletionRegistry(snapshot, input), registry);
+  const hinted = toCompletionRegistry(snapshot, {
+    acceptedKinds: ['username'],
+    instanceHints: { mastodon: 'mastodon.social' },
+    authorization: 'self'
+  });
+  const hintedMastodon = hinted.entries.find((entry) => entry.platformId === 'mastodon');
+  assert.equal(hintedMastodon?.applicability, 'applicable');
+  assert.ok(hintedMastodon?.applicabilityReason.trim().length > 0);
+});
+
+test('capability projection maps GET-59 supported / unsupported / unverified exactly', () => {
+  const grant = (over: { credentials?: boolean; authorization?: boolean } = {}) => ({
+    credentials: false,
+    authorization: false,
+    ...over
+  });
+  const record = (over: Partial<CapabilityRecord>): CapabilityRecord => {
+    const base = capabilityFixture('list', over) as unknown as CapabilityRecord;
+    return base;
+  };
+  const cases: Array<[CatalogCapabilityState, CapabilityRecord, { credentials?: boolean; authorization?: boolean } | null]> = [
+    ['unsupported', record({ integration: 'unsupported' }), null],
+    ['unsupported', record({ integration: 'not_integrated' }), null],
+    ['unsupported', record({ integration: 'integrated', access: 'inaccessible' }), null],
+    ['unsupported', record({ integration: 'integrated', access: 'credentials_required', verification: 'live_verified', verificationRef: { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' } }), null],
+    ['unsupported', record({ integration: 'integrated', access: 'authorization_required', verification: 'live_verified', verificationRef: { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' } }), grant({ credentials: true })],
+    ['unverified', record({ integration: 'integrated', access: 'unknown' }), null],
+    ['unverified', record({ integration: 'integrated', access: 'public', verification: 'documented_only' }), grant({ credentials: true, authorization: true })],
+    ['unverified', record({ integration: 'integrated', access: 'public', verification: 'offline_verified' }), null],
+    ['unverified', record({ integration: 'integrated', access: 'credentials_required', verification: 'documented_only' }), grant({ credentials: true })],
+    ['supported', record({ integration: 'integrated', access: 'public', verification: 'live_verified', verificationRef: { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' } }), null],
+    ['supported', record({ integration: 'integrated', access: 'credentials_required', verification: 'live_verified', verificationRef: { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' } }), grant({ credentials: true })]
+  ];
+  for (const [expected, capability, currentGrant] of cases) {
+    const verificationBefore = capability.verification;
+    const state = capabilityStateFor(capability, currentGrant ? grant(currentGrant) : null);
+    assert.equal(state, expected, `${JSON.stringify({ integration: capability.integration, access: capability.access, verification: capability.verification })} vs ${JSON.stringify(currentGrant)}`);
+    // Grants never rewrite the verification axis.
+    assert.equal(capability.verification, verificationBefore);
+    if (expected === 'supported') assert.equal(capability.verification, 'live_verified');
+    if (verificationBefore === 'documented_only') assert.notEqual(state, 'supported');
+  }
+
+  // The catalog projection emits the GET-59 capability snapshot shape.
+  const snapshot = loadSourceCatalog();
+  const access: CatalogAccessContext = {
+    grants: { github: { credentials: true, authorization: true }, x: { credentials: true, authorization: true } }
+  };
+  const projected: Get59CapabilitySnapshot = toCapabilitySnapshot(snapshot, access);
+  assert.equal(projected.registryVersion, snapshot.registryVersion);
+  const githubDiscovery = projected.operations.find(
+    (operation) => operation.platform === 'github' && operation.operation === 'discover_accounts'
+  );
+  assert.ok(githubDiscovery);
+  assert.equal(githubDiscovery.state, 'unverified', 'old GitHub adapter verification cannot promote the new path');
+  const githubList = projected.operations.find(
+    (operation) => operation.platform === 'github' && operation.operation === 'list_posts'
+  );
+  assert.equal(githubList?.state, 'unverified', 'the research-adapter list path keeps its unverified label');
+  // Every catalog entry contributes exactly the seven GET-59 platform ops.
+  for (const entry of snapshot.entries.slice(0, 3)) {
+    const ops = projected.operations.filter((operation) => operation.platform === entry.platformId);
+    assert.deepEqual(
+      ops.map((operation) => operation.operation).sort(),
+      ['discover_accounts', 'list_comments', 'list_posts', 'read_media', 'read_post', 'read_profile', 'read_thread'].sort()
+    );
+    for (const operation of ops) {
+      assert.ok(
+        operation.state === 'supported' || operation.state === 'unsupported' || operation.state === 'unverified'
+      );
+      if (operation.state !== 'supported') {
+        assert.ok(operation.limitation && operation.limitation.length > 0, 'gaps carry a limitation');
+      }
+    }
+  }
+});
+
+test('catalogSummary counts platforms, routes and source records separately', () => {
+  const snapshot = loadSourceCatalog();
+  const summary = catalogSummary(snapshot);
+  assert.equal(summary.platformCount, snapshot.entries.length);
+  assert.equal(summary.sourceCount, snapshot.sources.length);
+  assert.equal(summary.routeCount, snapshot.entries.reduce((total, entry) => total + entry.routes.length, 0));
+  assert.ok(summary.routeCount > summary.platformCount, 'routes and platforms are counted separately');
+  assert.equal(summary.capabilityRecordCount, snapshot.entries.length * 7);
+  assert.equal(summary.legacyRuleCount, BUILTIN_PLATFORM_REGISTRY.rules.length);
+});
+
+test('gaps stay honest per platform: no adapter, unverified and unknown price are never hidden', () => {
+  const snapshot = loadSourceCatalog();
+  const byId = new Map(snapshot.entries.map((entry) => [entry.platformId, entry]));
+  const discordGaps = platformGaps(byId.get('discord')!);
+  assert.ok(discordGaps.some((gap) => gap.kind === 'no_adapter'));
+  assert.ok(discordGaps.some((gap) => gap.kind === 'unknown_price'));
+  const githubGaps = platformGaps(byId.get('github')!);
+  assert.ok(githubGaps.some((gap) => gap.kind === 'unverified_capability'));
+});
+
+/* ------------------------------------------------------------------ */
+/* HTTP surface: old fields preserved, catalog gaps added              */
+/* ------------------------------------------------------------------ */
+
+test('GET /api/discovery/registry keeps old fields and adds the catalog gap surface', async (t) => {
+  const server = await startTestServer({ discoveryCatalog: loadSourceCatalog() });
+  t.after(async () => {
+    await server.close();
+  });
+  await server.client.signUp('catalog-route@example.test');
+  const { status, body } = await server.client.json<{
+    registry: typeof BUILTIN_PLATFORM_REGISTRY;
+    summary: ReturnType<typeof registrySummary>;
+    catalog: {
+      registryVersion: string;
+      contentHash: string;
+      summary: { platformCount: number; routeCount: number; sourceCount: number };
+      sources: Array<{
+        sourceId: string;
+        upstreamVersion: string | null;
+        contentHash: string | null;
+        license: string | null;
+        licenseHash: string | null;
+        upstreamState: string;
+        counts: { raw: number | null; loaded: number | null; excluded: number | null };
+      }>;
+      platforms: Array<{
+        platformId: string;
+        gaps: Array<{ kind: string; detail: string }>;
+        capabilities: Array<{
+          dimension: string;
+          docUrls: string[];
+          endpoints: string[];
+          sourceRefs: string[];
+          sourceLocator: string | null;
+          verificationRef: unknown;
+          cost: { amount: number | null; basis: string; conditions: string | null };
+          comments?: { authorReplies: string; parentChain: string };
+          pagination?: { cursor: string; sortOptions: string[] | null; dateRange: string };
+        }>;
+      }>;
+    };
+  }>('/api/discovery/registry');
+  assert.equal(status, 200);
+  assert.deepEqual(
+    { ...registrySummary(body.registry), version: null, generatedAt: null },
+    { ...registrySummary(BUILTIN_PLATFORM_REGISTRY), version: null, generatedAt: null },
+    'old registry rule counts unchanged'
+  );
+  assert.deepEqual(body.summary, registrySummary(body.registry), 'old summary field unchanged');
+  assert.ok(body.catalog);
+  assert.equal(body.catalog.registryVersion, body.registry.version, 'all projections carry the same version');
+  assert.match(body.catalog.contentHash, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(body.catalog.summary.platformCount, 54);
+  assert.ok(body.catalog.summary.routeCount > 54);
+  assert.equal(body.catalog.summary.sourceCount, 8);
+
+  // Independent reads of the frozen public-source metadata through the API.
+  const sourcesById = new Map(body.catalog.sources.map((source) => [source.sourceId, source]));
+  const maigret = sourcesById.get('maigret');
+  assert.equal(maigret?.upstreamVersion, EXPECTED_SOURCES.maigret.upstreamVersion);
+  assert.equal(maigret?.contentHash, EXPECTED_SOURCES.maigret.contentHash);
+  assert.equal(maigret?.license, 'MIT');
+  assert.equal(maigret?.licenseHash, EXPECTED_SOURCES.maigret.licenseHash);
+  assert.equal(maigret?.upstreamState, 'metadata_only_not_imported');
+  assert.deepEqual(maigret?.counts, { raw: null, loaded: null, excluded: null });
+  assert.equal(sourcesById.get('tikhub-openapi')?.upstreamVersion, 'V5.3.2');
+  assert.equal(sourcesById.get('tikhub-openapi')?.contentHash, EXPECTED_SOURCES['tikhub-openapi'].contentHash);
+
+  // The explicit Threads cursor limit is readable through the API surface.
+  const threads = body.catalog.platforms.find((platform) => platform.platformId === 'threads');
+  assert.ok(threads);
+  const threadsPagination = threads.capabilities.find((capability) => capability.dimension === 'pagination');
+  assert.equal(threadsPagination?.pagination?.cursor, 'invalid');
+  assert.ok((threadsPagination?.sourceLocator ?? '').includes('fetch_user_posts'));
+
+  // Public provenance details travel with every capability record.
+  const githubList = body.catalog.platforms
+    .find((platform) => platform.platformId === 'github')
+    ?.capabilities.find((capability) => capability.dimension === 'list');
+  assert.ok(githubList);
+  assert.ok(githubList.sourceRefs.length > 0);
+  assert.ok((githubList.sourceLocator ?? '').length > 0 || githubList.endpoints.length > 0);
+  assert.ok(githubList.cost.basis.length > 0);
+
+  const discord = body.catalog.platforms.find((platform) => platform.platformId === 'discord');
+  assert.ok(discord && discord.gaps.length > 0);
+  assert.ok(discord.gaps.some((gap) => gap.kind === 'unknown_price'));
+});
+
+test('GET /api/discovery/registry without a catalog stays byte-compatible for old callers', async (t) => {
+  const server = await startTestServer({ discoveryCatalog: null });
+  t.after(async () => {
+    await server.close();
+  });
+  await server.client.signUp('catalog-none@example.test');
+  const { body } = await server.client.json<Record<string, unknown>>('/api/discovery/registry');
+  assert.deepEqual(Object.keys(body).sort(), ['registry', 'summary']);
+  assert.deepEqual(
+    { ...registrySummary(body.registry as typeof BUILTIN_PLATFORM_REGISTRY), version: null, generatedAt: null },
+    { ...registrySummary(BUILTIN_PLATFORM_REGISTRY), version: null, generatedAt: null }
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* Production data packaging (synthetic canary only)                   */
+/* ------------------------------------------------------------------ */
+
+test('build:data copies only data/platforms, never sibling local stores', async (t) => {
+  const workDir = mkdtempSync(path.join(tmpdir(), 'catalog-packaging-'));
+  t.after(() => rmSync(workDir, { recursive: true, force: true }));
+  const pkg = path.join(workDir, 'pkg');
+  mkdirSync(path.join(pkg, 'scripts'), { recursive: true });
+  mkdirSync(path.join(pkg, 'data', 'platforms'), { recursive: true });
+  cpSync(path.join(appRoot, 'scripts', 'copy-platform-data.mjs'), path.join(pkg, 'scripts', 'copy-platform-data.mjs'));
+  cpSync(sourceDataDir, path.join(pkg, 'data', 'platforms'), { recursive: true });
+  // Synthetic canaries standing in for a local SQLite/user-research store.
+  writeFileSync(path.join(pkg, 'data', 'private-canary.sqlite'), 'synthetic-canary-not-a-real-db');
+  writeFileSync(path.join(pkg, 'data', 'research-notes.json'), '{"synthetic": true}');
+
+  const child = spawn(process.execPath, [path.join(pkg, 'scripts', 'copy-platform-data.mjs')], { cwd: workDir });
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+  const exitCode = await new Promise((resolve) => child.on('close', resolve));
+  assert.equal(exitCode, 0, `copy script failed: ${stderr}`);
+
+  // Required platform catalog is bundled…
+  assert.ok(existsSync(path.join(pkg, 'dist', 'data', 'platforms', 'manifest.json')));
+  assert.ok(existsSync(path.join(pkg, 'dist', 'data', 'platforms', 'catalog.json')));
+  // …and sibling local data never ships.
+  assert.equal(existsSync(path.join(pkg, 'dist', 'data', 'private-canary.sqlite')), false, 'canary sqlite leaked into dist');
+  assert.equal(existsSync(path.join(pkg, 'dist', 'data', 'research-notes.json')), false, 'local research notes leaked into dist');
+  assert.equal(existsSync(path.join(pkg, 'dist', 'data', 'data')), false);
+});
+
+/* ------------------------------------------------------------------ */
+/* Compiled runtime: bundled data loads outside the repository cwd     */
+/* ------------------------------------------------------------------ */
+
+test(
+  'compiled runtime loads the bundled catalog copy from an arbitrary cwd',
+  {
+    skip: existsSync(path.join(appRoot, 'dist', 'server', 'platforms', 'catalog.js'))
+      ? false
+      : 'run `npm --prefix apps/web run build` first'
+  },
+  async (t) => {
+    const distDir = path.join(appRoot, 'dist');
+    assert.ok(
+      existsSync(path.join(distDir, 'data', 'platforms', 'manifest.json')),
+      'npm run build must copy data/platforms into dist/data/platforms'
+    );
+    assert.equal(
+      existsSync(path.join(distDir, 'data', 'platforms', 'private-canary.sqlite')),
+      false,
+      'production dist must not carry local stores'
+    );
+    const workDir = mkdtempSync(path.join(tmpdir(), 'catalog-copy-'));
+    const copyRoot = path.join(workDir, 'copied-build');
+    const cwdDir = path.join(workDir, 'elsewhere');
+    mkdirSync(cwdDir, { recursive: true });
+    cpSync(distDir, path.join(copyRoot, 'dist'), { recursive: true });
+    t.after(() => rmSync(workDir, { recursive: true, force: true }));
+
+    const script = `
+      const catalog = await import(${JSON.stringify(`file://${path.join(copyRoot, 'dist', 'server', 'platforms', 'catalog.js')}`)});
+      const dataDir = catalog.defaultCatalogDataDir();
+      const snapshot = catalog.loadPlatformCatalog(dataDir);
+      console.log(JSON.stringify({
+        dataDir,
+        entries: snapshot.entries.length,
+        contentHash: snapshot.contentHash,
+        registryVersion: snapshot.registryVersion
+      }));
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: cwdDir });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    const exitCode = await new Promise((resolve) => child.on('close', resolve));
+    assert.equal(exitCode, 0, `copied build failed to load catalog: ${stderr}`);
+
+    const result = JSON.parse(stdout.trim()) as { dataDir: string; entries: number; contentHash: string; registryVersion: string };
+    assert.ok(
+      result.dataDir.startsWith(copyRoot),
+      `production must read bundled data inside the copied build, got ${result.dataDir}`
+    );
+    assert.equal(result.entries, 54);
+    assert.match(result.contentHash, /^sha256:[0-9a-f]{64}$/);
+    const source = loadSourceCatalog();
+    assert.equal(result.contentHash, source.contentHash, 'compiled and source data copies agree');
+    assert.equal(result.registryVersion, source.registryVersion);
+  }
+);

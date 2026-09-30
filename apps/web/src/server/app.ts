@@ -21,6 +21,7 @@ import { registerDiscoveryRoutes } from './routes/discovery.js';
 import type { Runner } from './services/runner.js';
 import type { DiscoveryRunner } from './services/discovery-runner.js';
 import type { PlatformRegistry } from '../shared/platform-discovery.js';
+import type { PlatformCatalogSnapshot } from '../shared/platform-catalog.js';
 import type { ReviewStore } from './review-store.js';
 import type { DiscoveryStore } from './discovery-store.js';
 import type { Store } from './store.js';
@@ -32,6 +33,8 @@ export interface AppDeps {
   discoveryStore: DiscoveryStore;
   discoveryRunner: DiscoveryRunner;
   discoveryRegistry: PlatformRegistry;
+  /** Versioned catalog surface for /api/discovery/registry; null omits it. */
+  discoveryCatalog?: PlatformCatalogSnapshot | null;
   auth: Auth;
   runner: Runner;
   clientDir: string;
@@ -95,7 +98,8 @@ export function createApp(deps: AppDeps): Express {
   registerDiscoveryRoutes(apiRouter, {
     store: deps.discoveryStore,
     runner: deps.discoveryRunner,
-    registry: deps.discoveryRegistry
+    registry: deps.discoveryRegistry,
+    catalog: deps.discoveryCatalog ?? null
   });
   app.use('/api', apiRouter);
 

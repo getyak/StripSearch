@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
-    "build": "npm run build:client && npm run build:server",
+    "build:data": "node scripts/copy-platform-data.mjs",
+    "build": "npm run build:client && npm run build:server && npm run build:data",
     "start": "node --env-file-if-exists=.env dist/server/index.js",
     "dev": "npm run build:client && node --import tsx --env-file-if-exists=.env --watch src/server/index.ts",
     "dev:client": "vite build --watch"

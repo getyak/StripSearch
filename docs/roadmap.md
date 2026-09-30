@@ -60,6 +60,8 @@
 
 2026-09-30：[Search / Fetch 工具接口契约（GET-59）](research-tool-contracts.md) 已落地：Search 8 / Fetch 10 去重后 15 个工具的可执行注册表、`dispatch(trustedContext, modelCall, ports, signal)` 验证网关、统一返回封套、逐底层请求计量端口与 pending-only 提交端口；核验是 Fetch 阶段（仅 3 件工具）而非第三角色。它是离线接口契约地基，不代表 Search / Fetch 上线，旧 alpha 工具面保持不变。
 
+2026-09-30：[版本化平台目录（GET-90）](platform-catalog.md) 已落地：20 个 TikHub 平台、30 个替代平台、个人网站与保留旧规则的 legacy 条目全部登记，七项能力×四维度（文档/实现/访问/验证）按逐维证据分开记录，一份快照产出旧 probe / GET-60 完成 / GET-59 能力三个投影，并扩展 `/api/discovery/registry` 的目录缺口与公开溯源面。全部能力记 documented_only、价格显式 null + 公开依据（null ≠ 免费）；Maigret / WhatsMyName / TikHub 来源仅冻结元数据（commit/版本、sha256、抓取时间、许可），未导入、无导入计数（导入与规则执行属 GET-91），无任何 live 验证。
+
 ## 已采纳的设计基线
 
 | 决定 | 理由 | 什么会使它改变 |
