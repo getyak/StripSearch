@@ -135,6 +135,23 @@ function costFixture(over: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
+function operationFixture(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    operationId: 'fixture-op',
+    kind: 'tikhub_documented',
+    method: 'GET',
+    endpoint: '/fixture/endpoint',
+    requestBody: null,
+    integrated: false,
+    access: 'public',
+    cost: costFixture(),
+    sourceRefs: ['src-public'],
+    sourceLocator: 'fixture:doc',
+    notes: [],
+    ...over
+  };
+}
+
 function capabilityFixture(
   dimension: CapabilityRecord['dimension'],
   over: Partial<CapabilityRecord> = {}
@@ -151,6 +168,7 @@ function capabilityFixture(
     verificationRef: null,
     cost: costFixture(),
     sourceRefs: ['src-public'],
+    operations: [operationFixture()],
     notes: [],
     ...(dimension === 'comments'
       ? { comments: { authorReplies: 'unknown', parentChain: 'unknown' } }
@@ -520,9 +538,191 @@ test('mixed-source platforms keep access and price per operation, never inherite
   assert.equal(capabilityOf(x, 'list').access, 'credentials_required');
 });
 
-/* ------------------------------------------------------------------ */
-/* Loader validation: hashes, duplicates, source refs, shapes          */
-/* ------------------------------------------------------------------ */
+test('mixed dimensions expose per-operation access/cost/integration evidence', () => {
+  const snapshot = loadSourceCatalog();
+  const reddit = entryById(snapshot, 'reddit');
+
+  // Reddit pagination actually runs only on the TikHub cursor endpoint: the
+  // anonymous legacy listing has no paging at all.
+  const pagination = capabilityOf(reddit, 'pagination');
+  assert.equal(pagination.access, 'credentials_required');
+  assert.equal(pagination.cost.provider, 'tikhub');
+  assert.ok(pagination.operations.length > 0);
+  for (const op of pagination.operations) {
+    assert.equal(op.access, 'credentials_required', op.operationId);
+    assert.equal(op.cost.provider, 'tikhub', op.operationId);
+    assert.ok(op.endpoint.includes('/api/v1/reddit/'), op.operationId);
+  }
+  assert.equal(pagination.operations.some((op) => op.endpoint.includes('submitted.json')), false,
+    'the paging-less legacy listing is not a pagination operation');
+
+  // Reddit list combines both routes and must express them separately.
+  const list = capabilityOf(reddit, 'list');
+  const legacyList = list.operations.find((op) => op.endpoint.includes('submitted.json'));
+  const tikhubList = list.operations.find((op) => op.endpoint.includes('/api/v1/reddit/'));
+  assert.ok(legacyList && tikhubList);
+  assert.equal(legacyList.integrated, true);
+  assert.equal(legacyList.access, 'public');
+  assert.equal(legacyList.cost.provider, null);
+  assert.equal(tikhubList.integrated, false);
+  assert.equal(tikhubList.access, 'credentials_required');
+  assert.equal(tikhubList.cost.provider, 'tikhub');
+  // Aggregate follows the operation that actually runs today.
+  assert.equal(list.integration, 'integrated');
+  assert.equal(list.access, legacyList.access);
+
+  // Global coherence: aggregates always derive from real operations.
+  for (const entry of snapshot.entries) {
+    for (const record of entry.capabilities) {
+      const integrated = record.operations.filter((op) => op.integrated);
+      if (record.integration === 'integrated') {
+        assert.ok(integrated.length > 0, `${entry.platformId}/${record.dimension}: integrated without an integrated operation`);
+        assert.ok(integrated.some((op) => op.access === record.access), `${entry.platformId}/${record.dimension}: access not from an integrated operation`);
+        assert.ok(integrated.some((op) => op.cost.provider === record.cost.provider), `${entry.platformId}/${record.dimension}: price not from an integrated operation`);
+      } else {
+        assert.equal(integrated.length, 0, `${entry.platformId}/${record.dimension}: hidden integrated operation`);
+      }
+    }
+  }
+});
+
+test('loader rejects aggregates that contradict their operations', () => {
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      const cap = (entries[0]!.capabilities as Record<string, unknown>[])[0]!;
+      cap.integration = 'integrated'; // no integrated operation exists
+      rehash(raw);
+    })),
+    'invalid_shape'
+  );
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      const cap = (entries[0]!.capabilities as Record<string, unknown>[])[0]!;
+      (cap.operations as Record<string, unknown>[]).push(operationFixture({ integrated: true, operationId: 'hidden-op' }));
+      rehash(raw);
+    })),
+    'invalid_shape'
+  );
+});
+
+test('selected TikHub operations match the frozen OpenAPI facts', () => {
+  const snapshot = loadSourceCatalog();
+  // Facts transcribed independently from the pinned V5.3.2 OpenAPI document
+  // (method + requestBody schema ref), not from the generator tables.
+  const FIXED_FACTS = [
+    { path: '/api/v1/douyin/douplus/search_user_v2', method: 'POST', requestBody: 'UserSearchV2Request' },
+    { path: '/api/v1/wechat_mp/v2/fetch_account_articles', method: 'POST', requestBody: 'FetchAccountArticlesRequest' },
+    { path: '/api/v1/wechat_mp/v2/fetch_article_detail', method: 'POST', requestBody: 'FetchArticleDetailRequest' },
+    { path: '/api/v1/wechat_channels/v2/fetch_user_profile', method: 'POST', requestBody: 'FetchUserProfileRequest' },
+    { path: '/api/v1/wechat_channels/v2/fetch_video_detail', method: 'POST', requestBody: 'FetchVideoDetailRequest' },
+    { path: '/api/v1/instagram/v1/fetch_post_comments_v2', method: 'GET', requestBody: null },
+    { path: '/api/v1/threads/web/fetch_user_posts', method: 'GET', requestBody: null },
+    { path: '/api/v1/reddit/app/fetch_user_comments', method: 'GET', requestBody: null }
+  ] as const;
+  const allOps = snapshot.entries.flatMap((entry) => entry.capabilities.flatMap((record) => record.operations));
+  for (const fact of FIXED_FACTS) {
+    const ops = allOps.filter((op) => op.endpoint === fact.path);
+    assert.ok(ops.length > 0, `catalog must register ${fact.path}`);
+    for (const op of ops) {
+      assert.equal(op.method, fact.method, fact.path);
+      assert.equal(op.requestBody, fact.requestBody, fact.path);
+    }
+  }
+  // The absent Instagram path is never cited.
+  assert.equal(allOps.some((op) => op.endpoint.includes('/api/v1/instagram/v2/fetch_post_comments_v2')), false);
+  // Wechat-mp articles paginate via the base64 offset cursor; page_size is ignored.
+  const wechatMp = entryById(snapshot, 'wechat-mp');
+  const wechatPagination = capabilityOf(wechatMp, 'pagination');
+  assert.equal(wechatPagination.pagination?.cursor, 'supported');
+  const wechatNotes = wechatPagination.notes.join(' ');
+  assert.match(wechatNotes, /offset|next_offset/);
+  assert.match(wechatNotes, /page_size.*忽略|忽略.*page_size/);
+});
+
+test('reddit bounds stay per-route: sort enum, no date-range import, key-gated paging', () => {
+  const snapshot = loadSourceCatalog();
+  const reddit = capabilityOf(entryById(snapshot, 'reddit'), 'pagination');
+  // The TikHub reddit endpoints expose sort NEW/TOP/HOT/CONTROVERSIAL and no
+  // date-range parameter; official after/before semantics are a different
+  // route and are never imported here (see docs/platforms/reddit-routes.md).
+  assert.deepEqual(reddit.pagination?.sortOptions, ['NEW', 'TOP', 'HOT', 'CONTROVERSIAL']);
+  assert.equal(reddit.pagination?.dateRange, 'unsupported');
+  assert.equal(reddit.pagination?.cursor, 'supported');
+  assert.match(reddit.notes.join(' '), /reddit-routes|跨路线|不照搬/);
+  const pagingOp = reddit.operations.find((op) => op.endpoint.includes('/api/v1/reddit/app/fetch_user_comments'));
+  assert.ok(pagingOp);
+  assert.equal(pagingOp.access, 'credentials_required');
+  assert.equal(pagingOp.cost.provider, 'tikhub');
+});
+
+test('X routes describe only the implemented known-handle handler, never people search', () => {
+  const snapshot = loadSourceCatalog();
+  const x = entryById(snapshot, 'x');
+  const integrated = x.routes.filter((route) => route.availability === 'integrated');
+  for (const route of integrated) {
+    assert.notEqual(route.kind, 'platform_search', 'profile reads cannot back people search');
+  }
+  const handleRoute = x.routes.find((route) => route.adapterId === 'tikhub-x' && route.availability === 'integrated');
+  assert.ok(handleRoute);
+  // Matches the real toolkit handler (social_profile), nothing broader.
+  assert.equal(handleRoute.kind, 'username_probe');
+  assert.equal(handleRoute.operation, 'tikhub-x:fetch_user_profile');
+  assert.equal(handleRoute.endpoint, 'https://api.tikhub.io/api/v1/twitter/web/fetch_user_profile?screen_name={screen_name}');
+  assert.ok(handleRoute.reason.includes('handle'));
+  const searchRoute = x.routes.find((route) => route.kind === 'platform_search');
+  assert.ok(searchRoute);
+  assert.equal(searchRoute.availability, 'not_integrated');
+  assert.equal(searchRoute.adapterId, null);
+  assert.equal(searchRoute.endpoint, null);
+  assert.match(searchRoute.reason, /未接入|搜索/);
+});
+
+test('thread depth requires explicit thread support with receipt and provenance', () => {
+  const threadless = catalogSnapshotFromJson(syntheticRaw((raw) => {
+    const entries = raw.entries as Record<string, unknown>[];
+    const caps = entries[0]!.capabilities as Record<string, unknown>[];
+    const comments = caps.find((cap) => cap.dimension === 'comments')!;
+    comments.comments = { authorReplies: 'supported', parentChain: 'supported' };
+    comments.integration = 'integrated';
+    comments.verification = 'live_verified';
+    comments.verificationRef = { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' };
+    (comments.operations as Record<string, unknown>[]).push(operationFixture({ operationId: 'live-comments', integrated: true, access: 'public' }));
+    rehash(raw);
+  }));
+  const projected = toCapabilitySnapshot(threadless, { grants: {} });
+  const readThread = projected.operations.find((op) => op.operation === 'read_thread');
+  assert.ok(readThread);
+  assert.notEqual(readThread.state, 'supported', 'comments receipts cannot verify the thread reader');
+  assert.equal(readThread.maxDepth, null, 'no manufactured depth bound');
+
+  // An explicit thread support with its own bound provenance can confirm depth.
+  const threaded = catalogSnapshotFromJson(syntheticRaw((raw) => {
+    const entries = raw.entries as Record<string, unknown>[];
+    const caps = entries[0]!.capabilities as Record<string, unknown>[];
+    const comments = caps.find((cap) => cap.dimension === 'comments')!;
+    comments.comments = { authorReplies: 'supported', parentChain: 'supported' };
+    comments.thread = { support: 'supported', maxDepth: 3, depthProvenance: 'receipt:thread-depth-3' };
+    comments.integration = 'integrated';
+    comments.verification = 'live_verified';
+    comments.verificationRef = { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' };
+    (comments.operations as Record<string, unknown>[]).push(operationFixture({ operationId: 'live-comments', integrated: true, access: 'public' }));
+    rehash(raw);
+  }));
+  const confirmed = toCapabilitySnapshot(threaded, { grants: {} }).operations.find((op) => op.operation === 'read_thread');
+  assert.equal(confirmed?.state, 'supported');
+  assert.equal(confirmed?.maxDepth, 3, 'depth comes from explicit provenance, never a design default');
+
+  // The shipped catalog stays conservative.
+  const snapshot = loadSourceCatalog();
+  for (const entry of snapshot.entries) {
+    const readThread = toCapabilitySnapshot({ ...snapshot, entries: [entry] }, { grants: {} })
+      .operations.find((op) => op.operation === 'read_thread');
+    assert.notEqual(readThread?.state, 'supported', entry.platformId);
+    assert.equal(readThread?.maxDepth, null, entry.platformId);
+  }
+});
 
 test('loader rejects duplicate platform ids and conflicting aliases', () => {
   expectLoadError(
@@ -580,6 +780,65 @@ test('loader validates content hashes, file hashes and source references', () =>
     })),
     'source_ref'
   );
+});
+
+test('legacy probe loader rejects non-GET methods instead of normalizing them', () => {
+  expectLoadError(
+    () => catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      entries[0]!.legacy = {
+        category: 'social',
+        subjectKinds: ['username'],
+        homepage: 'https://public.example.test',
+        probe: {
+          kind: 'http_status',
+          method: 'POST',
+          urlTemplate: 'https://public.example.test/users/{username}',
+          foundStatuses: [200],
+          notFoundStatuses: [404],
+          blockedStatuses: [403, 429],
+          foundMarker: null,
+          notFoundMarker: null,
+          transport: 'api_http'
+        },
+        posts: { kind: 'none', urlTemplate: '', maxPages: 0, itemsPath: '', fields: { id: null, url: null, title: null, publishedAt: null, excerpt: null } },
+        rateLimitPerMinute: 10,
+        verification: 'live_unverified',
+        verificationNote: '合成夹具',
+        notes: []
+      };
+      rehash(raw);
+    })),
+    'invalid_shape'
+  );
+  // The 13 real legacy rules still load unchanged (covered by the projection
+  // test above); a valid GET probe remains accepted.
+  const ok = catalogSnapshotFromJson(syntheticRaw((raw) => {
+    const entries = raw.entries as Record<string, unknown>[];
+    entries[0]!.legacy = {
+      category: 'social',
+      subjectKinds: ['username'],
+      homepage: 'https://public.example.test',
+      probe: {
+        kind: 'http_status',
+        method: 'GET',
+        urlTemplate: 'https://public.example.test/users/{username}',
+        foundStatuses: [200],
+        notFoundStatuses: [404],
+        blockedStatuses: [403, 429],
+        foundMarker: null,
+        notFoundMarker: null,
+        transport: 'api_http'
+      },
+      posts: { kind: 'none', urlTemplate: '', maxPages: 0, itemsPath: '', fields: { id: null, url: null, title: null, publishedAt: null, excerpt: null } },
+      rateLimitPerMinute: 10,
+      verification: 'live_unverified',
+      verificationNote: '合成夹具',
+      notes: []
+    };
+    rehash(raw);
+  }));
+  assert.equal(ok.entries[0]?.legacy?.probe?.method, 'GET');
 });
 
 test('loader validates shapes: seven dimensions, enum values, live_verified receipts and routes', () => {
@@ -869,9 +1128,10 @@ test('GET /api/discovery/registry keeps old fields and adds the catalog gap surf
           sourceRefs: string[];
           sourceLocator: string | null;
           verificationRef: unknown;
-          cost: { amount: number | null; basis: string; conditions: string | null };
+          cost: { provider: string | null; amount: number | null; basis: string; conditions: string | null };
           comments?: { authorReplies: string; parentChain: string };
           pagination?: { cursor: string; sortOptions: string[] | null; dateRange: string };
+          operations: Array<{ operationId: string; method: string | null; endpoint: string; requestBody: string | null; integrated: boolean; access: string; cost: { provider: string | null } }>;
         }>;
       }>;
     };
@@ -908,6 +1168,22 @@ test('GET /api/discovery/registry keeps old fields and adds the catalog gap surf
   const threadsPagination = threads.capabilities.find((capability) => capability.dimension === 'pagination');
   assert.equal(threadsPagination?.pagination?.cursor, 'invalid');
   assert.ok((threadsPagination?.sourceLocator ?? '').includes('fetch_user_posts'));
+
+  // Per-operation evidence is retained through the API (mixed dimensions).
+  const redditPagination = body.catalog.platforms
+    .find((platform) => platform.platformId === 'reddit')
+    ?.capabilities.find((capability) => capability.dimension === 'pagination');
+  assert.ok(redditPagination);
+  assert.equal(redditPagination.cost.provider, 'tikhub');
+  assert.ok(redditPagination.operations.length > 0);
+  assert.equal(redditPagination.operations.every((op) => op.access === 'credentials_required'), true);
+  assert.equal(redditPagination.operations.every((op) => op.method === 'GET'), true);
+  const wechatArticles = body.catalog.platforms
+    .find((platform) => platform.platformId === 'wechat-mp')
+    ?.capabilities.find((capability) => capability.dimension === 'list')
+    ?.operations.find((op) => op.endpoint.includes('fetch_account_articles'));
+  assert.equal(wechatArticles?.method, 'POST');
+  assert.equal(wechatArticles?.requestBody, 'FetchAccountArticlesRequest');
 
   // Public provenance details travel with every capability record.
   const githubList = body.catalog.platforms
@@ -968,9 +1244,92 @@ test('build:data copies only data/platforms, never sibling local stores', async 
   assert.equal(existsSync(path.join(pkg, 'dist', 'data', 'data')), false);
 });
 
+test('build:data normalizes the public bundle to world-readable modes without touching sources', async (t) => {
+  const workDir = mkdtempSync(path.join(tmpdir(), 'catalog-modes-'));
+  t.after(() => rmSync(workDir, { recursive: true, force: true }));
+  const pkg = path.join(workDir, 'pkg');
+  mkdirSync(path.join(pkg, 'scripts'), { recursive: true });
+  mkdirSync(path.join(pkg, 'data', 'platforms'), { recursive: true });
+  cpSync(path.join(appRoot, 'scripts', 'copy-platform-data.mjs'), path.join(pkg, 'scripts', 'copy-platform-data.mjs'));
+  cpSync(sourceDataDir, path.join(pkg, 'data', 'platforms'), { recursive: true });
+  writeFileSync(path.join(pkg, 'data', 'private-canary.sqlite'), 'synthetic-canary-not-a-real-db');
+  // Restrictive source modes: what cpSync would happily preserve into dist.
+  const { chmodSync, statSync, readdirSync } = await import('node:fs');
+  chmodSync(path.join(pkg, 'data'), 0o700);
+  chmodSync(path.join(pkg, 'data', 'platforms'), 0o700);
+  for (const name of readdirSync(path.join(pkg, 'data', 'platforms'))) {
+    chmodSync(path.join(pkg, 'data', 'platforms', name), 0o600);
+  }
+  chmodSync(path.join(pkg, 'data', 'private-canary.sqlite'), 0o600);
+
+  const child = spawn(process.execPath, [path.join(pkg, 'scripts', 'copy-platform-data.mjs')], { cwd: workDir });
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+  const exitCode = await new Promise((resolve) => child.on('close', resolve));
+  assert.equal(exitCode, 0, `copy script failed: ${stderr}`);
+
+  // The PUBLIC bundle must be readable/traversable by a non-owner (Docker
+  // runs as USER node against root-owned files).
+  const bundleRoot = path.join(pkg, 'dist', 'data', 'platforms');
+  assert.equal(statSync(bundleRoot).mode & 0o777, 0o755, 'bundle dir must be 755');
+  for (const name of readdirSync(bundleRoot)) {
+    assert.equal(statSync(path.join(bundleRoot, name)).mode & 0o777, 0o644, `${name} must be 644`);
+  }
+  // Sources and private siblings keep their restrictive modes and stay put.
+  assert.equal(statSync(path.join(pkg, 'data', 'platforms')).mode & 0o777, 0o700, 'source dir mode changed');
+  assert.equal(statSync(path.join(pkg, 'data', 'platforms', 'catalog.json')).mode & 0o777, 0o600, 'source file mode changed');
+  assert.equal(statSync(path.join(pkg, 'data', 'private-canary.sqlite')).mode & 0o777, 0o600, 'private sibling mode changed');
+  assert.equal(existsSync(path.join(pkg, 'dist', 'data', 'private-canary.sqlite')), false);
+});
+
 /* ------------------------------------------------------------------ */
 /* Compiled runtime: bundled data loads outside the repository cwd     */
 /* ------------------------------------------------------------------ */
+
+test(
+  'compiled runtime fails closed when the bundled data is missing',
+  {
+    skip: existsSync(path.join(appRoot, 'dist', 'server', 'platforms', 'catalog.js'))
+      ? false
+      : 'run `npm --prefix apps/web run build` first'
+  },
+  async (t) => {
+    const distDir = path.join(appRoot, 'dist');
+    const workDir = mkdtempSync(path.join(tmpdir(), 'catalog-missing-'));
+    const copyRoot = path.join(workDir, 'copied-build');
+    const cwdDir = path.join(workDir, 'elsewhere');
+    mkdirSync(cwdDir, { recursive: true });
+    // A complete dist EXCEPT its data bundle, plus a source-style catalog in
+    // the ancestor layout: the loader must not fall back to it.
+    cpSync(distDir, path.join(copyRoot, 'dist'), {
+      recursive: true,
+      filter: (src) => !src.includes(`${path.sep}dist${path.sep}data`)
+    });
+    assert.equal(existsSync(path.join(copyRoot, 'dist', 'data')), false);
+    cpSync(sourceDataDir, path.join(copyRoot, 'data', 'platforms'), { recursive: true });
+    t.after(() => rmSync(workDir, { recursive: true, force: true }));
+
+    const script = `
+      const catalog = await import(${JSON.stringify(`file://${path.join(copyRoot, 'dist', 'server', 'platforms', 'catalog.js')}`)});
+      try {
+        const dir = catalog.defaultCatalogDataDir();
+        console.log(JSON.stringify({ resolved: dir }));
+      } catch (error) {
+        console.log(JSON.stringify({ errorCode: error.code ?? null, name: error.name }));
+      }
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: cwdDir });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    const exitCode = await new Promise((resolve) => child.on('close', resolve));
+    assert.equal(exitCode, 0, `copied build crashed: ${stderr}`);
+    const result = JSON.parse(stdout.trim()) as { resolved?: string; errorCode?: string | null; name?: string };
+    assert.equal(result.resolved, undefined, `missing bundle must not resolve to ${String(result.resolved)}`);
+    assert.equal(result.errorCode, 'data_not_found');
+  }
+);
 
 test(
   'compiled runtime loads the bundled catalog copy from an arbitrary cwd',

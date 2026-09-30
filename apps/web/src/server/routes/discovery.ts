@@ -132,6 +132,7 @@ export function registerDiscoveryRoutes(router: Router, deps: DiscoveryRouteDeps
             sourceLocator: record.sourceLocator,
             sourceRefs: record.sourceRefs,
             comments: record.comments ?? null,
+            thread: record.thread ?? null,
             pagination: record.pagination ?? null,
             cost: {
               provider: record.cost.provider,
@@ -143,6 +144,28 @@ export function registerDiscoveryRoutes(router: Router, deps: DiscoveryRouteDeps
               basis: record.cost.basis,
               conditions: record.cost.conditions
             },
+            operations: record.operations.map((operation) => ({
+              operationId: operation.operationId,
+              kind: operation.kind,
+              method: operation.method,
+              endpoint: operation.endpoint,
+              requestBody: operation.requestBody,
+              integrated: operation.integrated,
+              access: operation.access,
+              cost: {
+                provider: operation.cost.provider,
+                unit: operation.cost.unit,
+                currency: operation.cost.currency,
+                amount: operation.cost.amount,
+                asOf: operation.cost.asOf,
+                source: operation.cost.source,
+                basis: operation.cost.basis,
+                conditions: operation.cost.conditions
+              },
+              sourceRefs: operation.sourceRefs,
+              sourceLocator: operation.sourceLocator,
+              notes: operation.notes
+            })),
             notes: record.notes
           })),
           routes: entry.routes.map((route) => ({

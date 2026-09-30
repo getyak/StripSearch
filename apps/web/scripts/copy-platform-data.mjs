@@ -13,7 +13,7 @@
  * Usage: `node scripts/copy-platform-data.mjs` (run by `npm run build:data`).
  */
 
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,4 +29,21 @@ if (!existsSync(path.join(sourceDir, 'manifest.json'))) {
 rmSync(distTarget, { recursive: true, force: true });
 mkdirSync(path.dirname(distTarget), { recursive: true });
 cpSync(sourceDir, distTarget, { recursive: true });
-console.log(`copy-platform-data: ${sourceDir} -> ${distTarget}`);
+
+/**
+ * Normalize ONLY the generated public bundle to 755/644. cpSync preserves the
+ * restrictive source modes (700/600), which would leave the root-owned Docker
+ * image unreadable for `USER node`. Sources, sibling data and user-research
+ * stores keep their modes untouched.
+ */
+function normalizePublicBundle(dir) {
+  chmodSync(dir, 0o755);
+  for (const name of readdirSync(dir)) {
+    const target = path.join(dir, name);
+    if (statSync(target).isDirectory()) normalizePublicBundle(target);
+    else chmodSync(target, 0o644);
+  }
+}
+normalizePublicBundle(distTarget);
+
+console.log(`copy-platform-data: ${sourceDir} -> ${distTarget} (modes 755/644)`);

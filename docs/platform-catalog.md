@@ -21,13 +21,17 @@
 
 每条 entry 登记七项能力：发现、主页、列表、正文、媒体、评论、分页；评论另记本人回复/父链，分页另记游标、排序、日期范围限制。每项能力把四个维度分开记录，互不替代：文档依据（documented / not_documented / unknown）、实现状态（integrated / not_integrated / unsupported，指本项目当前 adapter）、访问条件（public / credentials_required / authorization_required / inaccessible / unknown，缺 key 与端点失效分开）、验证依据（documented_only / offline_verified / live_verified，live_verified 必须绑定验收回执，加载器拒绝无回执的 live_verified）。
 
-**逐维证据规则（加载器强制）**：`documented` 只在该维度有具体端点事实（`endpoints`）或精确原始来源定位（`sourceLocator`，如 `tikhub-path-index:/api/v1/...`、`project-legacy-registry:github`）时成立；指向 provider/开发者首页的通用链接不构成任何能力维度的证据，此类维度一律 `unknown`。TikHub 端点事实来自已冻结的 V5.3.2 OpenAPI/path index；Threads 的 `fetch_user_posts` 官方描述为无分页，`end_cursor` 无效（分页记录 `cursor: "invalid"` 并携带定位）；Telegram 登记路径均为频道端点，不含个人账号读取。
+**逐维证据规则（加载器强制）**：`documented` 只在该维度有具体端点事实（`endpoints`）或精确原始来源定位（`sourceLocator`，如 `tikhub-path-index:/api/v1/...`、`project-legacy-registry:github`）时成立；指向 provider/开发者首页的通用链接不构成任何能力维度的证据，此类维度一律 `unknown`。TikHub 端点事实来自已冻结的 V5.3.2 OpenAPI/path index（全部入选 method/path/requestBody 已逐条对账，见任务审计回执）：微信公众号/视频号与抖音 douplus 搜索为 POST + requestBody schema；Threads 的 `fetch_user_posts` 官方描述为无分页，`end_cursor` 无效（分页记录 `cursor: "invalid"` 并携带定位）；Telegram 登记路径均为频道端点，不含个人账号读取。
+
+**逐操作描述（`operations`）**：每条能力携带逐操作描述（operationId、method、requestBody schema、端点、是否已接入、访问条件、费用、来源），混合来源维度（如 Reddit：匿名单页 listing + TikHub 游标 listing）不会被一条路线的条件抹平；聚合字段只从实际操作派生（有集成操作时取其条件，否则无单一口径则记 unknown），加载器校验一致性，API 原样保留。
 
 **规范主页规则**（`profileUrlRule`）只记录有公开文档模式的显式规则（旧探测模板、GitHub REST `htmlUrl` 形式、Bluesky/Mastodon 文档模式）；未核对到模式的平台保持 `null`，绝不从主页合成 `/{username}` 猜测。
 
-**实现状态只认真实路径**：存在性探测只算 discovery，不构成 profile 读取（npm/PyPI/devto 等同理）；profile 只有 GitHub 研究 adapter 与 TikHub X 工具两条具体路径，list 另含既有帖子追踪读取器（devto/HN/Medium/Reddit）与 GitHub 研究 adapter（仅读取本人拥有的仓库、仅首页、有数量上限，均已记录）；分页只有 devto/HN 的页码翻页被读取器实际消费。所有新路径的验证依据保持 `documented_only`，旧 GitHub 规则的 `live_verified` 标签不被新能力继承。
+**实现状态只认真实路径**：存在性探测只算 discovery，不构成 profile 读取（npm/PyPI/devto 等同理）；profile 只有 GitHub 研究 adapter 与 TikHub X 工具两条具体路径（X 工具仅支持已知 handle 的资料/帖子读取，不支持人物搜索，搜索路线保持 not_integrated），list 另含既有帖子追踪读取器（devto/HN/Medium/Reddit）与 GitHub 研究 adapter（仅读取本人拥有的仓库、仅首页、有数量上限，均已记录）；分页只有 devto/HN 的页码翻页被读取器实际消费，Reddit 分页只属于 TikHub 游标路线（credentials_required + TikHub 价格依据），不跨路线照搬官方 after/before 语义。所有新路径的验证依据保持 `documented_only`，旧 GitHub 规则的 `live_verified` 标签不被新能力继承。
 
-**访问与费用属于具体操作/路线**：同一平台不同维度可以不同（Reddit 的匿名探测维度是 `public`，TikHub 端点维度是 `credentials_required`）；没有已建立操作的维度记 `unknown` + 显式依据。所有价格都是显式 `null` + 公开依据（TikHub 公开价格目录按端点计价、币种/端点未定；目录响应的 request_id/time 不是费用回执）；**null 不等于免费**。
+**读线程（read_thread）是独立能力**：评论列表的回执/父链文档不能验证线程读取器或深度；只有显式 thread 支持 + 自身回执 + 深度来源（`depthProvenance`）才能给出 confirmed `maxDepth`，否则一律保守 `unverified` 且 `maxDepth: null`（不套设计默认值 4）。当前目录全部 thread 记录保持 `unknown`。
+
+**访问与费用属于具体操作/路线**：同一平台不同维度可以不同（Reddit 的匿名单页 listing 维度是 `public`，TikHub 游标分页是 `credentials_required` + TikHub 价格依据）；没有已建立操作的维度记 `unknown` + 显式依据。所有价格都是显式 `null` + 公开依据（TikHub 公开价格目录按端点列 `endpoint_cost`，未标币种/计量单位，未选定端点；目录响应的 request_id/time 不是费用回执）；**null 不等于免费**。
 
 ## 来源清单（元数据冻结，未导入）
 
@@ -53,7 +57,7 @@
 
 `loadPlatformCatalog(dataDir)` 校验文件 hash、内容 hash、重复 ID、冲突别名（别名不得与任何 platformId 或其他别名重复）、来源引用与完整形状（七维度齐全、枚举合法、价格 null/正数、documented 必有逐维证据、路由非空且带理由）。快照深冻结并深拷贝：后续改动输入不会改变已冻结快照；版本/hash 变化只影响新 round，旧 snapshot 不变。
 
-生产数据路径是模块相对的：`npm run build` 的 `build:data` 只把 `data/platforms` 复制进 `dist/data/platforms`（`data/` 同时是本地 SQLite/用户研究存储位置，**绝不整体复制**；打包回归用合成 canary 验证旁路数据不进 dist）。`defaultCatalogDataDir()` 从模块向上查找 `data/platforms/manifest.json`，因此编译产物在任意 cwd（含 Docker runtime，经现有 dist 复制打包）都读自带数据，不依赖仓库目录。测试注入构造器/加载结果，全部离线。
+生产数据路径是模块相对且显式的：编译产物读 `<dist>/data/platforms`（`npm run build:data` 只把 `data/platforms` 复制进 `dist/data/platforms` 并归一化为 755/644，保证非属主可读；`data/` 同时是本地 SQLite/用户研究存储位置，**绝不整体复制**，打包回归用合成 canary 验证旁路数据不进 dist、源目录权限不变）；源码运行读 `apps/web/data/platforms`。不做祖先目录回退：production bundle 缺失时即使源码目录存在也确定性抛 `data_not_found`（编译产物回归覆盖两种情况）。因此编译产物在任意 cwd（含 Docker runtime，经现有 dist 复制打包）都读自带数据，不依赖仓库目录。测试注入构造器/加载结果，全部离线。
 
 `GET /api/discovery/registry` 在保留原有 `registry` / `summary` 字段与行为的前提下，附加 `catalog`：版本、hash、汇总、来源清单（版本/hash/许可/状态等公开溯源）、逐平台能力（含 docUrls、endpoints、sourceLocator、sourceRefs、verificationRef、评论/分页详情、费用依据与条件）、路线与缺口。缺口显式列出：无 adapter 能力、未 live 验证能力、费用未知（null ≠ 免费）、访问受限能力。不注入目录时响应保持旧形状；不暴露任何凭据或 owner 访问上下文。
 

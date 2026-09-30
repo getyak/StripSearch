@@ -170,10 +170,53 @@ export interface CatalogVerificationRef {
   receipt: string;
 }
 
+export type CatalogOperationKind =
+  | 'legacy_probe'
+  | 'legacy_posts'
+  | 'research_adapter'
+  | 'tikhub_tool'
+  | 'tikhub_documented'
+  | 'external_report';
+
+/**
+ * One concrete operation behind a capability dimension. Mixed-source
+ * dimensions (e.g. Reddit: anonymous legacy listing + TikHub cursor listing)
+ * carry one descriptor per route so access/cost/integration/provenance are
+ * never flattened onto one route. `integrated` marks only real handlers.
+ */
+export interface CatalogOperation {
+  operationId: string;
+  kind: CatalogOperationKind;
+  /** HTTP method of the documented request; null for non-request operations. */
+  method: 'GET' | 'POST' | null;
+  /** Documented request template/path (data, never fetched here). */
+  endpoint: string;
+  /** requestBody schema ref for POST operations (e.g. 'FetchAccountArticlesRequest'). */
+  requestBody: string | null;
+  /** Whether THIS project has a real handler for this operation. */
+  integrated: boolean;
+  access: CapabilityAccess;
+  cost: CatalogCost;
+  sourceRefs: string[];
+  sourceLocator: string | null;
+  notes: string[];
+}
+
 /** Comments additionally record author replies / parent chains. */
 export interface CatalogCommentDetails {
   authorReplies: 'supported' | 'unsupported' | 'unknown';
   parentChain: 'supported' | 'unsupported' | 'unknown';
+}
+
+/**
+ * Thread reading is a SEPARATE capability from comment listing: a comments
+ * receipt never verifies the thread reader or its depth. A non-null `maxDepth`
+ * requires explicit `support: 'supported'` AND bound provenance.
+ */
+export interface CatalogThreadDetails {
+  support: 'supported' | 'unsupported' | 'unknown';
+  maxDepth: number | null;
+  depthProvenance: string | null;
 }
 
 /** Pagination additionally records cursor, sort and date-range limits. */
@@ -206,8 +249,11 @@ export interface CapabilityRecord {
   cost: CatalogCost;
   /** Ids into `PlatformCatalogSnapshot.sources`. */
   sourceRefs: string[];
+  /** Per-operation evidence; aggregates always derive from these. */
+  operations: CatalogOperation[];
   notes: string[];
   comments?: CatalogCommentDetails;
+  thread?: CatalogThreadDetails;
   pagination?: CatalogPaginationDetails;
 }
 

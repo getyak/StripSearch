@@ -40,8 +40,10 @@ import type {
   CatalogCost,
   CatalogEntry,
   CatalogGap,
+  CatalogOperation,
   CatalogSourceManifest,
   CatalogSummary,
+  CatalogThreadDetails,
   CapabilityRecord,
   CompletionPlatformRegistry,
   DiscoveryRoute,
@@ -50,7 +52,6 @@ import type {
   PlatformCatalogSnapshot
 } from '../../shared/platform-catalog.js';
 import type { PlatformRule } from '../../shared/platform-discovery.js';
-import { DEFAULT_THREAD_DEPTH } from '../../shared/research-completion.js';
 import type { CapabilitySnapshot } from '../research/research-tool-dispatch.js';
 
 export class CatalogLoadError extends Error {
@@ -162,6 +163,39 @@ const SOURCE_KINDS = [
   'provider_openapi', 'provider_pricing', 'official_documentation', 'public_rule_dataset', 'project_baseline'
 ] as const;
 const SUPPORT = ['supported', 'unsupported', 'unknown'] as const;
+const OPERATION_KINDS = [
+  'legacy_probe', 'legacy_posts', 'research_adapter', 'tikhub_tool', 'tikhub_documented', 'external_report'
+] as const;
+
+function validateOperation(raw: unknown, where: string, sourceIds: Set<string>): CatalogOperation {
+  if (!isRecord(raw)) fail('invalid_shape', `${where} must be an object`);
+  const methodRaw = raw.method ?? null;
+  if (methodRaw !== null && methodRaw !== 'GET' && methodRaw !== 'POST') {
+    fail('invalid_shape', `${where}.method must be GET, POST or null`);
+  }
+  const requestBody = optionalString(raw.requestBody, `${where}.requestBody`);
+  if (requestBody !== null && methodRaw !== 'POST') {
+    fail('invalid_shape', `${where}: requestBody only applies to POST operations`);
+  }
+  const sourceRefs = requireStringArray(raw.sourceRefs, `${where}.sourceRefs`);
+  if (sourceRefs.length === 0) fail('invalid_shape', `${where}.sourceRefs must not be empty`);
+  for (const ref of sourceRefs) {
+    if (!sourceIds.has(ref)) fail('source_ref', `${where} references unknown source ${ref}`);
+  }
+  return {
+    operationId: requireString(raw.operationId, `${where}.operationId`),
+    kind: requireEnum(raw.kind, OPERATION_KINDS, `${where}.kind`),
+    method: methodRaw as CatalogOperation['method'],
+    endpoint: requireString(raw.endpoint, `${where}.endpoint`),
+    requestBody,
+    integrated: typeof raw.integrated === 'boolean' ? raw.integrated : fail('invalid_shape', `${where}.integrated must be a boolean`),
+    access: requireEnum(raw.access, ACCESS, `${where}.access`),
+    cost: validateCost(raw.cost, `${where}.cost`),
+    sourceRefs,
+    sourceLocator: optionalString(raw.sourceLocator, `${where}.sourceLocator`),
+    notes: requireStringArray(raw.notes, `${where}.notes`)
+  };
+}
 
 function validateCost(raw: unknown, where: string): CatalogCost {
   if (!isRecord(raw)) fail('invalid_shape', `${where} must be an object`);
@@ -219,6 +253,11 @@ function validateCapability(raw: unknown, where: string, sourceIds: Set<string>)
   for (const ref of sourceRefs) {
     if (!sourceIds.has(ref)) fail('source_ref', `${where} references unknown source ${ref}`);
   }
+  const operationsRaw = raw.operations ?? [];
+  if (!Array.isArray(operationsRaw)) fail('invalid_shape', `${where}.operations must be an array`);
+  const operations = operationsRaw.map((item, position) =>
+    validateOperation(item, `${where}.operations[${position}]`, sourceIds)
+  );
   const record: CapabilityRecord = {
     dimension,
     documentation,
@@ -231,8 +270,32 @@ function validateCapability(raw: unknown, where: string, sourceIds: Set<string>)
     verificationRef,
     cost: validateCost(raw.cost, `${where}.cost`),
     sourceRefs,
+    operations,
     notes: requireStringArray(raw.notes, `${where}.notes`)
   };
+  // Aggregates must derive from the declared operations, never contradict them.
+  const integratedOps = operations.filter((operation) => operation.integrated);
+  if (record.integration === 'integrated' && integratedOps.length === 0) {
+    fail('invalid_shape', `${where}: integrated capability needs an integrated operation`);
+  }
+  if (record.integration !== 'integrated' && integratedOps.length > 0) {
+    fail('invalid_shape', `${where}: hidden integrated operation behind a non-integrated capability`);
+  }
+  if (integratedOps.length > 0) {
+    if (!integratedOps.some((operation) => operation.access === record.access)) {
+      fail('invalid_shape', `${where}: aggregate access must come from an integrated operation`);
+    }
+    if (!integratedOps.some((operation) => operation.cost.provider === record.cost.provider)) {
+      fail('invalid_shape', `${where}: aggregate price must come from an integrated operation`);
+    }
+  } else if (operations.length > 0) {
+    if (record.access !== 'unknown' && !operations.some((operation) => operation.access === record.access)) {
+      fail('invalid_shape', `${where}: aggregate access must come from a declared operation`);
+    }
+    if (record.cost.provider !== null && !operations.some((operation) => operation.cost.provider === record.cost.provider)) {
+      fail('invalid_shape', `${where}: aggregate price must come from a declared operation`);
+    }
+  }
   if (dimension === 'comments') {
     const details = raw.comments;
     if (!isRecord(details)) fail('invalid_shape', `${where}.comments details are required for the comments dimension`);
@@ -240,6 +303,20 @@ function validateCapability(raw: unknown, where: string, sourceIds: Set<string>)
       authorReplies: requireEnum(details.authorReplies, SUPPORT, `${where}.comments.authorReplies`),
       parentChain: requireEnum(details.parentChain, SUPPORT, `${where}.comments.parentChain`)
     };
+    const threadRaw = raw.thread ?? null;
+    if (threadRaw !== null) {
+      if (!isRecord(threadRaw)) fail('invalid_shape', `${where}.thread must be an object or null`);
+      const support = requireEnum(threadRaw.support, SUPPORT, `${where}.thread.support`);
+      const maxDepth = threadRaw.maxDepth ?? null;
+      if (maxDepth !== null && (typeof maxDepth !== 'number' || !Number.isInteger(maxDepth) || maxDepth < 1)) {
+        fail('invalid_shape', `${where}.thread.maxDepth must be null or a positive integer`);
+      }
+      const depthProvenance = optionalString(threadRaw.depthProvenance, `${where}.thread.depthProvenance`);
+      if (maxDepth !== null && (support !== 'supported' || depthProvenance === null)) {
+        fail('invalid_shape', `${where}: thread depth bound needs explicit support and provenance`);
+      }
+      record.thread = { support, maxDepth, depthProvenance };
+    }
   }
   if (dimension === 'pagination') {
     const details = raw.pagination;
@@ -284,6 +361,7 @@ function validateLegacyRule(raw: unknown, where: string): LegacyRuleCompat {
   let probe: LegacyRuleCompat['probe'] = null;
   if (probeRaw !== null) {
     if (!isRecord(probeRaw)) fail('invalid_shape', `${where}.probe must be an object or null`);
+    if (probeRaw.method !== 'GET') fail('invalid_shape', `${where}.probe.method must be GET`);
     const numArray = (value: unknown, name: string): number[] => {
       if (!Array.isArray(value)) fail('invalid_shape', `${where}.probe.${name} must be an array`);
       return value.map((item) => {
@@ -570,20 +648,27 @@ export function loadPlatformCatalog(dataDir: string): PlatformCatalogSnapshot {
 }
 
 /**
- * Default data directory: walk up from this module looking for the bundled
- * `data/platforms/manifest.json`. The compiled build ships the data inside
- * `dist/data`, so production reads the bundled copy from any cwd.
+ * Default data directory — explicit module-relative layout, no ancestor
+ * walking and no silent fallback:
+ *
+ * - compiled (`dist/server/platforms/catalog.js`) → `dist/data/platforms`,
+ *   the production bundle copied by `npm run build:data`;
+ * - source (`src/server/platforms/catalog.ts`) → `apps/web/data/platforms`,
+ *   the development data.
+ *
+ * A missing production bundle throws `data_not_found` deterministically even
+ * when a source checkout exists elsewhere.
  */
 export function defaultCatalogDataDir(fromModuleUrl: string = import.meta.url): string {
-  let dir = path.dirname(fileURLToPath(fromModuleUrl));
-  for (;;) {
-    const candidate = path.join(dir, 'data', 'platforms');
-    if (existsSync(path.join(candidate, 'manifest.json'))) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+  const moduleDir = path.dirname(fileURLToPath(fromModuleUrl));
+  const root = path.dirname(path.dirname(moduleDir)); // <pkg>/dist or <pkg>/src
+  const candidate = path.basename(root) === 'dist'
+    ? path.join(root, 'data', 'platforms')
+    : path.join(root, '..', 'data', 'platforms');
+  if (!existsSync(path.join(candidate, 'manifest.json'))) {
+    fail('data_not_found', `no catalog bundle at ${candidate}`);
   }
-  fail('data_not_found', 'no data/platforms/manifest.json found above the catalog module');
+  return candidate;
 }
 
 /* ------------------------------------------------------------------ */
@@ -713,28 +798,29 @@ export function toCapabilitySnapshot(
     push('read_media', byDimension.get('media') as CapabilityRecord);
     push('list_comments', comments, { sortOptions, dateRange });
 
-    // read_thread follows the comments capability plus its parent-chain limit.
+    // read_thread is a SEPARATE capability from comment listing: it needs
+    // explicit thread support with its own receipt and a provenance-bound
+    // depth. Comments receipts and parent-chain docs never verify it.
+    const thread: CatalogThreadDetails = comments.thread ?? { support: 'unknown', maxDepth: null, depthProvenance: null };
     const commentsState = capabilityStateFor(comments, grant);
-    const parentChain = comments.comments?.parentChain ?? 'unknown';
+    const threadConfirmed =
+      thread.support === 'supported' &&
+      thread.maxDepth !== null &&
+      thread.depthProvenance !== null &&
+      commentsState === 'supported';
     const state: CapabilitySnapshot['operations'][number]['state'] =
-      commentsState === 'unsupported'
-        ? 'unsupported'
-        : parentChain === 'supported'
-          ? commentsState
-          : parentChain === 'unsupported'
-            ? 'unsupported'
-            : 'unverified';
+      thread.support === 'unsupported' ? 'unsupported' : threadConfirmed ? 'supported' : 'unverified';
     operations.push({
       platform: entry.platformId,
       operation: 'read_thread',
       state,
       sortOptions: [],
       dateRange: 'unsupported',
-      maxDepth: state === 'supported' && parentChain === 'supported' ? DEFAULT_THREAD_DEPTH : null,
+      maxDepth: threadConfirmed ? (thread.maxDepth as number) : null,
       limitation:
         state === 'supported'
           ? null
-          : `${capabilityLimitation(comments, commentsState) ?? ''};parentChain=${parentChain}`.replace(/^;/, '')
+          : `thread=${thread.support};threadReceipt=${thread.depthProvenance ? 'present' : 'missing'};comments=${commentsState}`
     });
   }
   return {

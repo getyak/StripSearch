@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "catalog.json",
-      "sha256": "65a5eb3db1d27228ccaf56a04b66e404f3906443d8ab147d4c874f6d718c0084"
+      "sha256": "7f08e9189e5f97df5c398a8e3a4dc5928ed719d2a671ff0f8f9c513d4f0c4e91"
     }
   ],
   "counts": {
@@ -13,7 +13,7 @@
     "alternative": 30,
     "personal_website": 1,
     "legacy_only": 3,
-    "routes": 90,
+    "routes": 91,
     "capabilityRecords": 378,
     "sources": 8
   },

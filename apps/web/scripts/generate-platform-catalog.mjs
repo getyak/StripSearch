@@ -212,12 +212,12 @@ function unknownPriceCost(basis) {
 function tikhubCost() {
   return {
     provider: 'tikhub',
-    unit: 'per_request',
+    unit: null,
     currency: null,
     amount: null,
     asOf: GENERATED,
     source: TIKHUB_PRICE_URL,
-    basis: 'TikHub 公开价格目录（hash 859e6687…）按端点计价；未选定具体端点、币种未核对，金额保持 null',
+    basis: 'TikHub 公开价格目录（hash 859e6687…）按端点列 endpoint_cost，未标币种/计量单位；未选定具体端点，金额保持 null',
     conditions: '目录响应含随请求变化的 request_id/time，不作为费用回执；null 不等于免费'
   };
 }
@@ -250,8 +250,8 @@ const DIMENSIONS = ['discovery', 'profile', 'list', 'body', 'media', 'comments',
  */
 const TIKHUB = {
   douyin: {
-    discovery: ['/api/v1/douyin/douplus/search_user_v2'],
-    profile: ['/api/v1/douyin/web/fetch_user_profile_by_uid'],
+    discovery: [{ path: '/api/v1/douyin/douplus/search_user_v2', method: 'POST', requestBody: 'UserSearchV2Request' }],
+    profile: [{ path: '/api/v1/douyin/web/fetch_user_profile_by_uid', method: 'GET' }],
     list: ['/api/v1/douyin/app/v3/fetch_user_post_videos'],
     body: ['/api/v1/douyin/app/v3/fetch_one_video'],
     comments: ['/api/v1/douyin/app/v3/fetch_video_comments', '/api/v1/douyin/app/v3/fetch_video_comment_replies'],
@@ -315,19 +315,32 @@ const TIKHUB = {
     pagination: { endpoint: '/api/v1/weibo/app/fetch_user_articles', params: 'uid/since_id', cursor: 'supported', note: 'since_id 游标已登记' }
   },
   'wechat-mp': {
-    discovery: ['/api/v1/wechat_mp/v2/fetch_account_profile'],
-    profile: ['/api/v1/wechat_mp/v2/fetch_account_profile'],
-    list: ['/api/v1/wechat_mp/v2/fetch_account_articles'],
-    body: ['/api/v1/wechat_mp/v2/fetch_article_detail'],
-    comments: ['/api/v1/wechat_mp/v2/fetch_article_comments', '/api/v1/wechat_mp/v2/fetch_comment_replies'],
-    pagination: { endpoint: '/api/v1/wechat_mp/v2/fetch_account_articles', params: '（无分页参数）', cursor: 'unsupported', note: '端点未登记分页参数；fetch_comment_replies 是子回复，不是父链' }
+    discovery: [{ path: '/api/v1/wechat_mp/v2/fetch_account_profile', method: 'POST', requestBody: 'FetchAccountRequest' }],
+    profile: [{ path: '/api/v1/wechat_mp/v2/fetch_account_profile', method: 'POST', requestBody: 'FetchAccountRequest' }],
+    list: [{ path: '/api/v1/wechat_mp/v2/fetch_account_articles', method: 'POST', requestBody: 'FetchAccountArticlesRequest' }],
+    body: [{ path: '/api/v1/wechat_mp/v2/fetch_article_detail', method: 'POST', requestBody: 'FetchArticleDetailRequest' }],
+    comments: [
+      { path: '/api/v1/wechat_mp/v2/fetch_article_comments', method: 'POST', requestBody: 'FetchArticleCommentsRequest' },
+      { path: '/api/v1/wechat_mp/v2/fetch_comment_replies', method: 'POST', requestBody: 'FetchCommentRepliesRequest' }
+    ],
+    pagination: {
+      endpoint: '/api/v1/wechat_mp/v2/fetch_account_articles',
+      method: 'POST',
+      requestBody: 'FetchAccountArticlesRequest',
+      params: 'offset/page_size',
+      cursor: 'supported',
+      note: 'FetchAccountArticlesRequest.offset 为翻页游标（base64，首页留空、下页传上一页 next_offset）；page_size 被微信忽略（实测 1 与 40 相同）'
+    }
   },
   'wechat-channels': {
-    discovery: ['/api/v1/wechat_channels/v2/fetch_channel_info', '/api/v1/wechat_channels/v2/fetch_user_profile'],
-    profile: ['/api/v1/wechat_channels/v2/fetch_user_profile'],
-    list: ['/api/v1/wechat_channels/v2/fetch_user_videos'],
-    body: ['/api/v1/wechat_channels/v2/fetch_video_detail'],
-    comments: ['/api/v1/wechat_channels/v2/fetch_video_comments']
+    discovery: [
+      { path: '/api/v1/wechat_channels/v2/fetch_channel_info', method: 'POST', requestBody: 'FetchChannelInfoRequest' },
+      { path: '/api/v1/wechat_channels/v2/fetch_user_profile', method: 'POST', requestBody: 'FetchUserProfileRequest' }
+    ],
+    profile: [{ path: '/api/v1/wechat_channels/v2/fetch_user_profile', method: 'POST', requestBody: 'FetchUserProfileRequest' }],
+    list: [{ path: '/api/v1/wechat_channels/v2/fetch_user_videos', method: 'POST', requestBody: 'FetchUserVideosRequest' }],
+    body: [{ path: '/api/v1/wechat_channels/v2/fetch_video_detail', method: 'POST', requestBody: 'FetchVideoDetailRequest' }],
+    comments: [{ path: '/api/v1/wechat_channels/v2/fetch_video_comments', method: 'POST', requestBody: 'FetchVideoCommentsRequest' }]
   },
   toutiao: {
     discovery: ['/api/v1/toutiao/app/get_user_id', '/api/v1/toutiao/app/get_user_info'],
@@ -349,7 +362,7 @@ const TIKHUB = {
     discovery: ['/api/v1/instagram/v1/fetch_user_info_by_username'],
     profile: ['/api/v1/instagram/v1/fetch_user_info_by_username'],
     list: ['/api/v1/instagram/v1/fetch_user_posts'],
-    comments: ['/api/v1/instagram/v2/fetch_post_comments_v2', '/api/v1/instagram/v1/fetch_comment_replies'],
+    comments: ['/api/v1/instagram/v1/fetch_post_comments_v2', '/api/v1/instagram/v1/fetch_comment_replies'],
     pagination: { endpoint: '/api/v1/instagram/v1/fetch_user_posts', params: 'max_id/count', cursor: 'supported' }
   },
   youtube: {
@@ -382,7 +395,15 @@ const TIKHUB = {
     list: ['/api/v1/reddit/app/fetch_user_posts', '/api/v1/reddit/app/fetch_user_comments'],
     body: ['/api/v1/reddit/app/fetch_post_details'],
     comments: ['/api/v1/reddit/app/fetch_post_comments', '/api/v1/reddit/app/fetch_comment_replies'],
-    pagination: { endpoint: '/api/v1/reddit/app/fetch_user_comments', params: 'sort/page_size/after', cursor: 'supported', sortOptions: ['hot', 'new', 'top', 'rising'], dateRange: 'supported', note: '官方 after/before 与 TikHub after 已登记；通用读取器不消费 after' }
+    pagination: {
+      endpoint: '/api/v1/reddit/app/fetch_user_comments',
+      method: 'GET',
+      params: 'sort/after',
+      cursor: 'supported',
+      sortOptions: ['NEW', 'TOP', 'HOT', 'CONTROVERSIAL'],
+      dateRange: 'unsupported',
+      note: 'TikHub 端点仅有 sort（NEW/TOP/HOT/CONTROVERSIAL）与 after 游标，无日期范围参数；不跨路线照搬官方 after/before 语义（docs/platforms/reddit-routes.md）'
+    }
   },
   linkedin: {
     discovery: ['/api/v1/linkedin/web_v2/get_user_profile'],
@@ -507,14 +528,6 @@ const PROBE_PLATFORMS = new Set(['github', 'gitlab', 'huggingface', 'bluesky', '
 const LEGACY_LIST = new Set(['devto', 'hackernews', 'medium', 'reddit']);
 const LEGACY_PAGE = new Set(['devto', 'hackernews']);
 
-function integrationFor(pid, dim) {
-  if (dim === 'discovery') return PROBE_PLATFORMS.has(pid) ? 'integrated' : 'not_integrated';
-  if (dim === 'profile') return pid === 'github' || pid === 'x' ? 'integrated' : 'not_integrated';
-  if (dim === 'list') return LEGACY_LIST.has(pid) || pid === 'github' || pid === 'x' ? 'integrated' : 'not_integrated';
-  if (dim === 'pagination') return LEGACY_PAGE.has(pid) ? 'integrated' : 'not_integrated';
-  return 'not_integrated';
-}
-
 /* Canonical profile URL rules: explicit documented patterns only. */
 const PROFILE_RULES = {
   github: ['https://github.com/{username}', 'GitHub REST users 资源返回的 htmlUrl 形式（github-rest-docs）'],
@@ -536,25 +549,75 @@ const PROFILE_RULES = {
 function tikhubEvidence(pid, dim) {
   const spec = TIKHUB[pid] ?? {};
   if (dim === 'pagination') {
-    return spec.pagination?.endpoint ? [spec.pagination.endpoint] : [];
+    const pag = spec.pagination;
+    return pag?.endpoint
+      ? [{ path: pag.endpoint, method: pag.method ?? 'GET', requestBody: pag.requestBody ?? null }]
+      : [];
   }
-  return Array.isArray(spec[dim]) ? spec[dim] : [];
+  return (Array.isArray(spec[dim]) ? spec[dim] : []).map((item) =>
+    typeof item === 'string' ? { path: item, method: 'GET', requestBody: null } : item
+  );
 }
 
 function legacyRef(pid, dim) {
   return LEGACY_EV[pid]?.[dim] ?? null;
 }
 
-function buildCapability(pid, dim) {
-  const tikhubPaths = tikhubEvidence(pid, dim);
+function tikhubOperations(pid, dim) {
+  return tikhubEvidence(pid, dim).map((item) => ({
+    operationId: `${pid}-tikhub-${item.path.split('/').pop()}`,
+    kind: pid === 'x' && (dim === 'profile' || dim === 'list') ? 'tikhub_tool' : 'tikhub_documented',
+    method: item.method,
+    endpoint: item.path,
+    requestBody: item.requestBody ?? null,
+    // Only the TikHub X tool is a real handler today; known-handle reads only.
+    integrated: pid === 'x' && (dim === 'profile' || dim === 'list'),
+    access: 'credentials_required',
+    cost: tikhubCost(),
+    sourceRefs: ['tikhub-openapi', 'tikhub-endpoint-pricing'],
+    sourceLocator: `tikhub-path-index:${item.path}`,
+    notes: pid === 'x' ? ['现有 TikHub X 工具按已知 handle 读取；不支持人物搜索。'] : []
+  }));
+}
+
+function legacyOperation(pid, dim) {
   const legacy = legacyRef(pid, dim);
+  if (!legacy || legacy.endpoints.length === 0) return null;
+  const isGithubAdapter = pid === 'github' && (dim === 'profile' || dim === 'list' || dim === 'pagination');
+  const integrated =
+    dim === 'discovery' ? PROBE_PLATFORMS.has(pid)
+    : dim === 'list' ? LEGACY_LIST.has(pid) || pid === 'github'
+    : dim === 'pagination' ? LEGACY_PAGE.has(pid)
+    : isGithubAdapter && dim !== 'pagination';
+  return {
+    operationId: `${pid}-${isGithubAdapter ? 'research-adapter' : 'legacy'}-${dim}`,
+    kind: isGithubAdapter ? 'research_adapter' : (dim === 'discovery' ? 'legacy_probe' : 'legacy_posts'),
+    method: 'GET',
+    endpoint: legacy.endpoints[0],
+    requestBody: null,
+    integrated,
+    access: 'public',
+    cost: isGithubAdapter ? githubCost() : NO_PRICE,
+    sourceRefs: isGithubAdapter && dim !== 'discovery' ? ['github-rest-docs'] : ['project-legacy-registry'],
+    sourceLocator: legacy.locator,
+    notes: legacy.note ? [legacy.note] : []
+  };
+}
+
+function buildCapability(pid, dim) {
+  const legacy = legacyRef(pid, dim);
+  const tikhubPaths = tikhubEvidence(pid, dim);
+  const ops = [
+    ...(legacyOperation(pid, dim) ? [legacyOperation(pid, dim)] : []),
+    ...tikhubOperations(pid, dim)
+  ];
   const legacyEndpoints = legacy?.endpoints ?? [];
   const endpoints = [
-    ...legacyEndpoints,
-    ...tikhubPaths.map((p) => `GET ${p}`)
+    ...legacyEndpoints.map((endpoint) => `GET ${endpoint}`),
+    ...tikhubPaths.map((item) => `${item.method} ${item.path}`)
   ];
   const sourceLocator =
-    legacy?.locator ?? (tikhubPaths[0] ? `tikhub-path-index:${tikhubPaths[0]}` : null);
+    legacy?.locator ?? (tikhubPaths[0] ? `tikhub-path-index:${tikhubPaths[0].path}` : null);
   const documented = endpoints.length > 0 || sourceLocator !== null;
 
   // Source refs follow the actual evidence, never one route for everything.
@@ -562,32 +625,29 @@ function buildCapability(pid, dim) {
   if (legacy || PROBE_PLATFORMS.has(pid)) sourceRefs.add('project-legacy-registry');
   if (pid === 'reddit' && (dim === 'comments' || dim === 'pagination')) sourceRefs.add('project-reddit-routes');
   if (pid === 'github' && ['profile', 'list', 'pagination'].includes(dim)) sourceRefs.add('github-rest-docs');
-  if (tikhubPaths.length > 0) sourceRefs.add('tikhub-openapi');
+  if (tikhubPaths.length > 0) {
+    sourceRefs.add('tikhub-openapi');
+    sourceRefs.add('tikhub-endpoint-pricing');
+  }
   if (sourceRefs.size === 0) sourceRefs.add('platform-official-docs');
 
-  // Access and price belong to the actual operation/route of this dimension.
+  // Honest aggregates derive from the declared operations: the integrated
+  // operation's conditions when one runs today, otherwise the shared
+  // documented conditions (mixed/unknown stays unknown).
+  const integratedOps = ops.filter((operation) => operation.integrated);
+  let integration;
   let access;
   let cost;
-  if (dim === 'discovery' && PROBE_PLATFORMS.has(pid)) {
-    access = 'public';
-    cost = NO_PRICE;
-  } else if ((dim === 'list' || dim === 'pagination') && LEGACY_LIST.has(pid)) {
-    access = 'public';
-    cost = NO_PRICE;
-  } else if (pid === 'github' && ['profile', 'list', 'pagination'].includes(dim)) {
-    access = 'public';
-    cost = githubCost();
-  } else if (pid === 'x' && ['profile', 'list'].includes(dim)) {
-    access = 'credentials_required';
-    cost = tikhubCost();
-    sourceRefs.add('tikhub-endpoint-pricing');
-  } else if (tikhubPaths.length > 0) {
-    access = 'credentials_required';
-    cost = tikhubCost();
-    sourceRefs.add('tikhub-endpoint-pricing');
+  if (integratedOps.length > 0) {
+    integration = 'integrated';
+    access = integratedOps[0].access;
+    cost = integratedOps[0].cost;
   } else {
-    access = 'unknown';
-    cost = NO_OPERATION_PRICE;
+    integration = 'not_integrated';
+    const accesses = [...new Set(ops.map((operation) => operation.access))];
+    const providers = [...new Set(ops.map((operation) => operation.cost.provider))];
+    access = ops.length > 0 && accesses.length === 1 ? accesses[0] : 'unknown';
+    cost = ops.length > 0 && providers.length === 1 ? ops[0].cost : NO_OPERATION_PRICE;
   }
 
   const notes = [];
@@ -602,16 +662,19 @@ function buildCapability(pid, dim) {
       : (pid === 'github' && ['profile', 'list', 'pagination'].includes(dim) ? ['https://docs.github.com/en/rest'] : []),
     endpoints,
     sourceLocator,
-    integration: integrationFor(pid, dim),
+    integration,
     access,
     verification: 'documented_only',
     verificationRef: null,
     cost,
     sourceRefs: [...sourceRefs],
+    operations: ops,
     notes
   };
   if (dim === 'comments') {
     record.comments = legacy?.comments ?? { authorReplies: 'unknown', parentChain: 'unknown' };
+    // Thread reading is separate: no thread receipt exists yet.
+    record.thread = { support: 'unknown', maxDepth: null, depthProvenance: null };
   }
   if (dim === 'pagination') {
     const pag = legacy?.pagination ?? TIKHUB[pid]?.pagination ?? null;
@@ -695,14 +758,22 @@ function entry(platformId, name, cohort, {
 const entries = [];
 
 function addTikHub(pid, name, homepage, options = {}) {
-  const routes = [
-    route(`${pid}-tikhub`, 'platform_search', 'tikhub:platform', pid === 'x' ? 'tikhub-x' : null,
-      TIKHUB_OPENAPI_URL, ['provider_key'], pid === 'x' ? 'integrated' : 'not_integrated',
-      pid === 'x'
-        ? '现有 TikHub 工具已接入 X 账号/帖子读取；其余能力未 live 验证。'
-        : '端点已在 TikHub 公开目录登记；本项目未接入该平台的 TikHub 工具（GET-91/92 跟进）。',
-      ['tikhub-openapi'])
-  ];
+  const routes = [];
+  if (pid === 'x') {
+    // The implemented TikHub X tool (toolkit social_profile / social_posts)
+    // reads a KNOWN handle's profile/posts; it is not people search.
+    routes.push(route('x-tikhub-handle', 'username_probe', 'tikhub-x:fetch_user_profile', 'tikhub-x',
+      'https://api.tikhub.io/api/v1/twitter/web/fetch_user_profile?screen_name={screen_name}',
+      ['provider_key'], 'integrated',
+      '现有 TikHub X 工具按已知 handle 读取资料/帖子（screen_name）；不做人物搜索。', ['tikhub-openapi']));
+    routes.push(route('x-tikhub-search', 'platform_search', 'tikhub:twitter-search', null, null,
+      ['provider_key'], 'not_integrated',
+      'TikHub 目录含 Twitter 搜索类路径但本项目未接入；资料读取不支持人物搜索（GET-92 跟进）。', ['tikhub-openapi']));
+  } else {
+    routes.push(route(`${pid}-tikhub`, 'platform_search', 'tikhub:platform', null, null,
+      ['provider_key'], 'not_integrated',
+      '端点已在 TikHub 公开目录登记；本项目未接入该平台的 TikHub 工具（GET-91/92 跟进）。', ['tikhub-openapi']));
+  }
   if (PROBE_PLATFORMS.has(pid)) routes.push(probeRoute(pid));
   if (pid === 'x' || pid === 'instagram' || pid === 'bilibili') routes.push(importRoute(pid));
   for (const extra of options.extraRoutes ?? []) routes.push(extra);
