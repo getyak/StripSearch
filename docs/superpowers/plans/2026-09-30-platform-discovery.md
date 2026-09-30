@@ -10,7 +10,7 @@
 
 **Spec:** [已批准设计规范](../specs/2026-09-30-platform-discovery-design.md)。用户于 2026-09-30 批准书面规范。
 
-**Execution:** 沿用用户指定的 Pi + MiMo Pro 实现、Codex 定义接口/验收/交付，使用 executing-plans 跟踪；独立 native sub-agent 审查各交付 PR。执行前需用户审阅本文，执行方式无需再次选择。
+**Execution:** 沿用用户指定的 Pi + MiMo Pro 实现、Codex 定义接口/验收/交付，使用 executing-plans 跟踪；独立 native sub-agent 审查各交付 PR。用户于 2026-09-30 批准本文，沿用已授权的交付流程。
 
 ## Global Constraints
 
@@ -49,10 +49,10 @@
 - `toLegacyRegistry(snapshot: PlatformCatalogSnapshot): LegacyPlatformRegistry` keeps executable old probe shapes; `toCompletionRegistry(snapshot, input: CatalogApplicabilityInput): CompletionPlatformRegistry` keeps all entries with reason; `toCapabilitySnapshot(snapshot, access: CatalogAccessContext): CapabilitySnapshot` maps GET-59 enum/limitations.
 - `catalogSummary(snapshot: PlatformCatalogSnapshot): CatalogSummary` counts platforms/routes/source records separately. `CatalogApplicabilityInput` contains accepted kind, platform/instance hints and authorization policy; no owner/email material belongs in the public catalog.
 
-- [ ] **1. Add failing `platform-catalog.test.ts` tests:** independently list spec's 20 TikHub and 30 alternative IDs plus website; assert every entry has seven capabilities, unknown price is null, no-adapter entries survive completion projection, duplicate aliases fail, credentials cannot promote documented-only to live_verified, mutated input cannot change frozen snapshot.
-- [ ] **2. Run:** from `apps/web`, `node --import tsx --test src/tests/platform-catalog.test.ts`; confirm failures come from missing module/behavior, not environment.
-- [ ] **3. Implement the interfaces and data:** use separate documentation/integration/access/verification axes. Record public source URLs/date/hash and historical uncertainty; no fabricated endpoint availability. Extend `/api/discovery/registry` compatibly with a versioned catalog surface. Add data-copy step to existing build and a compiled-runtime read test.
-- [ ] **4. Verify:** targeted test, existing platform-discovery/research-completion/research-tool-contracts tests, `npm run typecheck`, `npm run build`; assert data loads outside repository cwd with a temporary copied production build. `python3 scripts/check_design.py` from repo root.
+- [x] **1. Add failing `platform-catalog.test.ts` tests:** independently list spec's 20 TikHub and 30 alternative IDs plus website; assert every entry has seven capabilities, unknown price is null, no-adapter entries survive completion projection, duplicate aliases fail, credentials cannot promote documented-only to live_verified, mutated input cannot change frozen snapshot.
+- [x] **2. Run:** from `apps/web`, `node --import tsx --test src/tests/platform-catalog.test.ts`; confirm failures come from missing module/behavior, not environment.
+- [x] **3. Implement the interfaces and data:** use separate documentation/integration/access/verification axes. Record public source URLs/date/hash and historical uncertainty; no fabricated endpoint availability. Extend `/api/discovery/registry` compatibly with a versioned catalog surface. Add data-copy step to existing build and a compiled-runtime read test.
+- [x] **4. Verify:** targeted test, existing platform-discovery/research-completion/research-tool-contracts tests, `npm run typecheck`, `npm run build`; assert data loads outside repository cwd with a temporary copied production build. `python3 scripts/check_design.py` from repo root.
 - [ ] **5. Commit:** `feat(platforms): add versioned capability catalog (GET-90)`; review and deliver GET-90 independently using Delivery Gate below. Its acceptance is directory/documentation honesty, not all platforms live.
 
 ## Task 2: 固定版本规则导入与合并（GET-91）
@@ -146,4 +146,4 @@
 
 spec §1–4 → Task 1；§5 → Task 2/3；§6 → Task 4；§7 → Task 5/6；§8 → Task 6；§9 → all verification steps and Delivery Gate。五个 Review Focus 已分配明确测试。模块名/签名一致，GET-62 合并和 Figwright grounding 保留为真实执行条件。
 
-当前仅规范批准、计划编写/自审完成。以上执行 checkbox 均未完成；未宣称代码、PR、合并、平台接入或 Linear 关闭。本文审阅后才启动实施，沿用已指定的 Pi/MiMo 执行方式。
+2026-09-30：规范与计划均已获用户批准。Task 1 已实施；typecheck、build、design check 与完整离线 Web 测试（414/414，无跳过）通过，独立审查的源码问题已修复并复核。Git/Docker 公共数据白名单已补齐，当前进入最终提交审查与 PR/CI 交付；GET-90 尚未完成合并和合并后验收，保持进行中。Task 2–6 尚未实施，GET-62 已合并契约和 Figwright 目标文件连接仍是后续明确依赖。

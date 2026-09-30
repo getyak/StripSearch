@@ -7,4 +7,10 @@
 !apps/web/vite.config.ts
 !apps/web/src/
 !apps/web/src/**
+!apps/web/scripts/
+!apps/web/scripts/copy-platform-data.mjs
+!apps/web/data/
+!apps/web/data/platforms/
+!apps/web/data/platforms/catalog.json
+!apps/web/data/platforms/manifest.json
 !Dockerfile

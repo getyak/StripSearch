@@ -15,7 +15,7 @@
 | 个人网站 | 1 | 作为原作/自链入口登记（`homepage_url` 输入），不与出版账号或自然人合并 |
 | legacy_only | 3 | DEV Community、npm、PyPI：旧探测规则基线保留，防止 legacy 投影丢失规则；不在上表 50 平台清单内 |
 
-平台数量与路线数量分开计数（当前 54 平台 / 90 路线 / 8 来源 / 378 条能力记录）；微信搜一搜只登记为微信条目上的辅助路线（`wechat_search`），不算第 21 个内容平台。
+平台数量与路线数量分开计数（当前 54 平台 / 91 路线 / 8 来源 / 378 条能力记录）；微信搜一搜只登记为微信条目上的辅助路线（`wechat_search`），不算第 21 个内容平台。
 
 ## 七项能力、四个独立维度、逐维证据
 
@@ -48,7 +48,7 @@
 
 1. **旧 probe registry**（`toLegacyRegistry`）：13 条旧规则的 probe / posts / 限速 / 验证标签逐字保留（含 GitHub 的 `live_verified` 标签与 x/Instagram/哔哩哔哩的 `probe: null`），与 `BUILTIN_PLATFORM_REGISTRY` 逐条 deep-equal 由测试锁定；作为探测引擎的默认注册表。
 2. **GET-60 完成注册表**（`toCompletionRegistry`）：适用性只由输入种类、实例提示与授权策略决定，不由 adapter 是否存在决定——无 adapter 平台仍在冻结分母里并带确定性理由；无 adapter ≠ not_applicable。
-3. **GET-59 能力快照**（`toCapabilitySnapshot`）：每平台映射 7 个 GET-59 操作（`discover_accounts` / `read_profile` / `list_posts` / `read_post` / `read_media` / `list_comments` / `read_thread`），`read_thread` 由评论能力的父链限制派生，`list_*` 携带分页的排序/日期限制。状态映射是精确的：
+3. **GET-59 能力快照**（`toCapabilitySnapshot`）：每平台映射 7 个 GET-59 操作（`discover_accounts` / `read_profile` / `list_posts` / `read_post` / `read_media` / `list_comments` / `read_thread`），`read_thread` 使用独立线程能力、访问条件与绑定回执（不借用评论列表证据），`list_*` 携带分页的排序/日期限制。状态映射是精确的：
    - `unsupported`：平台不提供该能力、项目无 adapter（GET-59 `not_implemented`）、不可访问、或当前缺凭据/授权；
    - `unverified`：访问条件 unknown，或 `documented_only` / `offline_verified`——**凭据不能把 documented_only 提升为 supported**；
    - `supported`：仅当能力是绑定回执的 `live_verified` 且访问条件当前满足。本目录当前没有任何 `supported` 项。
