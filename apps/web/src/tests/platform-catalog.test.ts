@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -679,49 +679,110 @@ test('X routes describe only the implemented known-handle handler, never people 
   assert.match(searchRoute.reason, /未接入|搜索/);
 });
 
-test('thread depth requires explicit thread support with receipt and provenance', () => {
-  const threadless = catalogSnapshotFromJson(syntheticRaw((raw) => {
-    const entries = raw.entries as Record<string, unknown>[];
-    const caps = entries[0]!.capabilities as Record<string, unknown>[];
-    const comments = caps.find((cap) => cap.dimension === 'comments')!;
-    comments.comments = { authorReplies: 'supported', parentChain: 'supported' };
-    comments.integration = 'integrated';
-    comments.verification = 'live_verified';
-    comments.verificationRef = { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' };
-    (comments.operations as Record<string, unknown>[]).push(operationFixture({ operationId: 'live-comments', integrated: true, access: 'public' }));
-    rehash(raw);
-  }));
-  const projected = toCapabilitySnapshot(threadless, { grants: {} });
-  const readThread = projected.operations.find((op) => op.operation === 'read_thread');
-  assert.ok(readThread);
-  assert.notEqual(readThread.state, 'supported', 'comments receipts cannot verify the thread reader');
-  assert.equal(readThread.maxDepth, null, 'no manufactured depth bound');
+test('read_thread never borrows comments evidence: own integration, access and receipt required', () => {
+  const threadCase = (thread: Record<string, unknown>, commentsOver: Record<string, unknown> = {}) => {
+    const snapshot = catalogSnapshotFromJson(syntheticRaw((raw) => {
+      const entries = raw.entries as Record<string, unknown>[];
+      const caps = entries[0]!.capabilities as Record<string, unknown>[];
+      const comments = caps.find((cap) => cap.dimension === 'comments')!;
+      comments.comments = { authorReplies: 'supported', parentChain: 'supported' };
+      comments.thread = thread;
+      Object.assign(comments, commentsOver);
+      if (commentsOver.integration === 'integrated') {
+        (comments.operations as Record<string, unknown>[]).push(operationFixture({ operationId: 'live-comments', integrated: true, access: 'public' }));
+      }
+      rehash(raw);
+    }));
+    return toCapabilitySnapshot(snapshot, { grants: {} }).operations.find((op) => op.operation === 'read_thread')!;
+  };
+  const ownReceipt = {
+    operation: 'read_thread',
+    adapterId: 'thread-adapter',
+    endpoint: 'https://public.example.test/thread',
+    verifiedAt: '2026-09-30',
+    receipt: 'receipt-thread-3',
+    verifiedMaxDepth: 3
+  };
 
-  // An explicit thread support with its own bound provenance can confirm depth.
-  const threaded = catalogSnapshotFromJson(syntheticRaw((raw) => {
-    const entries = raw.entries as Record<string, unknown>[];
-    const caps = entries[0]!.capabilities as Record<string, unknown>[];
-    const comments = caps.find((cap) => cap.dimension === 'comments')!;
-    comments.comments = { authorReplies: 'supported', parentChain: 'supported' };
-    comments.thread = { support: 'supported', maxDepth: 3, depthProvenance: 'receipt:thread-depth-3' };
-    comments.integration = 'integrated';
-    comments.verification = 'live_verified';
-    comments.verificationRef = { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' };
-    (comments.operations as Record<string, unknown>[]).push(operationFixture({ operationId: 'live-comments', integrated: true, access: 'public' }));
-    rehash(raw);
-  }));
-  const confirmed = toCapabilitySnapshot(threaded, { grants: {} }).operations.find((op) => op.operation === 'read_thread');
-  assert.equal(confirmed?.state, 'supported');
-  assert.equal(confirmed?.maxDepth, 3, 'depth comes from explicit provenance, never a design default');
+  // (a) integrated + live COMMENTS receipt + arbitrary provenance text, but
+  // NO own thread receipt: text alone is never an acceptance receipt.
+  const borrowed = threadCase(
+    { integration: 'integrated', access: 'public', verification: 'documented_only', verificationRef: null, maxDepth: null, notes: ['自述读到深度 3（纯文本，无回执）'] },
+    { integration: 'integrated', verification: 'live_verified', verificationRef: { adapterId: 'a', endpoint: 'e', verifiedAt: '2026-09-30', receipt: 'r' } }
+  );
+  assert.equal(borrowed.state, 'unverified');
+  assert.equal(borrowed.maxDepth, null);
 
-  // The shipped catalog stays conservative.
+  // (b) own thread without an adapter: GET-59 unsupported, not unverified.
+  assert.equal(threadCase({ integration: 'not_integrated', access: 'unknown', verification: 'documented_only', verificationRef: null, maxDepth: null, notes: [] }).state, 'unsupported');
+
+  // (c) own live receipt but missing credentials cannot run.
+  const gated = threadCase({ integration: 'integrated', access: 'credentials_required', verification: 'live_verified', verificationRef: ownReceipt, maxDepth: 3, notes: [] });
+  assert.equal(gated.state, 'unsupported');
+  assert.equal(gated.maxDepth, null);
+
+  // (d) offline-only proof stays unverified with no depth.
+  const offline = threadCase({ integration: 'integrated', access: 'public', verification: 'offline_verified', verificationRef: null, maxDepth: null, notes: [] });
+  assert.equal(offline.state, 'unverified');
+  assert.equal(offline.maxDepth, null);
+
+  // (e) a valid OWN verified thread with a provenance-bound depth confirms it.
+  const confirmed = threadCase({ integration: 'integrated', access: 'public', verification: 'live_verified', verificationRef: ownReceipt, maxDepth: 3, notes: [] });
+  assert.equal(confirmed.state, 'supported');
+  assert.equal(confirmed.maxDepth, 3, 'depth comes from the thread receipt bound, never a design default');
+
+  // Shipped catalog: no thread adapters, no receipts -> unsupported everywhere.
   const snapshot = loadSourceCatalog();
   for (const entry of snapshot.entries) {
     const readThread = toCapabilitySnapshot({ ...snapshot, entries: [entry] }, { grants: {} })
       .operations.find((op) => op.operation === 'read_thread');
-    assert.notEqual(readThread?.state, 'supported', entry.platformId);
+    assert.equal(readThread?.state, 'unsupported', entry.platformId);
     assert.equal(readThread?.maxDepth, null, entry.platformId);
   }
+});
+
+test('thread loader rejects live claims without their own receipt or a matching bound', () => {
+  const withThread = (thread: Record<string, unknown>) => catalogSnapshotFromJson(syntheticRaw((raw) => {
+    const entries = raw.entries as Record<string, unknown>[];
+    const comments = (entries[0]!.capabilities as Record<string, unknown>[]).find((cap) => cap.dimension === 'comments')!;
+    comments.thread = thread;
+    rehash(raw);
+  }));
+  const receipt = {
+    operation: 'read_thread',
+    adapterId: 'thread-adapter',
+    endpoint: 'https://public.example.test/thread',
+    verifiedAt: '2026-09-30',
+    receipt: 'receipt-thread-3',
+    verifiedMaxDepth: 3
+  };
+  // live_verified without its own structured receipt.
+  expectLoadError(
+    () => withThread({ integration: 'integrated', access: 'public', verification: 'live_verified', verificationRef: null, maxDepth: null, notes: ['文本自称已验证'] }),
+    'invalid_shape'
+  );
+  // depth bound without live verification.
+  expectLoadError(
+    () => withThread({ integration: 'integrated', access: 'public', verification: 'documented_only', verificationRef: null, maxDepth: 3, notes: [] }),
+    'invalid_shape'
+  );
+  // bound must not mismatch the verified bound.
+  expectLoadError(
+    () => withThread({ integration: 'integrated', access: 'public', verification: 'live_verified', verificationRef: receipt, maxDepth: 5, notes: [] }),
+    'invalid_shape'
+  );
+  // invalid verified bound.
+  expectLoadError(
+    () => withThread({ integration: 'integrated', access: 'public', verification: 'live_verified', verificationRef: { ...receipt, verifiedMaxDepth: 0 }, maxDepth: 0, notes: [] }),
+    'invalid_shape'
+  );
+  // the receipt must bind the read_thread operation, not any other receipt.
+  expectLoadError(
+    () => withThread({ integration: 'integrated', access: 'public', verification: 'live_verified', verificationRef: { ...receipt, operation: 'list_comments' }, maxDepth: 3, notes: [] }),
+    'invalid_shape'
+  );
+  // valid own receipt + matching bound loads.
+  assert.equal(withThread({ integration: 'integrated', access: 'public', verification: 'live_verified', verificationRef: receipt, maxDepth: 3, notes: [] }).entries[0]?.capabilities.find((cap) => cap.dimension === 'comments')?.thread?.maxDepth, 3);
 });
 
 test('loader rejects duplicate platform ids and conflicting aliases', () => {
@@ -1121,6 +1182,7 @@ test('GET /api/discovery/registry keeps old fields and adds the catalog gap surf
       platforms: Array<{
         platformId: string;
         gaps: Array<{ kind: string; detail: string }>;
+        routes: Array<{ routeId: string; kind: string; operation: string; adapterId: string | null; endpoint: string | null; requires: string[]; availability: string; reason: string; sourceRefs: string[] }>;
         capabilities: Array<{
           dimension: string;
           docUrls: string[];
@@ -1184,6 +1246,20 @@ test('GET /api/discovery/registry keeps old fields and adds the catalog gap surf
     ?.operations.find((op) => op.endpoint.includes('fetch_account_articles'));
   assert.equal(wechatArticles?.method, 'POST');
   assert.equal(wechatArticles?.requestBody, 'FetchAccountArticlesRequest');
+
+  // Route provenance (operation + source refs) is retained through the API.
+  const xHandleRoute = body.catalog.platforms
+    .find((platform) => platform.platformId === 'x')
+    ?.routes.find((route) => route.routeId === 'x-tikhub-handle');
+  assert.ok(xHandleRoute);
+  assert.equal(xHandleRoute.operation, 'tikhub-x:fetch_user_profile');
+  assert.ok(xHandleRoute.sourceRefs.includes('tikhub-openapi'));
+  for (const platform of body.catalog.platforms) {
+    for (const route of platform.routes) {
+      assert.ok(route.operation.length > 0, `${platform.platformId}/${route.routeId}: operation dropped`);
+      assert.ok(route.sourceRefs.length > 0, `${platform.platformId}/${route.routeId}: sourceRefs dropped`);
+    }
+  }
 
   // Public provenance details travel with every capability record.
   const githubList = body.catalog.platforms
@@ -1254,7 +1330,6 @@ test('build:data normalizes the public bundle to world-readable modes without to
   cpSync(sourceDataDir, path.join(pkg, 'data', 'platforms'), { recursive: true });
   writeFileSync(path.join(pkg, 'data', 'private-canary.sqlite'), 'synthetic-canary-not-a-real-db');
   // Restrictive source modes: what cpSync would happily preserve into dist.
-  const { chmodSync, statSync, readdirSync } = await import('node:fs');
   chmodSync(path.join(pkg, 'data'), 0o700);
   chmodSync(path.join(pkg, 'data', 'platforms'), 0o700);
   for (const name of readdirSync(path.join(pkg, 'data', 'platforms'))) {
@@ -1269,8 +1344,10 @@ test('build:data normalizes the public bundle to world-readable modes without to
   assert.equal(exitCode, 0, `copy script failed: ${stderr}`);
 
   // The PUBLIC bundle must be readable/traversable by a non-owner (Docker
-  // runs as USER node against root-owned files).
+  // runs as USER node against root-owned files), including its ancestors.
   const bundleRoot = path.join(pkg, 'dist', 'data', 'platforms');
+  assert.equal(statSync(path.join(pkg, 'dist')).mode & 0o777, 0o755, 'generated dist root must be 755');
+  assert.equal(statSync(path.join(pkg, 'dist', 'data')).mode & 0o777, 0o755, 'generated dist/data must be 755');
   assert.equal(statSync(bundleRoot).mode & 0o777, 0o755, 'bundle dir must be 755');
   for (const name of readdirSync(bundleRoot)) {
     assert.equal(statSync(path.join(bundleRoot, name)).mode & 0o777, 0o644, `${name} must be 644`);
@@ -1280,6 +1357,147 @@ test('build:data normalizes the public bundle to world-readable modes without to
   assert.equal(statSync(path.join(pkg, 'data', 'platforms', 'catalog.json')).mode & 0o777, 0o600, 'source file mode changed');
   assert.equal(statSync(path.join(pkg, 'data', 'private-canary.sqlite')).mode & 0o777, 0o600, 'private sibling mode changed');
   assert.equal(existsSync(path.join(pkg, 'dist', 'data', 'private-canary.sqlite')), false);
+});
+
+test('build:data normalizes generated public ancestors under restrictive umask', async (t) => {
+  const workDir = mkdtempSync(path.join(tmpdir(), 'catalog-umask-'));
+  t.after(() => rmSync(workDir, { recursive: true, force: true }));
+  const pkg = path.join(workDir, 'pkg');
+  mkdirSync(path.join(pkg, 'scripts'), { recursive: true });
+  mkdirSync(path.join(pkg, 'data', 'platforms'), { recursive: true });
+  cpSync(path.join(appRoot, 'scripts', 'copy-platform-data.mjs'), path.join(pkg, 'scripts', 'copy-platform-data.mjs'));
+  cpSync(sourceDataDir, path.join(pkg, 'data', 'platforms'), { recursive: true });
+  // Pre-existing restrictive generated ancestors (umask 077 reality).
+  mkdirSync(path.join(pkg, 'dist', 'data'), { recursive: true, mode: 0o700 });
+  chmodSync(path.join(pkg, 'dist'), 0o700);
+  chmodSync(path.join(pkg, 'dist', 'data'), 0o700);
+
+  const previousUmask = process.umask(0o077);
+  let exitCode: number | null = null;
+  let stderr = '';
+  try {
+    const child = spawn(process.execPath, [path.join(pkg, 'scripts', 'copy-platform-data.mjs')], { cwd: workDir });
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    exitCode = await new Promise((resolve) => child.on('close', resolve));
+  } finally {
+    process.umask(previousUmask);
+  }
+  assert.equal(exitCode, 0, `copy script failed: ${stderr}`);
+
+  for (const dir of ['dist', path.join('dist', 'data'), path.join('dist', 'data', 'platforms')]) {
+    const mode = statSync(path.join(pkg, dir)).mode & 0o777;
+    assert.equal(mode, 0o755, `${dir} must be traversable (755), got ${mode.toString(8)}`);
+  }
+  const catalogPath = path.join(pkg, 'dist', 'data', 'platforms', 'catalog.json');
+  assert.equal(statSync(catalogPath).mode & 0o777, 0o644);
+  const parsed = JSON.parse(readFileSync(catalogPath, 'utf8')) as { entries: unknown[] };
+  assert.ok(parsed.entries.length > 0, 'catalog must be readable in the bundle');
+});
+
+test('build:data refuses symlinks in source and generated ancestors without touching canaries', async (t) => {
+  const CANARY = 'synthetic-private-canary-do-not-leak';
+  const makeFixture = (name: string) => {
+    const workDir = mkdtempSync(path.join(tmpdir(), `catalog-symlink-${name}-`));
+    const pkg = path.join(workDir, 'pkg');
+    mkdirSync(path.join(pkg, 'scripts'), { recursive: true });
+    mkdirSync(path.join(pkg, 'data', 'platforms'), { recursive: true });
+    cpSync(path.join(appRoot, 'scripts', 'copy-platform-data.mjs'), path.join(pkg, 'scripts', 'copy-platform-data.mjs'));
+    cpSync(sourceDataDir, path.join(pkg, 'data', 'platforms'), { recursive: true });
+    writeFileSync(path.join(pkg, 'data', 'private-canary.txt'), CANARY);
+    chmodSync(path.join(pkg, 'data', 'private-canary.txt'), 0o600);
+    return { workDir, pkg };
+  };
+  const run = async (pkg: string, workDir: string) => {
+    const child = spawn(process.execPath, [path.join(pkg, 'scripts', 'copy-platform-data.mjs')], { cwd: workDir });
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    const code: number | null = await new Promise((resolve) => child.on('close', resolve));
+    return { code, stderr };
+  };
+  const assertUntouched = (pkg: string) => {
+    const canary = path.join(pkg, 'data', 'private-canary.txt');
+    assert.equal(readFileSync(canary, 'utf8'), CANARY, 'canary content changed');
+    assert.equal(statSync(canary).mode & 0o777, 0o600, 'canary mode changed (chmod escaped the bundle)');
+  };
+
+  // (a) source FILE symlink pointing at the private canary.
+  {
+    const { workDir, pkg } = makeFixture('file');
+    t.after(() => rmSync(workDir, { recursive: true, force: true }));
+    // A pre-existing artifact must survive a refused run.
+    mkdirSync(path.join(pkg, 'dist', 'data', 'platforms'), { recursive: true });
+    writeFileSync(path.join(pkg, 'dist', 'data', 'platforms', 'previous.txt'), 'previous-artifact');
+    symlinkSync(path.join(pkg, 'data', 'private-canary.txt'), path.join(pkg, 'data', 'platforms', 'leak.txt'));
+    const { code } = await run(pkg, workDir);
+    assert.notEqual(code, 0, 'file symlink must be refused');
+    assertUntouched(pkg);
+    assert.equal(readFileSync(path.join(pkg, 'dist', 'data', 'platforms', 'previous.txt'), 'utf8'), 'previous-artifact', 'previous artifact was modified');
+    assert.equal(existsSync(path.join(pkg, 'dist', 'data', 'platforms', 'catalog.json')), false, 'refused run must not copy');
+  }
+  // (b) source DIRECTORY symlink and source ROOT symlink.
+  {
+    const { workDir, pkg } = makeFixture('dir');
+    t.after(() => rmSync(workDir, { recursive: true, force: true }));
+    mkdirSync(path.join(pkg, 'data', 'private-dir'), { recursive: true, mode: 0o700 });
+    writeFileSync(path.join(pkg, 'data', 'private-dir', 'inside.txt'), CANARY);
+    chmodSync(path.join(pkg, 'data', 'private-dir', 'inside.txt'), 0o600);
+    symlinkSync(path.join(pkg, 'data', 'private-dir'), path.join(pkg, 'data', 'platforms', 'sub'));
+    const first = await run(pkg, workDir);
+    assert.notEqual(first.code, 0, 'directory symlink must be refused');
+    assertUntouched(pkg);
+    rmSync(path.join(pkg, 'data', 'platforms', 'sub'));
+    // Now make the whole source root a symlink.
+    const real = path.join(workDir, 'real-platforms');
+    cpSync(path.join(pkg, 'data', 'platforms'), real, { recursive: true });
+    rmSync(path.join(pkg, 'data', 'platforms'), { recursive: true, force: true });
+    symlinkSync(real, path.join(pkg, 'data', 'platforms'));
+    const second = await run(pkg, workDir);
+    assert.notEqual(second.code, 0, 'source root symlink must be refused');
+    assert.equal(statSync(path.join(pkg, 'data', 'private-canary.txt')).mode & 0o777, 0o600);
+  }
+  // A link in the data ancestor must not redirect the source outside the package.
+  {
+    const { workDir, pkg } = makeFixture('source-ancestor');
+    t.after(() => rmSync(workDir, { recursive: true, force: true }));
+    const externalData = path.join(workDir, 'external-data');
+    cpSync(path.join(pkg, 'data'), externalData, { recursive: true });
+    rmSync(path.join(pkg, 'data'), { recursive: true, force: true });
+    symlinkSync(externalData, path.join(pkg, 'data'));
+    const { code } = await run(pkg, workDir);
+    assert.notEqual(code, 0, 'symlinked source ancestor must be refused');
+    assertUntouched(pkg);
+    assert.equal(existsSync(path.join(pkg, 'dist')), false, 'refused source must not create an artifact');
+  }
+  // (c) generated DEST/ancestor symlink redirecting writes outside the package.
+  {
+    const { workDir, pkg } = makeFixture('dest');
+    t.after(() => rmSync(workDir, { recursive: true, force: true }));
+    mkdirSync(path.join(pkg, 'dist'), { recursive: true });
+    symlinkSync(path.join(pkg, 'data'), path.join(pkg, 'dist', 'data'));
+    const { code } = await run(pkg, workDir);
+    assert.notEqual(code, 0, 'symlinked generated ancestor must be refused');
+    assertUntouched(pkg);
+    assert.equal(existsSync(path.join(pkg, 'data', 'platforms', 'catalog.json')), true, 'source was modified');
+  }
+});
+
+test('build:data refuses incomplete source catalogs before touching previous artifacts', async (t) => {
+  for (const missing of ['catalog.json', 'manifest.json']) {
+    const workDir = mkdtempSync(path.join(tmpdir(), 'catalog-incomplete-'));
+    t.after(() => rmSync(workDir, { recursive: true, force: true }));
+    const pkg = path.join(workDir, 'pkg');
+    mkdirSync(path.join(pkg, 'scripts'), { recursive: true });
+    cpSync(path.join(appRoot, 'scripts', 'copy-platform-data.mjs'), path.join(pkg, 'scripts', 'copy-platform-data.mjs'));
+    cpSync(sourceDataDir, path.join(pkg, 'data', 'platforms'), { recursive: true });
+    rmSync(path.join(pkg, 'data', 'platforms', missing));
+    mkdirSync(path.join(pkg, 'dist', 'data', 'platforms'), { recursive: true });
+    const previous = path.join(pkg, 'dist', 'data', 'platforms', 'previous.txt');
+    writeFileSync(previous, 'previous-artifact');
+    const child = spawn(process.execPath, [path.join(pkg, 'scripts', 'copy-platform-data.mjs')], { cwd: workDir, stdio: 'ignore' });
+    const code: number | null = await new Promise((resolve) => child.on('close', resolve));
+    assert.notEqual(code, 0, `missing ${missing} must fail the build`);
+    assert.equal(readFileSync(previous, 'utf8'), 'previous-artifact');
+  }
 });
 
 /* ------------------------------------------------------------------ */

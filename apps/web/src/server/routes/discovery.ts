@@ -171,11 +171,13 @@ export function registerDiscoveryRoutes(router: Router, deps: DiscoveryRouteDeps
           routes: entry.routes.map((route) => ({
             routeId: route.routeId,
             kind: route.kind,
+            operation: route.operation,
             adapterId: route.adapterId,
             endpoint: route.endpoint,
             requires: route.requires,
             availability: route.availability,
-            reason: route.reason
+            reason: route.reason,
+            sourceRefs: route.sourceRefs
           })),
           gaps: platformGaps(entry)
         }))

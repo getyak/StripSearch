@@ -673,8 +673,15 @@ function buildCapability(pid, dim) {
   };
   if (dim === 'comments') {
     record.comments = legacy?.comments ?? { authorReplies: 'unknown', parentChain: 'unknown' };
-    // Thread reading is separate: no thread receipt exists yet.
-    record.thread = { support: 'unknown', maxDepth: null, depthProvenance: null };
+    // Thread reading is separate: no thread adapter and no own receipt exist.
+    record.thread = {
+      integration: 'not_integrated',
+      access: 'unknown',
+      verification: 'documented_only',
+      maxDepth: null,
+      verificationRef: null,
+      notes: ['读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。']
+    };
   }
   if (dim === 'pagination') {
     const pag = legacy?.pagination ?? TIKHUB[pid]?.pagination ?? null;

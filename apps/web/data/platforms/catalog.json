@@ -579,9 +579,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -1047,9 +1052,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -1517,9 +1527,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -1928,9 +1943,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -2397,9 +2417,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -2902,9 +2927,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -3344,9 +3374,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -3844,9 +3879,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -4312,9 +4352,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -4797,9 +4842,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -5242,9 +5292,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -5716,9 +5771,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -6152,9 +6212,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -6796,9 +6861,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -7245,9 +7315,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -7769,9 +7844,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -8326,9 +8406,14 @@
             "parentChain": "supported"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -8837,9 +8922,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -9317,9 +9407,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -9780,9 +9875,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -10067,9 +10167,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -10305,9 +10410,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -10543,9 +10653,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -10808,9 +10923,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -11110,9 +11230,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -11441,9 +11566,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -11801,9 +11931,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -12156,9 +12291,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -12486,9 +12626,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -12752,9 +12897,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -13105,9 +13255,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -13433,9 +13588,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -13672,9 +13832,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -13910,9 +14075,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -14149,9 +14319,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -14388,9 +14563,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -14627,9 +14807,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -14865,9 +15050,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -15104,9 +15294,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -15343,9 +15538,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -15583,9 +15783,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -15821,9 +16026,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -16059,9 +16269,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -16297,9 +16512,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -16535,9 +16755,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -16773,9 +16998,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -17012,9 +17242,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -17255,9 +17490,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -17498,9 +17738,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -17739,9 +17984,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -17977,9 +18227,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -18290,9 +18545,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -18645,9 +18905,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -18967,9 +19232,14 @@
             "parentChain": "unknown"
           },
           "thread": {
-            "support": "unknown",
+            "integration": "not_integrated",
+            "access": "unknown",
+            "verification": "documented_only",
             "maxDepth": null,
-            "depthProvenance": null
+            "verificationRef": null,
+            "notes": [
+              "读线程是独立能力：无已接入线程读取器、无独立验收回执；评论回执/父链文档不构成线程证据。"
+            ]
           }
         },
         {
@@ -19084,5 +19354,5 @@
       ]
     }
   ],
-  "contentHash": "sha256:c476609e9578daa37b009b87c753f6c9f6cb38417831f7eb130fe4945d971eb8"
+  "contentHash": "sha256:2d964f5b6484b9ac208bb39fb544dbb77aa8039772adfbf52d30c8cf488406fb"
 }

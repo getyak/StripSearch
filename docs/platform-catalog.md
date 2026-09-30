@@ -29,7 +29,7 @@
 
 **实现状态只认真实路径**：存在性探测只算 discovery，不构成 profile 读取（npm/PyPI/devto 等同理）；profile 只有 GitHub 研究 adapter 与 TikHub X 工具两条具体路径（X 工具仅支持已知 handle 的资料/帖子读取，不支持人物搜索，搜索路线保持 not_integrated），list 另含既有帖子追踪读取器（devto/HN/Medium/Reddit）与 GitHub 研究 adapter（仅读取本人拥有的仓库、仅首页、有数量上限，均已记录）；分页只有 devto/HN 的页码翻页被读取器实际消费，Reddit 分页只属于 TikHub 游标路线（credentials_required + TikHub 价格依据），不跨路线照搬官方 after/before 语义。所有新路径的验证依据保持 `documented_only`，旧 GitHub 规则的 `live_verified` 标签不被新能力继承。
 
-**读线程（read_thread）是独立能力**：评论列表的回执/父链文档不能验证线程读取器或深度；只有显式 thread 支持 + 自身回执 + 深度来源（`depthProvenance`）才能给出 confirmed `maxDepth`，否则一律保守 `unverified` 且 `maxDepth: null`（不套设计默认值 4）。当前目录全部 thread 记录保持 `unknown`。
+**读线程（read_thread）是独立能力**：评论列表的回执/父链文档/分页/任意文本都不能验证线程读取器或深度；读线程有自己的 integration/access/verification 三维与独立结构化验收回执（绑定 `read_thread` 操作、adapter、端点、日期、回执 id 与已验证深度上限）。只有“已接入线程能力 + 自身 live 验证回执 + 满足访问条件”才映射 GET-59 `supported`，且 `maxDepth` 不得超出回执验证的上限（加载器拒绝无回执 live 声明、无验证的深度与不匹配的上限）；无 adapter → `unsupported`，仅文档/离线/不完备证明 → `unverified`，缺凭据 → `unsupported`。当前目录全部线程记录 `not_integrated` / 未 live，投影一律 `unsupported` 且 `maxDepth: null`。
 
 **访问与费用属于具体操作/路线**：同一平台不同维度可以不同（Reddit 的匿名单页 listing 维度是 `public`，TikHub 游标分页是 `credentials_required` + TikHub 价格依据）；没有已建立操作的维度记 `unknown` + 显式依据。所有价格都是显式 `null` + 公开依据（TikHub 公开价格目录按端点列 `endpoint_cost`，未标币种/计量单位，未选定端点；目录响应的 request_id/time 不是费用回执）；**null 不等于免费**。
 
@@ -57,7 +57,7 @@
 
 `loadPlatformCatalog(dataDir)` 校验文件 hash、内容 hash、重复 ID、冲突别名（别名不得与任何 platformId 或其他别名重复）、来源引用与完整形状（七维度齐全、枚举合法、价格 null/正数、documented 必有逐维证据、路由非空且带理由）。快照深冻结并深拷贝：后续改动输入不会改变已冻结快照；版本/hash 变化只影响新 round，旧 snapshot 不变。
 
-生产数据路径是模块相对且显式的：编译产物读 `<dist>/data/platforms`（`npm run build:data` 只把 `data/platforms` 复制进 `dist/data/platforms` 并归一化为 755/644，保证非属主可读；`data/` 同时是本地 SQLite/用户研究存储位置，**绝不整体复制**，打包回归用合成 canary 验证旁路数据不进 dist、源目录权限不变）；源码运行读 `apps/web/data/platforms`。不做祖先目录回退：production bundle 缺失时即使源码目录存在也确定性抛 `data_not_found`（编译产物回归覆盖两种情况）。因此编译产物在任意 cwd（含 Docker runtime，经现有 dist 复制打包）都读自带数据，不依赖仓库目录。测试注入构造器/加载结果，全部离线。
+生产数据路径是模块相对且显式的：编译产物读 `<dist>/data/platforms`（`npm run build:data` 只把 `data/platforms` 复制进 `dist/data/platforms`，先用 lstat 拒绝源码子树与生成目录祖先中的符号链接/非普通条目（拒绝时源/旁路/旧产物一律不动），再把生成的公共命名空间 `dist`、`dist/data`、bundle 目录归一化为 755/644，保证非属主可读；`data/` 同时是本地 SQLite/用户研究存储位置，**绝不整体复制**，打包回归用合成 canary 验证旁路数据不进 dist、源目录权限不变）；源码运行读 `apps/web/data/platforms`。不做祖先目录回退：production bundle 缺失时即使源码目录存在也确定性抛 `data_not_found`（编译产物回归覆盖两种情况）。因此编译产物在任意 cwd（含 Docker runtime，经现有 dist 复制打包）都读自带数据，不依赖仓库目录。测试注入构造器/加载结果，全部离线。
 
 `GET /api/discovery/registry` 在保留原有 `registry` / `summary` 字段与行为的前提下，附加 `catalog`：版本、hash、汇总、来源清单（版本/hash/许可/状态等公开溯源）、逐平台能力（含 docUrls、endpoints、sourceLocator、sourceRefs、verificationRef、评论/分页详情、费用依据与条件）、路线与缺口。缺口显式列出：无 adapter 能力、未 live 验证能力、费用未知（null ≠ 免费）、访问受限能力。不注入目录时响应保持旧形状；不暴露任何凭据或 owner 访问上下文。
 

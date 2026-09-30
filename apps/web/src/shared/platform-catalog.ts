@@ -19,8 +19,9 @@
  * - An unknown price is an explicit `null` amount with a public basis.
  *   `null` never means "free".
  * - The two public longtail rule sources (Maigret / WhatsMyName) keep their
- *   actual known state: no frozen version, no captured bytes, null counts —
- *   importing them is GET-91, and nothing here claims rules are enabled.
+ *   actual known state: metadata frozen (commit/version, sha256, retrieval,
+ *   license), NOT imported, null import counts — importing them is GET-91,
+ *   and nothing here claims rules are enabled.
  * - Applicability for completion is decided by accepted input kinds and the
  *   authorization policy, never by whether an adapter exists: no-adapter
  *   platforms stay in the frozen denominator with an explicit reason.
@@ -210,13 +211,31 @@ export interface CatalogCommentDetails {
 
 /**
  * Thread reading is a SEPARATE capability from comment listing: a comments
- * receipt never verifies the thread reader or its depth. A non-null `maxDepth`
- * requires explicit `support: 'supported'` AND bound provenance.
+ * receipt never verifies the thread reader or its depth, and free-text notes
+ * are never an acceptance receipt. Confirming a depth bound requires thread's
+ * OWN structured verification receipt bound to the `read_thread` operation.
  */
+export interface CatalogThreadVerificationRef {
+  /** Always `read_thread`; comments receipts are structurally inadmissible. */
+  operation: 'read_thread';
+  adapterId: string;
+  endpoint: string;
+  verifiedAt: string;
+  receipt: string;
+  /** The depth bound this receipt actually verified. */
+  verifiedMaxDepth: number;
+}
+
 export interface CatalogThreadDetails {
-  support: 'supported' | 'unsupported' | 'unknown';
+  integration: CapabilityIntegration;
+  access: CapabilityAccess;
+  verification: CapabilityVerification;
+  /** Usable depth bound; null unless it equals the thread receipt's bound. */
   maxDepth: number | null;
-  depthProvenance: string | null;
+  /** Required with `live_verified`; the ONLY thing that can confirm depth. */
+  verificationRef: CatalogThreadVerificationRef | null;
+  /** Documentation-only context. Text alone never establishes anything. */
+  notes: string[];
 }
 
 /** Pagination additionally records cursor, sort and date-range limits. */
@@ -405,18 +424,40 @@ export interface CatalogCapabilitySnapshot {
  *    satisfied access. Everything else — `documented_only`, `offline_verified`
  *    — is `unverified`. Credentials can never promote `documented_only`.
  */
+function stateForAxes(
+  integration: CapabilityIntegration,
+  access: CapabilityAccess,
+  verification: CapabilityVerification,
+  hasOwnReceipt: boolean,
+  grant: CatalogAccessGrant | null
+): CatalogCapabilityState {
+  if (integration === 'unsupported') return 'unsupported';
+  if (integration === 'not_integrated') return 'unsupported';
+  if (access === 'inaccessible') return 'unsupported';
+  if (access === 'unknown') return 'unverified';
+  if (access === 'credentials_required' && grant?.credentials !== true) return 'unsupported';
+  if (access === 'authorization_required' && grant?.authorization !== true) return 'unsupported';
+  if (verification === 'live_verified' && hasOwnReceipt) return 'supported';
+  return 'unverified';
+}
+
 export function capabilityStateFor(
   record: CapabilityRecord,
   grant: CatalogAccessGrant | null
 ): CatalogCapabilityState {
-  if (record.integration === 'unsupported') return 'unsupported';
-  if (record.integration === 'not_integrated') return 'unsupported';
-  if (record.access === 'inaccessible') return 'unsupported';
-  if (record.access === 'unknown') return 'unverified';
-  if (record.access === 'credentials_required' && grant?.credentials !== true) return 'unsupported';
-  if (record.access === 'authorization_required' && grant?.authorization !== true) return 'unsupported';
-  if (record.verification === 'live_verified' && record.verificationRef !== null) return 'supported';
-  return 'unverified';
+  return stateForAxes(record.integration, record.access, record.verification, record.verificationRef !== null, grant);
+}
+
+/**
+ * Thread state uses the same exact axes but ONLY thread's own evidence:
+ * no adapter → unsupported, documented/offline proof → unverified, missing
+ * credentials → unsupported, own live receipt → supported.
+ */
+export function threadStateFor(
+  thread: CatalogThreadDetails,
+  grant: CatalogAccessGrant | null
+): CatalogCapabilityState {
+  return stateForAxes(thread.integration, thread.access, thread.verification, thread.verificationRef !== null, grant);
 }
 
 /** Deterministic limitation text for non-supported capability states. */

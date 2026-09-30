@@ -44,6 +44,7 @@ import type {
   CatalogSourceManifest,
   CatalogSummary,
   CatalogThreadDetails,
+  CatalogThreadVerificationRef,
   CapabilityRecord,
   CompletionPlatformRegistry,
   DiscoveryRoute,
@@ -51,6 +52,7 @@ import type {
   LegacyRuleCompat,
   PlatformCatalogSnapshot
 } from '../../shared/platform-catalog.js';
+import { threadStateFor } from '../../shared/platform-catalog.js';
 import type { PlatformRule } from '../../shared/platform-discovery.js';
 import type { CapabilitySnapshot } from '../research/research-tool-dispatch.js';
 
@@ -306,16 +308,50 @@ function validateCapability(raw: unknown, where: string, sourceIds: Set<string>)
     const threadRaw = raw.thread ?? null;
     if (threadRaw !== null) {
       if (!isRecord(threadRaw)) fail('invalid_shape', `${where}.thread must be an object or null`);
-      const support = requireEnum(threadRaw.support, SUPPORT, `${where}.thread.support`);
-      const maxDepth = threadRaw.maxDepth ?? null;
-      if (maxDepth !== null && (typeof maxDepth !== 'number' || !Number.isInteger(maxDepth) || maxDepth < 1)) {
-        fail('invalid_shape', `${where}.thread.maxDepth must be null or a positive integer`);
+      const threadIntegration = requireEnum(threadRaw.integration, INTEGRATION, `${where}.thread.integration`);
+      const threadAccess = requireEnum(threadRaw.access, ACCESS, `${where}.thread.access`);
+      const threadVerification = requireEnum(threadRaw.verification, VERIFICATION, `${where}.thread.verification`);
+      const threadRefRaw = threadRaw.verificationRef ?? null;
+      let threadRef: CatalogThreadVerificationRef | null = null;
+      if (threadVerification === 'live_verified') {
+        if (!isRecord(threadRefRaw)) {
+          fail('invalid_shape', `${where}: live thread verification requires its own read_thread receipt`);
+        }
+        if (threadRefRaw.operation !== 'read_thread') {
+          fail('invalid_shape', `${where}: thread receipts must bind the read_thread operation`);
+        }
+        const verifiedMaxDepth = threadRefRaw.verifiedMaxDepth;
+        if (typeof verifiedMaxDepth !== 'number' || !Number.isInteger(verifiedMaxDepth) || verifiedMaxDepth < 1) {
+          fail('invalid_shape', `${where}: thread receipt needs a valid verifiedMaxDepth`);
+        }
+        threadRef = {
+          operation: 'read_thread',
+          adapterId: requireString(threadRefRaw.adapterId, `${where}.thread.verificationRef.adapterId`),
+          endpoint: requireString(threadRefRaw.endpoint, `${where}.thread.verificationRef.endpoint`),
+          verifiedAt: requireString(threadRefRaw.verifiedAt, `${where}.thread.verificationRef.verifiedAt`),
+          receipt: requireString(threadRefRaw.receipt, `${where}.thread.verificationRef.receipt`),
+          verifiedMaxDepth
+        };
+      } else if (threadRefRaw !== null) {
+        fail('invalid_shape', `${where}: thread receipts are only allowed with live_verified`);
       }
-      const depthProvenance = optionalString(threadRaw.depthProvenance, `${where}.thread.depthProvenance`);
-      if (maxDepth !== null && (support !== 'supported' || depthProvenance === null)) {
-        fail('invalid_shape', `${where}: thread depth bound needs explicit support and provenance`);
+      const threadMaxDepth = threadRaw.maxDepth ?? null;
+      if (threadMaxDepth !== null) {
+        if (typeof threadMaxDepth !== 'number' || !Number.isInteger(threadMaxDepth) || threadMaxDepth < 1) {
+          fail('invalid_shape', `${where}.thread.maxDepth must be null or a positive integer`);
+        }
+        if (threadRef === null || threadMaxDepth !== threadRef.verifiedMaxDepth) {
+          fail('invalid_shape', `${where}: thread depth must not exceed or mismatch the verified bound`);
+        }
       }
-      record.thread = { support, maxDepth, depthProvenance };
+      record.thread = {
+        integration: threadIntegration,
+        access: threadAccess,
+        verification: threadVerification,
+        maxDepth: threadMaxDepth,
+        verificationRef: threadRef,
+        notes: requireStringArray(threadRaw.notes ?? [], `${where}.thread.notes`)
+      };
     }
   }
   if (dimension === 'pagination') {
@@ -798,29 +834,29 @@ export function toCapabilitySnapshot(
     push('read_media', byDimension.get('media') as CapabilityRecord);
     push('list_comments', comments, { sortOptions, dateRange });
 
-    // read_thread is a SEPARATE capability from comment listing: it needs
-    // explicit thread support with its own receipt and a provenance-bound
-    // depth. Comments receipts and parent-chain docs never verify it.
-    const thread: CatalogThreadDetails = comments.thread ?? { support: 'unknown', maxDepth: null, depthProvenance: null };
-    const commentsState = capabilityStateFor(comments, grant);
-    const threadConfirmed =
-      thread.support === 'supported' &&
-      thread.maxDepth !== null &&
-      thread.depthProvenance !== null &&
-      commentsState === 'supported';
-    const state: CapabilitySnapshot['operations'][number]['state'] =
-      thread.support === 'unsupported' ? 'unsupported' : threadConfirmed ? 'supported' : 'unverified';
+    // read_thread is a SEPARATE capability from comment listing: only its OWN
+    // integration, access and structured read_thread receipt can confirm it.
+    // Comments receipts, parentChain docs, pagination and free text never do.
+    const thread: CatalogThreadDetails = comments.thread ?? {
+      integration: 'not_integrated',
+      access: 'unknown',
+      verification: 'documented_only',
+      maxDepth: null,
+      verificationRef: null,
+      notes: []
+    };
+    const state = threadStateFor(thread, grant);
     operations.push({
       platform: entry.platformId,
       operation: 'read_thread',
       state,
       sortOptions: [],
       dateRange: 'unsupported',
-      maxDepth: threadConfirmed ? (thread.maxDepth as number) : null,
+      maxDepth: state === 'supported' ? thread.maxDepth : null,
       limitation:
         state === 'supported'
           ? null
-          : `thread=${thread.support};threadReceipt=${thread.depthProvenance ? 'present' : 'missing'};comments=${commentsState}`
+          : `thread:verification=${thread.verification};access=${thread.access};integration=${thread.integration}`
     });
   }
   return {
