@@ -8,6 +8,7 @@ import { ApiClient, ApiError } from './api.js';
 import type { ExportFormat, ResumeInput } from './api.js';
 import { createAuthController, renderUserNav, showToast } from './auth.js';
 import { byId, clear, make, setText, show } from './dom.js';
+import { createHomeMotion } from './home-motion.js';
 import { createReviewWorkbench } from './review.js';
 import {
   renderActivity,
@@ -83,6 +84,9 @@ const state: AppState = {
 
 const api = new ApiClient();
 const auth = createAuthController(api);
+// Homepage motion is isolated from the research/auth/review flows: it only
+// renders the synthetic home artifact and never touches the API.
+const homeMotion = createHomeMotion();
 
 const FOLLOWUP_PROMPTS = [
   '还有哪些公开项目？',
@@ -240,6 +244,8 @@ function route(): void {
   els.app.hidden = !wantsApp;
   els.review.hidden = !wantsReview;
   els.footer.hidden = wantsApp || wantsReview;
+  document.body.dataset.view = wantsApp ? 'app' : wantsReview ? 'review' : 'home';
+  homeMotion.setActive(!wantsApp && !wantsReview);
   if (wantsReview) {
     let caseId: string | null = null;
     if (reviewMatch?.[1]) {
@@ -1319,5 +1325,6 @@ export const __test = {
   applySnapshot,
   renderAll,
   isCurrentRun,
-  isCurrentUser
+  isCurrentUser,
+  homeMotion
 };
