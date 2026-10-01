@@ -86,6 +86,29 @@ test('hosted signup denies non-allowlisted emails and empty lists; existing logi
   assert.equal(session.body.user.email, 'alice@example.test');
 });
 
+test('explicit open hosted signup admits an unlisted email while preserving secure sessions and Origin checks', async (t) => {
+  const server = await startTestServer({ providerFactory: createFakeFactory() }, {
+    ...hostedEnv('alice@example.test'),
+    STRIPSEARCH_SIGNUP_MODE: 'open'
+  });
+  t.after(() => server.close());
+  const rejected = await server.client.request('/api/auth/sign-up/email', {
+    method: 'POST', origin: 'https://evil.example.test',
+    json: { name: 'Bob', email: 'bob@example.test', password: 'password-1234' }
+  });
+  assert.equal(rejected.status, 403);
+  const signup = await server.client.signUp('bob@example.test', 'password-1234', 'Bob');
+  assert.equal(signup.status, 200);
+  const cookie = signup.headers.getSetCookie().find(value => value.startsWith('__Secure-stripsearch.'));
+  assert.ok(cookie);
+  assert.match(cookie, /; Secure/i);
+  assert.match(cookie, /; HttpOnly/i);
+  const session = await server.client.json<{ user: { email: string } }>('/api/auth/get-session');
+  assert.equal(session.body.user.email, 'bob@example.test');
+  assert.equal((await server.client.signOut()).status, 200);
+  assert.equal((await server.client.signIn('bob@example.test', 'password-1234')).status, 200);
+});
+
 test('hosted auth mutations reject missing, foreign and spoofed Origins', async (t) => {
   const server = await startTestServer({ providerFactory: createFakeFactory() }, hostedEnv('alice@example.test'));
   t.after(() => server.close());

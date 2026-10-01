@@ -205,6 +205,25 @@ test('hosted mode rejects missing, insecure or malformed origins', () => {
   }
 });
 
+test('hosted signup opens only with the explicit open policy and rejects misspelled policies', () => {
+  const dir = tempDir();
+  const env = {
+    STRIPSEARCH_DEPLOYMENT: 'hosted',
+    STRIPSEARCH_DATA_DIR: dir,
+    STRIPSEARCH_PUBLIC_ORIGIN: 'https://search.example.test',
+    STRIPSEARCH_SIGNUP_EMAILS: 'alice@example.test'
+  };
+  try {
+    assert.equal(loadConfig({ ...env, STRIPSEARCH_SIGNUP_MODE: ' OPEN ' }).signupEmails, null);
+    assert.deepEqual(loadConfig({ ...env, STRIPSEARCH_SIGNUP_MODE: 'allowlist' }).signupEmails, ['alice@example.test']);
+    for (const mode of ['opne', '', 'true', '*']) {
+      assert.throws(() => loadConfig({ ...env, STRIPSEARCH_SIGNUP_MODE: mode }), /STRIPSEARCH_SIGNUP_MODE/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('default data and client dirs stay anchored at apps/web in source and compiled output', async () => {
   const appRoot = fileURLToPath(new URL('../../', import.meta.url));
   assert.equal(defaultDataDir(), path.join(appRoot, '.data'));
