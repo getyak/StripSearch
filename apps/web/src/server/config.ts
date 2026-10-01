@@ -26,8 +26,8 @@ export interface AppConfig {
   /** Secure cookies are derived from hosted HTTPS only. */
   secureCookies: boolean;
   /**
-   * Normalized lowercase signup allowlist. `null` means local mode is
-   * unrestricted; an empty array means hosted mode rejects every new signup.
+   * Normalized lowercase signup allowlist. `null` means local mode or explicitly
+   * open hosted signup; an empty array rejects every new signup.
    */
   signupEmails: string[] | null;
   authSecret: string;
@@ -113,6 +113,15 @@ function parseSignupEmails(raw: string | undefined): string[] {
     }
   }
   return [...new Set(entries)];
+}
+
+function parseHostedSignupEmails(env: NodeJS.ProcessEnv): string[] | null {
+  const mode = (env.STRIPSEARCH_SIGNUP_MODE ?? 'allowlist').trim().toLowerCase();
+  if (mode === 'open') return null;
+  if (mode !== 'allowlist') {
+    throw new Error('STRIPSEARCH_SIGNUP_MODE must be "allowlist" or "open".');
+  }
+  return parseSignupEmails(env.STRIPSEARCH_SIGNUP_EMAILS);
 }
 
 function parseOrigin(origin: string): URL {
@@ -216,7 +225,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     origin,
     allowedOrigins,
     secureCookies: hosted,
-    signupEmails: hosted ? parseSignupEmails(env.STRIPSEARCH_SIGNUP_EMAILS) : null,
+    signupEmails: hosted ? parseHostedSignupEmails(env) : null,
     authSecret,
     authSecretSource,
     dataDir,

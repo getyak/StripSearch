@@ -9,7 +9,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /**
  * Better Auth owns password hashing and sessions. This module only constrains
  * the signup payload, pins the cookie / session / rate-limit policy, and, in
- * hosted mode, enforces the explicit public origin and the signup allowlist.
+ * hosted mode, enforces the explicit public origin and configured signup policy.
  */
 export function createAuth(db: DB, config: AppConfig) {
   const hosted = config.deployment === 'hosted';
@@ -83,8 +83,8 @@ export function createAuth(db: DB, config: AppConfig) {
             if (email.length === 0 || email.length > 254 || !EMAIL_RE.test(email)) {
               throw new APIError('BAD_REQUEST', { message: '邮箱格式不正确。' });
             }
-            // Hosted registration is allowlist-only. An empty configured list
-            // rejects every new account; existing accounts can still sign in.
+            // A configured allowlist constrains registration; null explicitly
+            // opens it. An empty list denies new accounts, not existing login.
             if (signupAllowlist && !signupAllowlist.includes(email.toLowerCase())) {
               throw new APIError('FORBIDDEN', {
                 message: '该邮箱不在允许注册的名单内。',
