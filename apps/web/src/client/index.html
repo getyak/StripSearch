@@ -11,7 +11,7 @@
     <title>StripSearch · 了解一个人</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body data-view="home">
     <a class="skip-link" href="#main">跳到主要内容</a>
 
     <header class="site-nav">
@@ -39,42 +39,130 @@
       <main id="main">
         <!-- ============ HOME ============ -->
         <div id="view-home">
-          <section class="container hero" aria-labelledby="hero-title">
-            <div class="hero-copy">
-              <p class="hero-kicker">从一个线索，开始理解。</p>
-              <h1 id="hero-title">想了解谁？</h1>
-              <p class="hero-lead">输入姓名或公开主页，查看经历、作品与公开表达。</p>
-            </div>
-            <div class="composer-wrap">
-              <form class="composer" id="research-form" novalidate>
-                <div class="composer-body">
-                  <div class="field">
-                    <div class="field-head">
-                      <label for="research-question">姓名、主页链接，或你想了解的人</label>
-                      <button class="clear-input" id="clear-question" type="button" hidden>清空</button>
+          <section class="home-hero" aria-labelledby="hero-title">
+            <div class="home-band home-hero-inner">
+              <div class="hero-copy">
+                <p class="hero-kicker">PUBLIC LIVES. OPEN CONTEXT.</p>
+                <h1 id="hero-title">看见<br />名字之外。</h1>
+                <p class="hero-lead">输入一个名字或公开主页链接，沿着公开材料追溯来源，分清哪些有据可查、哪些还不能下结论。</p>
+                <div class="composer-wrap">
+                  <form class="composer" id="research-form" novalidate>
+                    <div class="composer-body">
+                      <div class="field">
+                        <div class="field-head">
+                          <label for="research-question">姓名、主页链接，或你想了解的人</label>
+                          <button class="clear-input" id="clear-question" type="button" hidden>清空</button>
+                        </div>
+                        <textarea id="research-question" name="input" rows="2" aria-describedby="question-help question-error" placeholder="一个名字，或一条公开主页链接"></textarea>
+                        <span class="error-text" id="question-error" role="alert"></span>
+                      </div>
+                      <div class="composer-actions">
+                        <span class="helper keyboard-hint" id="question-help">⌘ / Ctrl + Enter 提交</span>
+                        <button class="button primary" type="submit" id="submit-research">开始了解 <span aria-hidden="true">↗</span></button>
+                      </div>
+                      <p class="form-status" id="form-status" role="status"></p>
                     </div>
-                    <textarea id="research-question" name="input" rows="3" aria-describedby="question-help question-error" placeholder="一个名字，或一条公开主页链接"></textarea>
-                    <span class="error-text" id="question-error" role="alert"></span>
-                  </div>
-                  <div class="composer-actions">
-                    <span class="helper keyboard-hint" id="question-help">⌘ / Ctrl + Enter 提交</span>
-                    <button class="button primary" type="submit" id="submit-research">开始了解 <span aria-hidden="true">↗</span></button>
-                  </div>
-                  <p class="form-status" id="form-status" role="status"></p>
+                  </form>
+                  <div class="entry-help"><button class="clear-input" type="button" id="open-example">填入公开主页示例</button><span class="helper">提交后开始，资料将保存到你的账号。</span></div>
                 </div>
-              </form>
-              <div class="entry-help"><button class="clear-input" type="button" id="open-example">填入公开主页示例</button><span class="helper">提交后开始，资料将保存到你的账号。</span></div>
+              </div>
+
+              <div class="artifact" id="home-artifact" data-stage="4" aria-labelledby="artifact-title">
+                <div class="artifact-head">
+                  <p class="artifact-caption">原创合成演示 · 非实时研究</p>
+                  <h2 id="artifact-title">Lantern · 2025.06 更新记录</h2>
+                  <p class="artifact-context" id="artifact-context">结论 · [S1] 更新记录 · 2025 年 6 月</p>
+                </div>
+                <div class="artifact-path" aria-hidden="true"><span></span></div>
+                <div class="artifact-controls">
+                  <div class="artifact-stages" id="artifact-stages" hidden role="group" aria-label="演示步骤">
+                    <button class="artifact-stage-btn" type="button" data-stage-button="1">捕捉</button>
+                    <button class="artifact-stage-btn" type="button" data-stage-button="2">发现</button>
+                    <button class="artifact-stage-btn" type="button" data-stage-button="3">整理</button>
+                    <button class="artifact-stage-btn" type="button" data-stage-button="4">理解</button>
+                  </div>
+                  <div class="artifact-playback">
+                    <button class="button primary" type="button" id="demo-play" hidden>看一次研究，如何发生</button>
+                    <button class="button" type="button" id="demo-toggle" hidden>暂停</button>
+                    <button class="button ghost" type="button" id="demo-jump" hidden>直接看结果</button>
+                    <button class="button ghost" type="button" id="demo-replay" hidden>重新播放</button>
+                  </div>
+                  <p class="artifact-status" id="demo-status" role="status"></p>
+                </div>
+                <div class="artifact-rows">
+                  <div class="artifact-seed" id="artifact-seed">
+                    <span class="artifact-label">研究起点</span>
+                    <strong>林舟</strong>
+                    <span class="artifact-note">合成人物 · 项目主页线索</span>
+                  </div>
+                  <div class="artifact-strips" id="artifact-strips">
+                    <span class="artifact-label">来源</span>
+                    <p class="artifact-note" id="artifact-strip-empty" hidden>来源尚未出现。</p>
+                    <button class="artifact-strip" type="button" id="artifact-source-strip" hidden aria-expanded="false" aria-controls="artifact-source-detail">[S1] Lantern 2025.06 更新记录 · 2025 年 6 月</button>
+                    <div class="artifact-source-detail" id="artifact-source-detail">
+                      <p><span class="artifact-label">原文</span>“新增离线阅读与本地索引。”</p>
+                      <p><span class="artifact-label">日期</span>2025 年 6 月 · 原创合成更新记录</p>
+                      <p><span class="artifact-label">能说明</span>更新记录宣布了离线阅读与本地索引功能。</p>
+                      <p><span class="artifact-label">还不能证明</span>由某个人独立完成，或实际使用效果。</p>
+                    </div>
+                  </div>
+                  <div class="artifact-stage-area" id="artifact-stage-area">
+                    <section class="artifact-stage" data-stage="1" aria-labelledby="artifact-stage-1-title">
+                      <p class="artifact-label">01 / 捕捉</p>
+                      <h3 id="artifact-stage-1-title">从一个名字或主页开始。</h3>
+                      <p>先确认这条公开线索指向的是谁；同名不自动合并。</p>
+                    </section>
+                    <section class="artifact-stage" data-stage="2" aria-labelledby="artifact-stage-2-title">
+                      <p class="artifact-label">02 / 发现</p>
+                      <h3 id="artifact-stage-2-title">让来源出现。</h3>
+                      <p>[S1] 出自公开更新记录：Lantern · 2025 年 6 月。出处与日期随材料一起保留。</p>
+                    </section>
+                    <section class="artifact-stage" data-stage="3" aria-labelledby="artifact-stage-3-title">
+                      <p class="artifact-label">03 / 整理</p>
+                      <h3 id="artifact-stage-3-title">把材料放回时间线。</h3>
+                      <p>2025 年 6 月 · 更新记录写明新增功能。没有材料的时段保持空白，不做补写。</p>
+                    </section>
+                    <section class="artifact-stage" data-stage="4" aria-labelledby="artifact-stage-4-title">
+                      <p class="artifact-label">04 / 理解</p>
+                      <h3 id="artifact-stage-4-title">结论有支持，也有未知。</h3>
+                      <blockquote>“新增离线阅读与本地索引。”</blockquote>
+                      <p><strong>能说明：</strong>更新记录宣布了离线阅读与本地索引功能。</p>
+                      <p><strong>还不能证明：</strong>这份记录不能证明由某个人独立完成，也不能说明实际使用效果。</p>
+                    </section>
+                  </div>
+                </div>
+
+              </div>
             </div>
           </section>
-          <section class="container person-preview" id="example" aria-labelledby="example-title">
-            <div><p class="hero-kicker">不止找到资料</p><h2 id="example-title">把一个人，读得更清楚。</h2><p class="helper">以下为原创合成片段</p></div>
-            <div class="preview-reading">
-              <p>从他做过的作品，到他如何解释自己的选择。<br>知道哪些有据可查，也知道哪里仍不能下结论。</p>
-              <details class="preview-evidence"><summary>看一个带出处的例子</summary><div>
-                <p><strong>作品记录</strong> · 合成项目 Lantern 的更新记录，提到了离线阅读功能。</p>
-                <blockquote>“新增离线阅读与本地索引。”</blockquote>
-                <p class="helper">原创合成更新记录，2025 年 6 月。它能说明功能已发布，不能证明由某个人独立完成。</p>
-              </div></details>
+
+          <section class="home-proof" id="example" aria-labelledby="example-title">
+            <div class="home-band">
+              <h2 id="example-title">观点有声音。<br />理解有来处。</h2>
+              <div class="proof-pair">
+                <div class="proof-col">
+                  <p class="proof-index">01 / 原始材料</p>
+                  <p class="proof-heading">2025 年 6 月<br />Lantern 更新记录</p>
+                  <p class="proof-note">合成材料中的时间、行动和原话。</p>
+                  <blockquote class="proof-original"><span>[S1] 更新记录原文</span><p>“新增离线阅读与本地索引。”</p></blockquote>
+                </div>
+                <div class="proof-col">
+                  <p class="proof-index">02 / 研究片段</p>
+                  <p class="proof-heading">沿着公开材料，<br />理解一段脉络。</p>
+                  <p class="proof-note">点击一句话的出处，回到支持它的材料。</p>
+                  <p class="proof-claim">更新记录宣布了离线阅读与本地索引功能。</p>
+                  <details class="proof-evidence">
+                    <summary>[S1] 这句话的依据</summary>
+                    <div>
+                      <p>原文：“新增离线阅读与本地索引。”</p>
+                      <p>日期：2025 年 6 月 · 原创合成更新记录。</p>
+                      <p>能说明：功能已在更新记录中宣布。</p>
+                      <p>还不能证明：由某个人独立完成，或实际使用效果。</p>
+                    </div>
+                  </details>
+                  <p class="artifact-caption">原创合成演示 · 非实时研究</p>
+                </div>
+              </div>
             </div>
           </section>
           <details class="container scope-note" id="boundaries"><summary>公开资料，有据可查。</summary><p>用于理解公开作品、准备采访和授权自我研究。保留出处、相反证据与未知；不提供私人位置追踪或匿名身份揭露。</p></details>
@@ -191,6 +279,7 @@
         <div class="container footer-inner">
           <p>StripSearch · 公开资料，有据可查。</p>
           <p><a href="https://github.com/cubxxw/StripSearch" target="_blank" rel="noopener noreferrer">源码与设计</a></p>
+          <p><a class="button footer-return" href="#research-question">回到输入</a></p>
         </div>
       </footer>
     </div>
