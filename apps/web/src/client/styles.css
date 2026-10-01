@@ -765,6 +765,7 @@ body[data-view="home"] .nav-inner {
   margin-inline: auto;
   padding-block: clamp(28px, 4.5vw, 64px);
 }
+#view-home :is(#example, #boundaries, #research-question) { scroll-margin-top: 104px; }
 
 /* ---------- hero: narrative + composer | living synthetic evidence ---------- */
 .home-hero {
