@@ -371,6 +371,7 @@ export function renderActivity(
   clear(list);
   const total = stages[0]?.total ?? 0;
   const done = stages.filter((stage) => stage.status === 'done').length;
+  const running = state === 'researching' || state === 'queued';
   if (stages.length === 0) {
     list.appendChild(make('p', { className: 'stage-empty', text: '还没有可观察的研究步骤。' }));
   } else {
@@ -379,7 +380,7 @@ export function renderActivity(
       item.dataset.status = stage.status;
       item.appendChild(make('span', { className: 'stage-index', text: String(stage.index + 1).padStart(2, '0') }));
       item.appendChild(make('span', { className: 'stage-label', text: stage.label }));
-      item.appendChild(make('span', { className: 'stage-tag', text: STAGE_TAGS[stage.status] }));
+      item.appendChild(make('span', { className: 'stage-tag', text: openEnded && !running && stage.status === 'active' ? '过程记录' : STAGE_TAGS[stage.status] }));
       if (stage.detail) item.appendChild(make('span', { className: 'stage-detail', text: stage.detail }));
       list.appendChild(item);
     }
@@ -390,9 +391,8 @@ export function renderActivity(
   progressBar.setAttribute('aria-valuemax', String(total || 1));
   progressBar.setAttribute('aria-valuenow', String(done));
   progressBar.setAttribute('aria-valuetext', `${done} / ${total || 0} 步已完成`);
-  progressText.textContent = openEnded ? `${done} 个步骤已完成` : `${done} / ${total || 0}`;
-  activityState.textContent = [...stages].reverse().find((stage) => stage.status === 'active')?.label ?? stateLabel(state);
-  const running = state === 'researching' || state === 'queued';
+  progressText.textContent = openEnded ? `${stages.length} 条过程记录` : `${done} / ${total || 0}`;
+  activityState.textContent = running ? [...stages].reverse().find((stage) => stage.status === 'active')?.label ?? stateLabel(state) : stateLabel(state);
   indicator.hidden = !running;
 }
 

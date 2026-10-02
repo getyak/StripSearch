@@ -151,3 +151,9 @@ test('activity rendering derives progress from ordered stage events', () => {
   assert.equal(fill.style.transform, 'scaleX(0.5)');
   assert.equal(indicator.hidden, false);
 });
+
+test('open-ended terminal research shows process records without claiming active or completed stages', () => {
+ const list=domContainer(), fill=domContainer(), bar=domContainer(), text=domContainer(), stateEl=domContainer(), indicator=domContainer();
+ renderActivity(list,fill,bar,text,stateEl,indicator,[{index:0,total:12,key:'reading',label:'读取原文',status:'active',detail:null}],'partial',true);
+ assert.equal(text.textContent,'1 条过程记录');assert.equal(stateEl.textContent,'部分完成');assert.equal(indicator.hidden,true);assert.equal(bar.hidden,true);assert.match(list.textContent!,/过程记录/);assert.doesNotMatch(list.textContent!,/正在查看/);
+});

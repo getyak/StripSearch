@@ -542,6 +542,7 @@ export async function runResearchBaseline(options: RunResearchBaselineOptions): 
     failures: runLevelFailures
   };
   const report = buildReport(caseReports, {
+    datasetVersion: cases[0]!.datasetVersion,
     generatedAt: new Date().toISOString(),
     totalMonotonicElapsedMs: performance.now() - startedAt,
     config: {
@@ -663,7 +664,7 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   const repoRoot = findRepoRoot();
-  const datasetArg = values.dataset ?? path.join('evals', 'research-baseline-v1', 'cases.jsonl');
+  const datasetArg = values.dataset ?? path.join('evals', 'research-baseline-v2', 'cases.jsonl');
   const outputArg = values.output ?? path.join('_private', 'evals', 'research-baseline', 'latest');
   const datasetPath = path.resolve(repoRoot, datasetArg);
   const outputDir = path.resolve(repoRoot, outputArg);

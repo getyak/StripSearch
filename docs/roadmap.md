@@ -79,3 +79,5 @@
 | 开源引擎、用户自带服务 | 避免把商业 API 当开源能力 | 托管需求与成本得到验证后另立方案 |
 
 设计变化使用 [decision 模板](../templates/decision.md)，质量/成本变化使用 [experiment 模板](../templates/experiment.md)。Notion 仅保存摘要与决定，仓库是版本化规范的唯一来源。
+
+2026-10-02 旧 alpha 的[深度修复](research-depth-contract.md)纳入批次采集、原文 provenance、五类研究问题状态及撤回传播，并冻结 v2 合成回放。它不替代新 Search / Fetch 运行时、持续历史/评论分页和真实自主规划验收；相关任务继续保持未完成。

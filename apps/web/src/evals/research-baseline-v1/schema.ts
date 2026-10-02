@@ -19,7 +19,8 @@ export type BaselineClaimKind = 'attributed_statement' | 'page_statement' | 'inf
 export type BaselineSection = 'background' | 'work' | 'expression' | 'analysis';
 export type BaselineToolKind = 'search' | 'read' | 'firecrawl' | 'social_profile' | 'social_posts' | 'github_profile';
 
-export const DATASET_VERSION = 'research-baseline-v1';
+export const DATASET_VERSION = 'research-baseline-v2';
+export type DatasetVersion = 'research-baseline-v1' | 'research-baseline-v2';
 export const DATASET_PROVENANCE = 'original-synthetic';
 
 export class BaselineSchemaError extends Error {
@@ -191,7 +192,7 @@ export interface BaselineInput {
 
 export interface BaselineCase {
   caseId: string;
-  datasetVersion: typeof DATASET_VERSION;
+  datasetVersion: DatasetVersion;
   title: string;
   scenario: string;
   split: 'discovery' | 'regression';
@@ -384,7 +385,7 @@ export function parseCase(value: unknown, path = 'case'): BaselineCase {
   exactKeys(inputRaw, ['question', 'seedUrl'], `${path}.input`);
   const entry: BaselineCase = {
     caseId: str(raw.case_id, `${path}.case_id`, { min: 1, pattern: CASE_ID_PATTERN }),
-    datasetVersion: enumValue(raw.dataset_version, [DATASET_VERSION] as const, `${path}.dataset_version`),
+    datasetVersion: enumValue(raw.dataset_version, ['research-baseline-v1','research-baseline-v2'] as const, `${path}.dataset_version`),
     title: str(raw.title, `${path}.title`, { min: 1 }),
     scenario: str(raw.scenario, `${path}.scenario`, { min: 1 }),
     split: enumValue(raw.split, ['discovery', 'regression'] as const, `${path}.split`),
@@ -438,5 +439,6 @@ export function parseDataset(text: string): BaselineCase[] {
   }
   if (cases.length === 0) throw new BaselineSchemaError('dataset is empty');
   validateDataset(cases);
+  if(new Set(cases.map(c=>c.datasetVersion)).size!==1)throw new BaselineSchemaError('mixed dataset versions');
   return cases;
 }

@@ -1,3 +1,4 @@
+import { researchDepthCoverage } from '../shared/research-depth.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
@@ -606,6 +607,7 @@ export class Store {
     const page = checkpoint?.pages.find(page => page.sourceKey === sourceKey);
     const anchor = checkpoint?.pages.find(page => page.url === checkpoint.anchorUrl);
     if (anchor && anchor.sourceKey !== sourceKey && !this.isResearchSourceActive(runId, anchor.sourceKey, ownerId, seen)) return false;
+    if (page?.discoveredFrom?.length && !page.discoveredFrom.some(parentKey => this.isResearchSourceActive(runId, parentKey, ownerId, seen))) return false;
     return !page?.inheritedFrom || this.isResearchSourceActive(page.inheritedFrom.runId, page.inheritedFrom.sourceKey, ownerId, seen);
   }
 
@@ -670,7 +672,7 @@ export class Store {
       usage: run.usage,
       reviewCount: countReviewItems(observations, answer),
       ...(checkpoint ? {
-        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id), stopReason: run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns },
+        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns, coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
         ...(checkpoint.anchorUrl && identity.status === 'resolved' ? {
           personObject: {
             schemaVersion: 'stripsearch/person/v1' as const,

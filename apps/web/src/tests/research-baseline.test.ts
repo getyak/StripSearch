@@ -34,8 +34,8 @@ import type { CaseExecution } from '../evals/research-baseline-v1/case-runner.js
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const harnessDir = path.resolve(testDir, '..', 'evals', 'research-baseline-v1');
 const repoRoot = findRepoRoot();
-const datasetPath = path.join(repoRoot, 'evals', 'research-baseline-v1', 'cases.jsonl');
-const datasetDisplayPath = 'evals/research-baseline-v1/cases.jsonl';
+const datasetPath = path.join(repoRoot, 'evals', 'research-baseline-v2', 'cases.jsonl');
+const datasetDisplayPath = 'evals/research-baseline-v2/cases.jsonl';
 
 function tempBase(): string {
   const configured = process.env.TMPDIR?.trim();
@@ -295,7 +295,7 @@ test('frozen replay passes structurally with honest counters and deterministic h
     assert.equal(report.type, 'offline_controller_replay');
     assert.equal(report.summary.scheduled, 11);
     assert.deepEqual(report.summary.caseProgress, { started: 11, finished: 11, unfinished: 0, notRun: 0 });
-    assert.deepEqual(report.summary.states, { completed: 2, partial: 7, needs_input: 1, runner_error: 1 });
+    assert.deepEqual(report.summary.states, { completed: 0, partial: 9, needs_input: 1, runner_error: 1 });
     assert.equal(report.summary.passRate.denominator, 11, 'all scheduled cases stay in the denominator');
     assert.equal(report.summary.structural.passed, 11);
     // Model accounting: zero actual invocations, historical receipts preserved,
@@ -305,7 +305,7 @@ test('frozen replay passes structurally with honest counters and deterministic h
     assert.equal(report.summary.modelTokens, 'not_measured');
     assert.equal(report.summary.modelCostUsd, 'not_measured');
     assert.equal(report.summary.actualPaidCostUsd, null);
-    assert.equal(report.summary.plannerDecisionCalls, 16);
+    assert.equal(report.summary.plannerDecisionCalls, 20);
     assert.equal(report.summary.fixtureProviderCalls, 14);
     assert.equal(report.summary.networkAttempts, 0);
     assert.deepEqual(report.run.failures, []);
@@ -339,7 +339,7 @@ test('frozen replay passes structurally with honest counters and deterministic h
     assert.ok(runnerError.actual.executionError?.message.includes('run_inactive'));
     const continuation = report.cases.find((entry) => entry.caseId === 'rb-010');
     assert.ok(continuation);
-    assert.equal(continuation.actual.state, 'completed');
+    assert.equal(continuation.actual.state, 'partial');
     assert.equal(continuation.structural, 'pass');
 
     // Historical inflight model receipt is recovery evidence, not an invocation.
