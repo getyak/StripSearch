@@ -43,7 +43,9 @@ jobs:
           test -x "$CHROMIUM_EXECUTABLE_PATH"
           "$CHROMIUM_EXECUTABLE_PATH" --version
       - name: Runtime tests (offline providers)
-        run: npm --prefix apps/web test
+        working-directory: apps/web
+        # Keep CPU-heavy DOM fixtures from starving the real Chrome PDF check.
+        run: node --import tsx --test --test-concurrency=2 src/tests/*.test.ts
       - name: Dataset integrity (no answer grading)
         run: python3 scripts/check_eval_datasets.py
       - name: Frozen provider evaluations (no external requests)
