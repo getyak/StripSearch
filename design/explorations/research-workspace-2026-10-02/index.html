@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StripSearch · 连续研究工作区</title>
+  <meta name="description" content="从公开账号发现到有出处的人物理解。原创合成设计演示。">
+  <link rel="icon" href="data:,"><link rel="stylesheet" href="styles.css?v=20261002-4">
+  <script defer src="state.js?v=20261002-4"></script><script defer src="app.js?v=20261002-4"></script>
+</head>
+<body>
+  <a class="skip" href="#document">跳到研究内容</a>
+  <header class="project-bar">
+    <div class="project-name"><img src="assets/11-257.svg" width="16" height="16" alt=""><span>StripSearch</span><span class="slash">/</span><strong>林舟</strong><span class="demo-label">合成设计演示</span></div>
+    <div class="project-actions"><span id="project-status"></span><button data-action="new">新建研究</button><button data-action="export"><img src="assets/11-244.svg" width="16" height="16" alt="">导出</button></div>
+  </header>
+  <nav class="mobile-controls" aria-label="工作区面板"><button data-action="mobile-nav">人物导航</button><button data-action="mobile-context">对话与依据</button></nav>
+  <div class="workspace">
+    <aside class="rail" id="rail" aria-label="人物导航"></aside>
+    <main class="reading" id="reading">
+      <div class="pane-toolbar"><strong id="view-title">研究摘要</strong><div><button data-action="font" aria-label="切换舒适阅读字号">Aa</button><button data-action="coverage">覆盖与范围</button></div></div>
+      <div id="document" class="document" tabindex="-1"></div>
+    </main>
+    <aside class="context" id="context" aria-label="对话与依据"></aside>
+  </div>
+  <dialog id="mobile-panel" aria-labelledby="mobile-title"><header><strong id="mobile-title"></strong><button data-action="close-mobile">关闭</button></header><div id="mobile-content"></div></dialog>
+  <dialog id="action-dialog" aria-labelledby="dialog-title"><header><h2 id="dialog-title"></h2><button data-action="close-dialog">关闭</button></header><div id="dialog-content"></div></dialog>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <noscript><p>交互演示需要 JavaScript；没有连接真实搜索服务。</p></noscript>
+</body>
+</html>
