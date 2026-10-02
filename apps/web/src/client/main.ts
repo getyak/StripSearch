@@ -798,7 +798,9 @@ function renderRunSummary(): void {
     const details = make('details', {});
     const budget = research.budget;
     details.appendChild(make('summary', { text: '本次研究用量' }));
-    details.appendChild(make('p', { text: `读取 ${budget.toolCalls} / ${budget.limits.toolCalls} 次 · 分析 ${budget.modelCalls} / ${budget.limits.modelCalls} 轮` }));
+    // Zero limits are honestly labeled: 0 means no fixed total cap, never “0 allowed”.
+    const limitLabel = (value: number): string => value > 0 ? String(value) : '无固定上限';
+    details.appendChild(make('p', { text: `读取 ${budget.toolCalls} / ${limitLabel(budget.limits.toolCalls)} 次 · 分析 ${budget.modelCalls} / ${limitLabel(budget.limits.modelCalls)} 轮` }));
     const estimatedCost = Number.isFinite(budget.estimatedUsd) ? `估算费用 $${budget.estimatedUsd.toFixed(4)}` : '费用暂不可估算';
     details.appendChild(make('p', { text: `${estimatedCost}。${budget.unknownCost ? '部分费用尚未确认，实际金额可能更高。' : '以服务商的实际账单为准。'}` }));
     els.researchDetails.appendChild(details);

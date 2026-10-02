@@ -128,14 +128,14 @@ test('posts require a successful inner status and never retry rejected status', 
 });
 
 
-test('Exa preserves relative, structured and tail links before bounded original reading', async()=>{
+test('Exa preserves relative, structured and tail links while retaining original reading', async()=>{
  const url='https://synthetic-author.dev/about/';
  const raw='Original synthetic author '+ 'x'.repeat(24500)+' [Archive](/articles/) https://synthetic-author.dev/data/identity.json';
  const h=harness({results:[{id:url,url,text:raw,author:'Synthetic Author',publishedDate:'2026-09-01',extras:{links:['/data/timeline.md','https://github.com/synthetic-author','https://127.0.0.1/','//evil.invalid/']}}],statuses:[{id:url,status:'success'}]});
  const r=await h.execute({type:'read',url});const page=r.pages[0]!;
  assert.ok(page.links.includes('https://synthetic-author.dev/articles/'));assert.ok(page.links.includes('https://synthetic-author.dev/data/identity.json'));assert.ok(page.links.includes('https://synthetic-author.dev/data/timeline.md'));
  assert.ok(!page.links.some(l=>l.includes('127.0.0.1')||l.includes('evil.invalid')));
- assert.equal(page.text.length,24000);assert.equal(page.textTruncated,true);assert.equal(page.retrieval,'read');assert.equal(page.author,'Synthetic Author');assert.ok(Date.parse(page.retrievedAt!)>0);
+ assert.equal(page.text,raw);assert.equal(page.textTruncated,false);assert.equal(page.retrieval,'read');assert.equal(page.author,'Synthetic Author');assert.ok(Date.parse(page.retrievedAt!)>0);
  const sent=JSON.parse(h.calls[0]!.init!.body!);assert.equal(sent.extras.links,100);assert.equal(sent.subpages,0);assert.equal(h.calls.length,1);
 });
 
@@ -151,4 +151,11 @@ test('search preserves discovery provenance and cannot imply full original readi
  const h=harness({results:[{url:'https://synthetic-author.dev/article',text:'Original discovery',extras:{links:['https://synthetic-author.dev/another']}}]});
  const page=(await h.execute({type:'search',query:'Find a dated original work by Synthetic Author'})).pages[0]!;
  assert.equal(page.retrieval,'search');assert.ok(page.links.includes('https://synthetic-author.dev/another'));assert.equal(h.calls.length,1);
+});
+
+
+test('original reading retains more than 100 supplied links and full source text',async()=>{
+ const url='https://synthetic-author.dev/archive';const links=Array.from({length:180},(_,i)=>`https://synthetic-author.dev/post/${i}`);const raw='x'.repeat(50000)+' '+links.join(' ');
+ const h=harness({results:[{id:url,url,text:raw,extras:{links}}],statuses:[{id:url,status:'success'}]});
+ const r=await h.execute({type:'read',url});assert.equal(r.pages[0]?.text,raw);assert.equal(r.pages[0]?.links.length,180);assert.equal(JSON.parse(h.calls[0]!.init!.body!).text,true);
 });

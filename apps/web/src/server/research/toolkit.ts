@@ -6,7 +6,6 @@ import type { HttpRequestInit } from '../adapters/types.js';
 import type { ResearchAccount, ResearchPage, ResearchToolAction, ResearchToolResult, ResearchTools, ResearchToolsOptions } from './tool-contracts.js';
 
 const TEXT_LIMIT = 6000;
-const READ_TEXT_LIMIT = 24000;
 const LINK_LIMIT = 100;
 const USER_AGENT = 'StripSearch/0.2';
 const X_HOSTS = new Set(['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com', 'mobile.twitter.com']);
@@ -33,15 +32,17 @@ function linksFrom(rawText: string, extra: unknown[] = [], base?: string): strin
   // Extract discovery links before clipping the retained text. Never execute source instructions.
   values.push(...(rawText.match(/https:\/\/[^\s<>"'\]）)]+/g) ?? []).map(value => value.replace(/[.,;。；]+$/, '')));
   for (const match of rawText.matchAll(/\[[^\]\n]*\]\(<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\)/g)) values.push(match[1]);
-  let visited = 0;
-  const walk = (value: unknown, name = '', depth = 0): void => {
-    if (++visited > 2000 || depth > 12) return;
-    if (typeof value === 'string') {
-      if (value.startsWith('https://') || /(?:url|href|link|identity_json|timeline_md)$/i.test(name) && /^(?:\/(?!\/)|\.\.?\/)/.test(value)) values.push(value);
-    } else if (Array.isArray(value)) { for (const item of value) walk(item, name, depth + 1); }
-    else if (value && typeof value === 'object') { for (const [key, item] of Object.entries(value)) walk(item, key, depth + 1); }
-  };
-  try { walk(JSON.parse(rawText)); } catch { /* Ordinary prose is not JSON. */ }
+
+  try {
+    const pending: {value:unknown;name:string}[]=[{value:JSON.parse(rawText),name:''}];
+    while(pending.length){
+      const {value,name}=pending.pop()!;
+      if(typeof value==='string'){
+        if(value.startsWith('https://')||/(?:url|href|link|identity_json|timeline_md)$/i.test(name)&&/^(?:\/(?!\/)|\.\.?\/)/.test(value))values.push(value);
+      }else if(Array.isArray(value)){for(const item of value)pending.push({value:item,name});}
+      else if(value&&typeof value==='object'){for(const [key,item]of Object.entries(value))pending.push({value:item,name:key});}
+    }
+  } catch { /* Ordinary prose is not JSON. */ }
   const links: string[] = [];
   for (const value of values) {
     try {
@@ -51,11 +52,13 @@ function linksFrom(rawText: string, extra: unknown[] = [], base?: string): strin
       const url = publicUrl(resolved);
       if (!links.includes(url)) links.push(url);
     } catch { /* Untrusted links are not eligible tool targets. */ }
-    if (links.length >= LINK_LIMIT) break;
+
   }
   return links;
 }
 function text(raw: unknown, max = TEXT_LIMIT): string { return sanitizeText(raw, max); }
+/** Original text keeps everything a provider supplied; HTTP bytes stay bounded. */
+function retainText(raw: unknown): string { return sanitizeText(raw, Number.MAX_SAFE_INTEGER); }
 function profileKind(url: string): ResearchPage['kind'] {
   const parsed = new URL(url);
   if (extractGitHubHandle(url) || (X_HOSTS.has(parsed.hostname) && /^\/[A-Za-z0-9_]{1,15}\/?$/.test(parsed.pathname)) || /(^|\.)linkedin\.com$/.test(parsed.hostname) && /^\/in\/[^/]+\/?$/.test(parsed.pathname) || /^\/(?:about|bio|profile)\/?$/i.test(parsed.pathname)) return 'profile';
@@ -96,7 +99,9 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const query = searching ? action.query.trim() : '';
     if (searching && (!query || query.length > 600)) fail('搜索内容为空或过长。');
     const requested = action.type === 'read' ? publicUrl(action.url) : null;
-    const payload = searching ? { query, numResults: 5, contents: { text: { maxCharacters: TEXT_LIMIT }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: { maxCharacters: READ_TEXT_LIMIT }, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
+    // Original contents requests must not fix maxCharacters: the toolkit keeps
+    // all supplied text and any provider/HTTP truncation is an explicit gap.
+    const payload = searching ? { query, numResults: 5, contents: { text: { maxCharacters: TEXT_LIMIT }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: true, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
     const { body, bytes } = await request(`https://api.exa.ai/${searching ? 'search' : 'contents'}`, { method: 'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(payload) }, signal);
     if (!Array.isArray(body.results)) fail('网页供应商返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
@@ -109,14 +114,17 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
         if (!status || status.status !== 'success') fail('请求网页没有获得可用正文。');
       }
       const rawContent = asString(item.text) ?? '';
-      const retainLimit = searching ? TEXT_LIMIT : READ_TEXT_LIMIT;
-      const content = text(rawContent, retainLimit);
+      // Discovery snippets stay bounded; original contents retain all supplied
+      // text. Bounded truncation is an explicit gap, never completed content.
+      const content = searching ? text(rawContent, TEXT_LIMIT) : retainText(rawContent);
       if (!content) { if (requested) fail('请求网页没有可用正文。'); else continue; }
       const author = text(item.author, 160);
       const limitations = ['网页内容仍需核对人物归属；同名不代表同一人。'];
       if (author) limitations.push(`页面返回的作者署名：${author}；尚未独立核实。`);
-      if (rawContent.length >= retainLimit) limitations.push(`供应商正文为有界读取，最多保留 ${retainLimit} 个字符；无法确认后续正文是否完整。`);
-      pages.push({ url, title: text(item.title, 200) || url, text: content, kind: profileKind(url), publishedAt: asString(item.publishedDate), author: author || null, retrieval: searching ? 'search' : 'read', textTruncated: rawContent.length >= retainLimit, links: linksFrom(rawContent, asArray(asRecord(item.extras).links), url), limitations: [...limitations, '自链仅作发现线索；最多保留 100 条，不自动确认身份或历史完整。'] });
+      const truncated = searching && rawContent.length > TEXT_LIMIT;
+      if (truncated) limitations.push(`供应商正文为有界读取，最多保留 ${TEXT_LIMIT} 个字符；后续正文是缺口，不能当作完整原文。`);
+      else if (!searching) limitations.push('本次读取未指定供应商正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。');
+      pages.push({ url, title: text(item.title, 200) || url, text: content, kind: profileKind(url), publishedAt: asString(item.publishedDate), author: author || null, retrieval: searching ? 'search' : 'read', textTruncated: truncated, links: linksFrom(rawContent, asArray(asRecord(item.extras).links), url), limitations: [...limitations, '自链仅作发现线索；供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整，不自动确认身份或历史完整。'] });
     }
     if (requested && pages.length !== 1) fail('请求网页没有返回对应正文。');
     return result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。']);
@@ -134,10 +142,9 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const canonicalHost = (value: string) => new URL(value).hostname.replace(/^www\./, '');
     if (canonicalHost(finalUrl) !== canonicalHost(url)) fail('网页跳转到了其他网站，未采用返回资料。');
     const rawContent = asString(data.markdown) ?? '';
-    const content = text(rawContent, READ_TEXT_LIMIT); if (!content) fail('目标网页没有可用正文。');
-    const limitations = ['网页原文仍需核对人物归属。', `请求地址：${sourceUrl}`, `最终地址：${finalUrl}`];
-    if (rawContent.length >= READ_TEXT_LIMIT) limitations.push('正文最多保留前 24000 个字符，后续未读。');
-    return result([{ url: sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: rawContent.length >= READ_TEXT_LIMIT, links: linksFrom(rawContent, [finalUrl], sourceUrl), limitations: [...limitations, '最多保留 100 条自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
+    const content = retainText(rawContent); if (!content) fail('目标网页没有可用正文。');
+    const limitations = ['网页原文仍需核对人物归属。', `请求地址：${sourceUrl}`, `最终地址：${finalUrl}`, '本次读取未指定正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。'];
+    return result([{ url: sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], sourceUrl), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
   }
   async function social(type: 'social_profile' | 'social_posts', url: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const handle = xHandle(url); const apiKey = key(options.tikhubApiKey, '公开账号');
@@ -151,7 +158,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (type === 'social_posts' && data.status !== 'ok') fail('公开帖子没有返回成功的读取状态。');
     const target = xAccount(type === 'social_profile' ? data : data.user, handle);
     if (type === 'social_profile') {
-      const content = [text(target.data.name, 200), text(target.data.desc), asString(target.data.website)].filter(Boolean).join('\n').slice(0, TEXT_LIMIT);
+      const content = [text(target.data.name, 200), retainText(target.data.desc), asString(target.data.website)].filter(Boolean).join('\n');
       return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [target.data.website]), limitations: ['账号资料是账号自述；不自动证明跨平台身份。'] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
     }
     if (!Array.isArray(data.timeline)) fail('公开帖子返回了不支持的数据结构。');
@@ -162,14 +169,13 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
       if (item.retweeted_tweet || item.retweeted || item.retweet || item.retweeted_status || item.is_retweet === true) continue;
       if (decimalId(asRecord(item.author).rest_id) !== target.account.id) continue;
       const id = decimalId(item.tweet_id); const rawContent = asString(item.text) ?? '';
-      const content = text(rawContent);
+      const content = retainText(rawContent);
       if (!id || !content) continue;
       const limitations = ['内容由该账号发布；不代表已经独立验证其中陈述。'];
       if (item.quoted || item.quoted_tweet || item.quoted_status) limitations.push('这条帖子引用了其他内容；这里只保留本人外层文字，不收录被引用作者的陈述。');
       if (item.reply_to) limitations.push('这是一条回复，尚未读取完整上下文。');
-      if (typeof item.text === 'string' && item.text.length > TEXT_LIMIT) limitations.push('帖子已截取前 6000 个字符。');
       pages.push({ url: `https://x.com/${target.account.handle}/status/${id}`, title: `@${target.account.handle} 的公开帖子`, text: content, kind: 'work', retrieval: 'read', author: target.account.handle, publishedAt: asString(item.created_at), account: target.account, links: linksFrom(rawContent, [], target.account.profileUrl), limitations });
-      if (pages.length === 10) break;
+
     }
     const nextCursor = asString(data.next_cursor);
     const limitations = ['仅保留已核对账号 ID 的本人帖子；转发与引用原文未混入。', '账号读取费用按目录价估算，并非最终账单。'];
@@ -182,7 +188,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const login = asString(body.login); const returnedUrl = publicUrl(body.html_url);
     const id = decimalId(body.id) ?? (typeof body.id === 'number' && Number.isSafeInteger(body.id) && body.id >= 0 ? String(body.id) : null);
     if (!login || login.toLowerCase() !== handle.toLowerCase() || !id || comparable(returnedUrl).toLowerCase() !== comparable(url).toLowerCase()) fail('返回的 GitHub 账号与请求不匹配。');
-    const content = [text(body.name, 200), text(body.bio), text(body.company, 200), asString(body.blog)].filter(Boolean).join('\n').slice(0, TEXT_LIMIT);
+    const content = [text(body.name, 200), retainText(body.bio), text(body.company, 200), asString(body.blog)].filter(Boolean).join('\n');
     const account: ResearchAccount = { platform: 'github', handle: login, id, profileUrl: returnedUrl };
     return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [body.blog]), limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。'] }], bytes, 0);
   }

@@ -108,8 +108,8 @@ export class ScriptedResearchTools implements ResearchTools {
 
 export interface PlannerCallRecord {
   mode: string | undefined;
-  remainingTools: number;
-  remainingModels: number;
+  remainingTools: number | null;
+  remainingModels: number | null;
   claims: number | undefined;
 }
 

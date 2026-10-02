@@ -22,8 +22,10 @@
 
 旧 alpha 接收最多四个独立动作的 batch；每个动作仍单独计量并校验已发现 URL。五类问题的证据可用性从通过独立核验且由读取动作获取的断言计算，撤回后重新计算；它不是覆盖百分比。未填维度的历史报告仍可读，但不能满足新的完成条件。JSON、Markdown、HTML/PDF 与界面使用同一 canonical 问题状态。
 
-新配置可显式增加单批限制：`STRIPSEARCH_RESEARCH_TOOL_CALLS`、`STRIPSEARCH_RESEARCH_MODEL_CALLS`、`STRIPSEARCH_RESEARCH_INPUT_TOKENS`、`STRIPSEARCH_RESEARCH_OUTPUT_TOKENS`、`STRIPSEARCH_RESEARCH_ELAPSED_MS`；未配置保持 12/8/150k/16k/240 秒。限制保存在 checkpoint；重启不按新配置悄悄扩大本次批次。配置上限是服务端保护，非研究质量保证，也不是硬美元账单上限。
+新配置可显式增加单批限制：`STRIPSEARCH_RESEARCH_TOOL_CALLS`、`STRIPSEARCH_RESEARCH_MODEL_CALLS`、`STRIPSEARCH_RESEARCH_INPUT_TOKENS`、`STRIPSEARCH_RESEARCH_OUTPUT_TOKENS`、`STRIPSEARCH_RESEARCH_ELAPSED_MS`；新作业未配置默认各项 0，表示无固定总量上限；正安全整数表示部署显式选择的限制，取消任意配置天花板。旧账本未保存 limits 时仍冻结历史 12/8/150k/16k/240 秒。限制保存在 checkpoint；重启不按新配置悄悄扩大本次批次。配置上限是服务端保护，非研究质量保证，也不是硬美元账单上限。
 
 历史 v1 回放数据/证据不改写；当前生产行为采用 [v2 合成回放](../evals/research-baseline-v2/README.md)，明确冻结期望变化，未评测真实自动规划质量。无本地供应商凭据时只能验证程序及会话连接器的真实读取，不能宣称生产全链路 live 通过。
 
-单批仍最多保留 24 个页面。达到后不继续为新页面付费；Search 返回超过该容量的资料明确记为未纳入。后续研究继承当前活跃的发现页及原文，搜索不能覆盖已读正文；新读取保留发现来源依赖，来源撤回会连带停用派生证据。当前 alpha 无法扩大满容量的页面集，持续历史分页与选择性跨批纳入仍待长研究运行时。
+原始 corpus 不设固定页面数，保留供应商返回的全部正文、页面和自链。模型每轮只看目录窗口（12 个来源、每来源 20 条链接、30 项未知）与选择的 4000 字符正文窗口；这些窗口可通过本地 catalog / inspect 换页，不消耗工具 HTTP 请求。发送窗口前重新校验当前活跃来源，旧缓存正文不作为输入，撤回材料不能借 inspect 重现。重复工具或同一窗口无进展时停止为 partial:no_new_evidence，避免无限规划扣费；它是无进展判定，不是总轮数限制。
+
+生产新默认与旧回放分开：[连续平台深读](platform-depth-continuation.md)。目录与正文窗口不代表整个平台、历史、媒体或评论已经完整。供应商补充链接索引每请求 100 条，实际返回及正文内链接全部保留；未证明完整的索引仍是缺口。成功读取的费用说明保存在 notes，不充当 unresolved 研究项。
