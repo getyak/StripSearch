@@ -157,3 +157,52 @@ test('open-ended terminal research shows process records without claiming active
  renderActivity(list,fill,bar,text,stateEl,indicator,[{index:0,total:12,key:'reading',label:'读取原文',status:'active',detail:null}],'partial',true);
  assert.equal(text.textContent,'1 条过程记录');assert.equal(stateEl.textContent,'部分完成');assert.equal(indicator.hidden,true);assert.equal(bar.hidden,true);assert.match(list.textContent!,/过程记录/);assert.doesNotMatch(list.textContent!,/正在查看/);
 });
+
+// Long lists stay complete while keyboard users enter them once.
+test('3200 sources remain reachable through one roving keyboard entry', () => {
+  const container = domContainer();
+  jsdomWindow.document.body.appendChild(container);
+  const base = viewWith();
+  const view = viewWith({ sources: Array.from({ length: 3200 }, (_, index) => ({
+    ...base.sources[0]!, sourceKey: `S${index + 1}`, title: `合成来源 ${index + 1}`
+  })) });
+  let selected: string | null = null;
+  renderSourceList(container, view, null, 'all', (key) => { selected = key; });
+  const rows = [...container.querySelectorAll<HTMLButtonElement>('button.source-row')];
+  assert.equal(rows.length, 3200);
+  assert.equal(rows.filter((row) => row.tabIndex === 0).length, 1);
+  rows[0]!.focus();
+  rows[0]!.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+  assert.equal(jsdomWindow.document.activeElement, rows[3199]);
+  rows[3199]!.click();
+  assert.equal(selected, 'S3200');
+  rows[3199]!.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
+  assert.equal(jsdomWindow.document.activeElement, rows[0]);
+  container.remove();
+});
+
+test('return refuses a replaced sentence or a different source at the same report slot', async () => {
+  const { createCitationReturn } = await import('../client/citation-return.js');
+  for (const replacement of ['sentence', 'source']) {
+    const report = domContainer();
+    const scroller = domContainer();
+    jsdomWindow.document.body.append(report, scroller);
+    const original = viewWith();
+    original.answer[0]!.bullets[0]!.text = '第一行 "原话"\\出处\n第二行';
+    renderReport(report, original, { onCitation: () => undefined });
+    const button = report.querySelector<HTMLElement>('button.citation')!;
+    const controller = createCitationReturn({ doc: jsdomWindow.document, win: jsdomWindow,
+      report: () => report, scroller: () => scroller, runId: () => original.runId, reducedMotion: () => true });
+    controller.enterViaCitation('S1', button.dataset.citationAnchor!, button);
+    renderReport(report, original, { onCitation: () => undefined });
+    controller.sync();
+    assert.equal(controller.returnToCitation(), true, 'quoted multiline context survives a same-content rerender');
+    if (replacement === 'sentence') original.answer[0]!.bullets[0]!.text = '完全不同的结论';
+    else original.answer[0]!.bullets[0]!.sourceKeys = ['S2'];
+    renderReport(report, original, { onCitation: () => undefined });
+    controller.sync();
+    assert.equal(controller.entry(), null, `${replacement} replacement invalidates the old target`);
+    assert.equal(controller.returnToCitation(), false);
+    report.remove(); scroller.remove();
+  }
+});

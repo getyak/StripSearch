@@ -173,7 +173,7 @@
           <div class="app-shell inspector-collapsed" id="app-shell">
             <aside class="history-rail" aria-label="已保存研究">
               <div class="rail-head">
-                <button class="button" id="new-research" type="button">新建研究</button>
+                <p class="rail-title">已保存研究</p>
                 <button class="button ghost" id="rail-return-home" type="button">返回首页</button>
               </div>
               <div id="history-list"></div>
@@ -186,21 +186,24 @@
                   <span class="work-state" id="desk-state">等待确认</span>
                   <span class="work-revision mono" id="work-revision"></span>
                 </div>
-                <div class="work-actions">
+                <div class="work-actions" role="toolbar" aria-label="阅读操作">
+                  <button class="button" id="new-research" type="button"><span class="wide-label">新建研究</span><span class="narrow-label">新建</span></button>
+                  <button class="button" id="open-search" type="button" aria-haspopup="dialog"><span class="wide-label">检索 / 导航</span><span class="narrow-label">检索</span><span class="kbd-hint mono wide-label" aria-hidden="true">⌘K</span></button>
                   <button class="button" id="stop-run" type="button" hidden>取消</button>
-                  <details class="export-menu"><summary>导出资料</summary><div>
+                  <button class="button wide-only" id="toggle-inspector" type="button" aria-pressed="false">展开出处</button>
+                  <button class="button narrow-only" id="open-mobile-sources" type="button">出处</button>
+                  <button class="button narrow-only" id="open-mobile-history" type="button"><span class="wide-label">已保存研究</span><span class="narrow-label">历史</span></button>
+                  <details class="export-menu" id="more-menu"><summary>更多</summary><div>
+                    <p class="menu-label">导出资料</p>
                     <button class="button" id="download-html" type="button" disabled>下载 HTML</button>
                     <button class="button" id="download-pdf" type="button" disabled>下载 PDF</button>
                     <button class="button" id="download-json" type="button" disabled>下载 JSON</button>
                     <button class="button" id="download-md" type="button" disabled>下载 Markdown</button>
                     <button class="button" id="copy-report" type="button" disabled>复制文本</button>
+                    <button class="button" id="retry-run" type="button" hidden>重试</button>
+                    <button class="button danger" id="delete-run" type="button" hidden>删除</button>
+                    <button class="button" id="app-return-home" type="button">返回首页</button>
                   </div></details>
-                  <button class="button" id="retry-run" type="button" hidden>重试</button>
-                  <button class="button danger" id="delete-run" type="button" hidden>删除</button>
-                  <button class="button narrow-only" id="open-mobile-history" type="button">已保存研究</button>
-                  <button class="button narrow-only" id="open-mobile-sources" type="button">出处</button>
-                  <button class="button wide-only" id="toggle-inspector" type="button" aria-pressed="false">展开出处</button>
-                  <button class="button" id="app-return-home" type="button">返回首页</button>
                 </div>
               </header>
 
@@ -265,7 +268,7 @@
               </div>
               <div class="source-filters" id="source-filters" role="group" aria-label="来源筛选"></div>
               <div class="source-list" id="inspector-source-list" role="listbox" aria-label="来源列表"></div>
-              <div class="source-detail" id="inspector-detail" aria-live="polite">
+              <div class="source-detail" id="inspector-detail" tabindex="-1" aria-live="polite">
                 <p class="source-placeholder">选择一条来源查看原文、状态与操作。</p>
               </div>
             </aside>
@@ -338,7 +341,23 @@
       </div>
       <div class="source-filters" id="drawer-source-filters" role="group" aria-label="来源筛选"></div>
       <div class="source-list" id="drawer-source-list" role="listbox" aria-label="来源列表"></div>
-      <div class="source-detail" id="drawer-source-detail"></div>
+      <div class="source-detail" id="drawer-source-detail" tabindex="-1"></div>
+    </dialog>
+
+    <!-- Local search / navigation (native dialog): filters only what is already
+         loaded into this account's interface - history report titles/questions
+         and the current report's source titles/URLs/excerpts. -->
+    <dialog id="search-dialog" class="modal search-modal" aria-labelledby="search-dialog-title">
+      <div class="modal-head">
+        <h2 id="search-dialog-title">检索 / 导航</h2>
+        <button class="inspector-close" type="button" data-close-search aria-label="关闭">×</button>
+      </div>
+      <p class="modal-note">在已加载的历史报告与当前报告来源中，检索标题、链接和摘录。</p>
+      <label class="sr-only" for="search-input">筛选已加载内容</label>
+      <input id="search-input" class="search-input" type="text" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="search-results" aria-autocomplete="list" placeholder="输入关键词筛选，例如人名、来源标题或 URL 片段" />
+      <p class="search-hint">↑ ↓ 选择 · Enter 打开 · Esc 关闭</p>
+      <p class="search-empty" id="search-empty" role="status" hidden></p>
+      <div class="search-results" id="search-results" role="listbox" aria-label="检索结果"></div>
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

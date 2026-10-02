@@ -17,14 +17,17 @@ import { byId, clear, formatDate, formatDateTime, hostnameOf, make } from './dom
 export type SourceFilter = 'all' | 'profile' | 'work' | 'third_party' | 'excluded';
 
 export interface ReportHandlers {
-  onCitation(sourceKey: string): void;
+  onCitation(sourceKey: string, button: HTMLElement): void;
 }
 
 export interface SourceHandlers {
-  onSelect(sourceKey: string): void;
+  onSelect(sourceKey: string, row: HTMLElement | null): void;
   onExclude(sourceKey: string): void;
   onRestore(sourceKey: string): void;
   onUndo(sourceKey: string): void;
+  /** Explicit "return to the original sentence" action for citation entries. */
+  onReturnToCitation?: () => void;
+  canReturnToCitation?: boolean;
 }
 
 export interface StageView {
@@ -44,15 +47,26 @@ const STAGE_TAGS: Record<StageView['status'], string> = {
   unavailable: '不可用'
 };
 
-function citationButton(sourceKey: string, handlers: ReportHandlers): HTMLButtonElement {
-  return make('button', {
+/**
+ * Citation buttons carry a semantic anchor (section/bullet/citation position).
+ * The anchor is stable across re-renders of the same report content and lets
+ * the return controller find the EXACT citation even when one source is cited
+ * several times; it is never derived from the source key alone.
+ */
+function citationButton(sourceKey: string, anchor: string, context: string, handlers: ReportHandlers): HTMLButtonElement {
+  const button = make('button', {
     className: 'citation',
     text: `[${sourceKey}]`,
-    attrs: { type: 'button', 'data-source': sourceKey, 'aria-label': `查看来源 ${sourceKey}` },
-    on: {
-      click: () => handlers.onCitation(sourceKey)
+    attrs: {
+      type: 'button',
+      'data-source': sourceKey,
+      'data-citation-anchor': anchor,
+      'data-citation-context': context,
+      'aria-label': `查看来源 ${sourceKey}`
     }
   });
+  button.addEventListener('click', () => handlers.onCitation(sourceKey, button));
+  return button;
 }
 
 function bulletNode(
@@ -61,6 +75,7 @@ function bulletNode(
   kind: ClaimKind,
   validity: 'valid' | 'review',
   reviewReason: string | null,
+  anchorBase: string,
   handlers: ReportHandlers
 ): HTMLElement {
   const wrapper = make('div', { className: 'finding' });
@@ -79,8 +94,8 @@ function bulletNode(
   if (kind === 'inference') {
     paragraph.appendChild(make('span', { className: 'limit-note', text: '（推断，非已核实事实）' }));
   }
-  for (const key of sourceKeys) {
-    paragraph.appendChild(citationButton(key, handlers));
+  for (const [index, key] of sourceKeys.entries()) {
+    paragraph.appendChild(citationButton(key, `${anchorBase}c${index}`, text, handlers));
   }
   wrapper.appendChild(paragraph);
   return wrapper;
@@ -91,8 +106,11 @@ export function renderReport(
   view: CanonicalView | null,
   handlers: ReportHandlers
 ): void {
+  const observationsOpen = container.dataset.runId === view?.runId
+    && Boolean(container.querySelector<HTMLDetailsElement>('.report-observations')?.open);
   clear(container);
   if (!view) {
+    container.removeAttribute('data-run-id');
     container.appendChild(
       make('div', {
         className: 'empty-state enter',
@@ -101,6 +119,9 @@ export function renderReport(
     );
     return;
   }
+  // The rendered run id is the authority for focus/scroll restoration: polling
+  // re-renders must never chase focus into a different report.
+  container.dataset.runId = view.runId;
   const header = make('header', { className: 'report-header enter' });
   header.appendChild(
     make('h2', { text: view.identity.displayName || (view.identity.handle ? `@${view.identity.handle}` : view.question) })
@@ -126,8 +147,8 @@ export function renderReport(
     container.appendChild(make('p', { className: 'reading-arrival', text: '正在核对人物线索。找到的资料会逐步出现在这里。' }));
   }
 
-  for (const section of view.answer) {
-    if (!section.body.trim() && section.bullets.length === 0) continue;
+  view.answer.forEach((section, sectionIndex) => {
+    if (!section.body.trim() && section.bullets.length === 0) return;
     const sectionEl = make('section', { className: 'report-section' });
     sectionEl.appendChild(make('h3', { text: section.heading }));
     const copy = make('div', { className: 'report-copy' });
@@ -139,6 +160,7 @@ export function renderReport(
         bullet.kind,
         bullet.validity,
         bullet.reviewReason,
+        `s${sectionIndex}b${index}`,
         handlers
       );
       node.classList.add('enter');
@@ -147,15 +169,16 @@ export function renderReport(
     });
     sectionEl.appendChild(copy);
     container.appendChild(sectionEl);
-  }
+  });
 
   if (view.observations.length > 0) {
     const details = make('details', { className: 'report-observations' });
+    details.open = observationsOpen;
     details.appendChild(
       make('summary', { text: `观察项（${view.observations.length}）`, attrs: { role: 'button' } })
     );
     const list = make('ul', { className: 'observation-list' });
-    for (const observation of view.observations) {
+    for (const [observationIndex, observation] of view.observations.entries()) {
       const item = make('li', {});
       if (observation.validity === 'review') {
         item.appendChild(
@@ -166,7 +189,9 @@ export function renderReport(
       item.appendChild(
         make('span', { className: 'limit-note', text: `（${KIND_LABELS[observation.kind]}）` })
       );
-      for (const key of observation.sourceKeys) item.appendChild(citationButton(key, handlers));
+      for (const [index, key] of observation.sourceKeys.entries()) {
+        item.appendChild(citationButton(key, `o${observationIndex}c${index}`, observation.statement, handlers));
+      }
       if (observation.limitations.length > 0) {
         item.appendChild(make('span', { className: 'limit-note', text: `限制：${observation.limitations.join('；')}` }));
       }
@@ -218,10 +243,25 @@ export function renderSourceList(
   view: CanonicalView | null,
   selectedKey: string | null,
   filter: SourceFilter,
-  onSelect: (sourceKey: string) => void
+  onSelect: (sourceKey: string, row: HTMLElement | null) => void
 ): void {
   clear(container);
+  // Stamp the run this list belongs to so focus restoration can refuse to
+  // chase a row across a report switch.
+  container.dataset.runId = view?.runId ?? '';
   const sources = (view?.sources ?? []).filter((source) => matchesFilter(source, filter));
+  const tabKey = sources.find((source) => source.sourceKey === selectedKey)?.sourceKey ?? sources[0]?.sourceKey;
+  container.onkeydown = (event) => {
+    if (event.isComposing || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const rows = [...container.querySelectorAll<HTMLButtonElement>('button.source-row')];
+    const index = rows.indexOf(event.target as HTMLButtonElement);
+    if (index < 0) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1
+      : Math.max(0, Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+    for (const [i, row] of rows.entries()) row.tabIndex = i === next ? 0 : -1;
+    rows[next]?.focus();
+  };
   if (sources.length === 0) {
     container.appendChild(
       make('p', { className: 'empty-state', text: filter === 'excluded' ? '没有已排除的来源。' : '这一筛选下没有来源。' })
@@ -230,9 +270,15 @@ export function renderSourceList(
   }
   for (const source of sources) {
     const row = make('button', {
-      className: 'source-row enter',
-      attrs: { type: 'button', role: 'option', 'aria-selected': source.sourceKey === selectedKey ? 'true' : 'false' },
-      on: { click: () => onSelect(source.sourceKey) }
+      className: 'source-row',
+      attrs: {
+        type: 'button',
+        role: 'option',
+        tabindex: source.sourceKey === tabKey ? '0' : '-1',
+        'aria-selected': source.sourceKey === selectedKey ? 'true' : 'false',
+        'data-source-key': source.sourceKey
+      },
+      on: { click: () => onSelect(source.sourceKey, row) }
     });
     row.dataset.status = source.excluded ? 'excluded' : 'ok';
     row.appendChild(make('span', { className: 'source-code', text: source.sourceKey }));
@@ -262,6 +308,8 @@ export function renderSourceDetail(
   handlers: SourceHandlers
 ): void {
   clear(container);
+  container.dataset.runId = view?.runId ?? '';
+  container.dataset.sourceKey = selectedKey ?? '';
   const source = view?.sources.find((item) => item.sourceKey === selectedKey) ?? null;
   if (!source) {
     container.appendChild(make('p', { className: 'source-placeholder', text: '选择一条来源查看原文、状态与操作。' }));
@@ -269,6 +317,24 @@ export function renderSourceDetail(
   }
   container.appendChild(make('span', { className: 'source-label', text: `${source.sourceKey} · ${SOURCE_KIND_LABELS[source.kind]}` }));
   container.appendChild(make('h3', { text: source.title }));
+  if (handlers.canReturnToCitation && handlers.onReturnToCitation) {
+    container.appendChild(
+      make('button', {
+        className: 'button return-citation',
+        text: '返回原句',
+        attrs: {
+          type: 'button',
+          'data-source-focus': 'return',
+          'aria-label': '返回原句，恢复原引用焦点与阅读位置'
+        },
+        on: {
+          click: () => {
+            handlers.onReturnToCitation?.();
+          }
+        }
+      })
+    );
+  }
 
   if (source.excerpt) {
     const quote = make('div', { className: 'source-quote' });
@@ -280,7 +346,7 @@ export function renderSourceDetail(
   }
 
   const list = make('dl', {});
-  const link = make('a', { text: source.url, attrs: { href: source.url, target: '_blank', rel: 'noopener noreferrer' } });
+  const link = make('a', { text: source.url, attrs: { href: source.url, target: '_blank', rel: 'noopener noreferrer', 'data-source-focus': 'url' } });
   const linkRow = make('div', {});
   linkRow.appendChild(make('dt', { text: '链接' }));
   const linkDd = make('dd', {});
@@ -295,7 +361,7 @@ export function renderSourceDetail(
   list.appendChild(
     detailRow(
       '状态',
-      source.excluded ? '已不采用' : source.fetchStatus === 'ok' ? '已读取' : source.fetchStatus
+      sourceStatusLabel(source)
     )
   );
   list.appendChild(
@@ -310,7 +376,7 @@ export function renderSourceDetail(
       make('button', {
         className: 'button',
         text: '撤销',
-        attrs: { type: 'button' },
+        attrs: { type: 'button', 'data-source-focus': 'undo' },
         on: { click: () => handlers.onUndo(source.sourceKey) }
       })
     );
@@ -322,7 +388,7 @@ export function renderSourceDetail(
     make('button', {
       className: source.excluded ? 'button' : 'button danger',
       text: source.excluded ? '恢复来源' : '不采用这条来源',
-      attrs: { type: 'button' },
+      attrs: { type: 'button', 'data-source-focus': source.excluded ? 'restore' : 'exclude' },
       on: {
         click: () => {
           if (source.excluded) handlers.onRestore(source.sourceKey);
@@ -411,7 +477,11 @@ export function renderHistory(
   for (const run of runs) {
     const button = make('button', {
       className: 'history-item',
-      attrs: { type: 'button', 'aria-current': run.runId === currentRunId ? 'true' : 'false' },
+      attrs: {
+        type: 'button',
+        'aria-current': run.runId === currentRunId ? 'true' : 'false',
+        'data-run-id': run.runId
+      },
       on: { click: () => onSelect(run.runId) }
     });
     button.appendChild(make('strong', { text: run.question }));
@@ -463,7 +533,8 @@ export function sourceStatusLabel(source: CanonicalSource): string {
   if (source.excluded) return '已不采用';
   if (source.fetchStatus === 'ok') return '已读取';
   if (source.fetchStatus === 'truncated') return '被截断';
-  return source.fetchStatus;
+  if (source.fetchStatus === 'inaccessible') return '未能读取';
+  return '已不采用';
 }
 
 export { byId };
