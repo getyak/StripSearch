@@ -25,7 +25,8 @@ export function createDshPlanner(model='deepseek-flash'):ResearchPlanner {
 }
 
 export function buildResearchPrompt(input:PlannerInput):string {
- const catalog=input.checkpoint.catalog??{offset:Math.max(0,input.checkpoint.pages.length-12),linkOffset:0,unknownOffset:0};
+ const requestedCatalog=input.checkpoint.catalog??{offset:Math.max(0,input.checkpoint.pages.length-12),linkOffset:0,unknownOffset:0};
+ const catalog={...requestedCatalog,offset:Math.min(requestedCatalog.offset,Math.max(0,input.checkpoint.pages.length-1))};
  const windowPages=input.checkpoint.pages.slice(catalog.offset,catalog.offset+12);
  const selected=input.checkpoint.pages.find(p=>p.sourceKey===input.checkpoint.inspect?.sourceKey);
  const inspect=selected&&input.checkpoint.inspect?inspectWindow(selected,input.checkpoint.inspect.offset):undefined;

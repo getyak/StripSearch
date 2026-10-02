@@ -44,13 +44,14 @@ function linksFrom(rawText: string, extra: unknown[] = [], base?: string): strin
     }
   } catch { /* Ordinary prose is not JSON. */ }
   const links: string[] = [];
+  const seenLinks = new Set<string>();
   for (const value of values) {
     try {
       if (typeof value !== 'string' || value.startsWith('//') || value.includes('\\')) continue;
       const resolved = value.startsWith('https://') ? value : base && !/^[a-z][a-z0-9+.-]*:/i.test(value) ? new URL(value, base).href : null;
       if (!resolved) continue;
       const url = publicUrl(resolved);
-      if (!links.includes(url)) links.push(url);
+      if (!seenLinks.has(url)) { seenLinks.add(url); links.push(url); }
     } catch { /* Untrusted links are not eligible tool targets. */ }
 
   }

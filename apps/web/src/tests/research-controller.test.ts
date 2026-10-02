@@ -257,7 +257,7 @@ test('historical checkpoint without limits keeps finite policy after fresh zero 
 
 test('revisiting a local window cycle stops unlimited paid planning',async()=>{
  const {db,store,run}=setup();let rounds=0;
- const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[{...profile,text:'a'.repeat(10000)}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<6);return {action:'inspect',sourceKey:'S1',offset:rounds%2?0:4000};}}});
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[{...profile,text:'a'.repeat(4000)+'b'.repeat(4000)+'a'.repeat(2000)}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<6);return {action:'inspect',sourceKey:'S1',offset:rounds%2?0:4000};}}});
  assert.equal(rounds,3);assert.equal(result.stopReason,'no_new_evidence');db.close();
 });
 
@@ -292,4 +292,10 @@ test('explicit tool cap with unlimited model calls stops when further planning c
  const {db,store,run}=setup();let rounds=0,calls=0;
  const result=await runResearch({store,run,limits:{...unlimited,toolCalls:1},signal:new AbortController().signal,tools:{async execute(){calls++;return {pages:[profile],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<3);return {action:'read',url:interview.url};}}});
  assert.equal(calls,1);assert.equal(rounds,1);assert.equal(result.stopReason,'budget_exhausted');db.close();
+});
+
+test('identical source excerpts at shifted offsets do not buy more unlimited planning',async()=>{
+ const {db,store,run}=setup();let rounds=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[{...profile,text:'a'.repeat(10000)}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<5);return {action:'inspect',sourceKey:'S1',offset:rounds-1};}}});
+ assert.equal(rounds,2);assert.equal(result.stopReason,'no_new_evidence');assert.equal(store.research.checkpoint(run.id)?.pages[0]?.text.length,10000);db.close();
 });

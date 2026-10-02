@@ -47,3 +47,10 @@ test('oversized provider metadata is previewed without changing the stored sourc
  for(const mode of ['plan','verify'] as const){const prompt=buildResearchPrompt({question:'fixture',mode,claims:[claim],checkpoint,remainingTools:null,remainingModels:null});const data=JSON.parse(prompt);assert.ok(prompt.length<16000);assert.equal(data.sources[0].author.length,1000);assert.equal(data.sources[0].publishedAt.length,100);assert.equal(data.sources[0].metadataWindow.author,600000);}
  assert.equal(page.author.length,600000);assert.equal(page.publishedAt.length,600000);
 });
+
+test('catalog selection is clamped when active sources shrink after revocation',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');
+ const page={sourceKey:'S1',url:'https://synthetic-author.dev/work',title:'Synthetic',text:'Still active.',kind:'work' as const,publishedAt:null,links:[],limitations:[]};
+ const checkpoint={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:null,identity:null,candidates:[],pages:[page],claims:[],unknowns:[],stopReason:null,catalog:{offset:90,linkOffset:0,unknownOffset:0}};
+ const data=JSON.parse(buildResearchPrompt({question:'fixture',checkpoint,remainingTools:null,remainingModels:null}));assert.equal(data.sourceCatalog.offset,0);assert.equal(data.sources[0].sourceKey,'S1');assert.equal(checkpoint.catalog.offset,90);
+});

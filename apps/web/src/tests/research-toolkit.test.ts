@@ -159,3 +159,9 @@ test('original reading retains more than 100 supplied links and full source text
  const h=harness({results:[{id:url,url,text:raw,extras:{links}}],statuses:[{id:url,status:'success'}]});
  const r=await h.execute({type:'read',url});assert.equal(r.pages[0]?.text,raw);assert.equal(r.pages[0]?.links.length,180);assert.equal(JSON.parse(h.calls[0]!.init!.body!).text,true);
 });
+
+test('dense original link catalogs retain all unique links and stable order',async()=>{
+ const url='https://synthetic-author.dev/archive';const links=Array.from({length:5000},(_,i)=>`https://synthetic-author.dev/post/${i}`);const raw=JSON.stringify({entries:[...links,...links]});
+ const h=harness({results:[{id:url,url,text:raw,extras:{links}}],statuses:[{id:url,status:'success'}]},200,{maxBytes:2000000});
+ const page=(await h.execute({type:'read',url})).pages[0]!;assert.deepEqual(page.links,links);assert.equal(page.text,raw);
+});

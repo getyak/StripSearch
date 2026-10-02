@@ -283,7 +283,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      const activePages=stillActivePages();const offset=Math.min(step.offset,Math.max(0,activePages.length-1));
      const maxLinks=Math.max(0,...activePages.slice(offset,offset+12).map(p=>p.links.length-1));
      const selected={offset,linkOffset:Math.min(step.linkOffset,maxLinks),unknownOffset:Math.min(step.unknownOffset,Math.max(0,checkpoint.unknowns.length-1))};
-     const signature='catalog:'+digest({selected,pages:stillActivePages().slice(selected.offset,selected.offset+12).map(p=>({key:p.sourceKey,text:p.text.slice(0,600),links:p.links.slice(selected.linkOffset,selected.linkOffset+20)})),unknowns:checkpoint.unknowns.slice(selected.unknownOffset,selected.unknownOffset+30)});
+     const signature='catalog:'+digest({pages:stillActivePages().slice(selected.offset,selected.offset+12).map(p=>({key:p.sourceKey,text:p.text.slice(0,600),links:p.links.slice(selected.linkOffset,selected.linkOffset+20)})),unknowns:checkpoint.unknowns.slice(selected.unknownOffset,selected.unknownOffset+30)});
      if(!localWindows.has(signature)){localWindows.add(signature);checkpoint.catalog=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];save();}
      continue;
     }
@@ -294,7 +294,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      if(!page)throw new ResearchStop('invalid_decision');
      if(!stillActivePages().some(p=>p.sourceKey===step.sourceKey))throw new ResearchStop('source_revoked');
      const selected={sourceKey:page.sourceKey,offset:Math.min(step.offset,page.text.length)};
-     const signature='inspect:'+digest({...selected,text:page.text.slice(selected.offset,selected.offset+4000)});
+     const signature='inspect:'+digest({sourceKey:selected.sourceKey,text:page.text.slice(selected.offset,selected.offset+4000)});
      if(!localWindows.has(signature)){localWindows.add(signature);checkpoint.inspect=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];}
      save();continue;
     }
