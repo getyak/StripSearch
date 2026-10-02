@@ -25,6 +25,8 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 
 ## 设计导航
 
+2026-10-02 GET-132：新增[连续研究体验设计](docs/research-experience.md)，以当前 Figma 阅读工作区为基线，衔接账号发现、一次范围确认、分批深读、证据核查与修订。对应[合成工作区演示](design/explorations/research-workspace-2026-10-02/index.html)是独立设计验证，不替换 Web alpha，不代表 Search / Fetch 已接线或研究质量已验收。
+
 | 要了解什么 | 去哪里 |
 |---|---|
 | 为谁做、差异在哪里、什么值得验证 | [产品设计](docs/product.md) |
