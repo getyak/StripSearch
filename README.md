@@ -48,6 +48,8 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 
 先看一份[合成报告](examples/report.md)，再对照[同一份 JSON](examples/report.json)和[请求配置](examples/request.json)。样例域名 `example.org` 是占位标识，不应抓取。
 
+2026-10-02 研究增量：[深度契约](docs/research-depth-contract.md)修复搜索摘要冒充原文、批次分支失败、资料截断后的自链发现和过早完成判断。五类研究问题分别显示已核验材料与缺口，四种导出共享同一状态；当前控制器回放采用版本化 [v2](evals/research-baseline-v2/README.md)。它仍是有界 alpha，未验收新的长研究运行时或自主规划质量。
+
 ## 部署
 
 官网与工作台共用 `apps/web`，采用 Nginx HTTPS + 单实例 Node / SQLite 部署。容器、持久化、注册控制、备份与回滚步骤见[部署说明](docs/deployment.md)。代码与容器检查不等于线上验收；实际发布版本通过 `/release.json` 核对。

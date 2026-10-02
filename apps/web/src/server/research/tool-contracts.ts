@@ -6,6 +6,7 @@ export interface ResearchAccount { platform: 'github' | 'x'; handle: string; id:
 export interface ResearchPage {
  url: string; title: string; text: string; kind: 'profile' | 'work' | 'third_party';
  publishedAt: string | null; account?: ResearchAccount; links: string[]; limitations: string[];
+ author?: string | null; retrievedAt?: string; retrieval?: 'search' | 'read' | 'profile'; textTruncated?: boolean;
 }
 export interface ResearchToolResult {
  pages: ResearchPage[]; requests: number; bytes: number;

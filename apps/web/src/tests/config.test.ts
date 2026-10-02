@@ -243,3 +243,12 @@ test('default data and client dirs stay anchored at apps/web in source and compi
     assert.equal(config.dataDir, path.join(appRoot, '.data'));
   }
 });
+
+
+test('longer research limits are explicit, bounded and keep default values',async()=>{
+ const {loadResearchLimits}=await import('../server/config.js');
+ assert.equal(loadResearchLimits({}).toolCalls,12);
+ assert.equal(loadResearchLimits({STRIPSEARCH_RESEARCH_TOOL_CALLS:'32',STRIPSEARCH_RESEARCH_MODEL_CALLS:'20'}).toolCalls,32);
+ for(const value of ['', 'NaN', '-1', '0', '1.2', '201']) assert.throws(()=>loadResearchLimits({STRIPSEARCH_RESEARCH_TOOL_CALLS:value}));
+ assert.throws(()=>loadResearchLimits({STRIPSEARCH_RESEARCH_MODEL_CALLS:'1'}));
+});

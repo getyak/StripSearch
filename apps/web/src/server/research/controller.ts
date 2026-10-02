@@ -1,3 +1,4 @@
+import { RESEARCH_FACETS, researchDepthCoverage, type ResearchFacet } from '../../shared/research-depth.js';
 import { createHash } from 'node:crypto';
 import { NeedsInputError, type IdentityCandidate, type ProviderResult, type ResearchBudgetLimits, type SourceDraft } from '../../shared/types.js';
 import { extractGitHubHandle, normalizeResearchUrl, sanitizeText } from '../../shared/validation.js';
@@ -15,12 +16,25 @@ export interface ResearchOptions {
 function object(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value);}
 function digest(value:unknown):string{return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);}
 function candidateId(url:string):string{return 'candidate_'+digest(url);}
-function draft(page:StoredPage,anchor:string|null):SourceDraft{return {key:page.sourceKey,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,excerptLocator:'公开页面文本',identityLabel:page.url===anchor?'所选公开主页':'来源归属未独立验证',identityConfirmed:page.url===anchor,fetchStatus:page.text?'ok':'inaccessible',limits:[...page.limitations,...page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
+function draft(page:StoredPage,anchor:string|null):SourceDraft{return {key:page.sourceKey,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,excerptLocator:page.retrieval==='search'?'搜索发现材料，尚未回读原文':'公开页面文本',identityLabel:page.url===anchor?'所选公开主页':'来源归属未独立验证',identityConfirmed:page.url===anchor,fetchStatus:page.text?'ok':'inaccessible',limits:[...page.limitations,...page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
 
 export async function runResearch(options:ResearchOptions):Promise<ProviderResult>{
- const {store,run,tools,planner}=options;const limits=options.limits??RESEARCH_LIMITS;
+ const {store,run,tools,planner}=options;
+ const persisted=store.research.checkpoint(run.id);
+ const limits=persisted?(persisted.limits??RESEARCH_LIMITS):(options.limits??RESEARCH_LIMITS);
  const launched=Date.now();
- const checkpoint:ResearchCheckpoint=store.research.checkpoint(run.id)??{phase:'identity',steps:0,startedAt:launched,elapsedMs:0,anchorUrl:normalizeResearchUrl(run.seedUrl),identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null};
+ const checkpoint:ResearchCheckpoint=persisted??{phase:'identity',steps:0,startedAt:launched,elapsedMs:0,anchorUrl:normalizeResearchUrl(run.seedUrl),identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null};
+ checkpoint.limits??={...limits};
+ // Historical checkpoints did not persist retrieval provenance. Recover it only
+ // from a completed, matching action receipt; missing proof stays unread.
+ for(const page of checkpoint.pages){
+  if(page.retrieval)continue;
+  const matching=store.research.receipts(run.id).filter(r=>r.kind==='tool'&&r.state==='completed'&&object(r.request)&&object(r.result)&&Array.isArray(r.result.pages)&&r.result.pages.some((p:unknown)=>object(p)&&p.url===page.url&&typeof p.text==='string'&&sanitizeText(p.text,24000).startsWith(page.text)));
+  const read=matching.find(r=>object(r.request)&&['read','firecrawl','social_profile','social_posts','github_profile'].includes(String(r.request.type)));
+  if(read&&object(read.request))page.retrieval=['social_profile','github_profile'].includes(String(read.request.type))?'profile':'read';
+  else if(matching.length)page.retrieval='search';
+ }
+
  const priorElapsed=checkpoint.elapsedMs;
  const deadline=new AbortController();const remaining=Math.max(1,limits.elapsedMs-priorElapsed);
  const timer=setTimeout(()=>deadline.abort(new ResearchStop('budget_exhausted')),remaining);
@@ -28,15 +42,28 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);if(priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
  const save=()=>{active();checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);};
  const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':'读取相关资料',status:'active'});};
- const allowedUrls=()=>new Set([checkpoint.anchorUrl,...checkpoint.pages.flatMap(p=>[p.url,...p.links])].filter((v):v is string=>!!v));
  const stillActivePages=()=>checkpoint.pages.filter(page=>store.isResearchSourceActive(run.id,page.sourceKey,run.ownerId));
- const ingest=(result:ResearchToolResult)=>{
+ const allowedUrls=()=>new Set([checkpoint.anchorUrl,...stillActivePages().flatMap(p=>[p.url,...p.links])].filter((v):v is string=>!!v));
+ const dependencies=(action:ResearchToolAction):string[]=>{
+  if(action.type==='search'||action.url===checkpoint.anchorUrl)return [];
+  const existing=checkpoint.pages.find(p=>p.url===action.url);
+  if(action.type==='social_posts'&&existing)return [existing.sourceKey];
+  return existing?.discoveredFrom??stillActivePages().filter(p=>p.links.includes(action.url)&&p.sourceKey!==existing?.sourceKey).map(p=>p.sourceKey);
+ };
+ const ingest=(result:ResearchToolResult,action:ResearchToolAction,discoveredFrom:string[]=[])=>{
   active();
   for(const page of result.pages.slice(0,12)){
    const url=normalizeResearchUrl(page.url);if(!url)continue;
    const existing=checkpoint.pages.find(p=>p.url===url);
-   if(!existing&&checkpoint.pages.length>=24)continue;
-   const clean:StoredPage={...page,url,title:sanitizeText(page.title,200),text:sanitizeText(page.text,8000),links:[...new Set(page.links.map(normalizeResearchUrl).filter((v):v is string=>!!v))].slice(0,24),limitations:page.limitations.map(v=>sanitizeText(v,500)),sourceKey:existing?.sourceKey??`S${checkpoint.pages.length+1}`};
+   if(!existing&&checkpoint.pages.length>=24){checkpoint.unknowns.push('本批最多保留 24 个页面；超出部分未纳入证据，剩余发现线索保留，当前 alpha 不支持扩大页面集。');continue;}
+   const retrieval=action.type==='search'?'search':action.type==='github_profile'||action.type==='social_profile'?'profile':'read';
+   const clean:StoredPage={...page,retrieval,url,title:sanitizeText(page.title,200),text:sanitizeText(page.text,24000),links:[...new Set(page.links.map(normalizeResearchUrl).filter((v):v is string=>!!v))].slice(0,100),limitations:page.limitations.map(v=>sanitizeText(v,500)),sourceKey:existing?.sourceKey??`S${checkpoint.pages.length+1}`,...existing?.inheritedFrom?{inheritedFrom:existing.inheritedFrom}:{},...discoveredFrom.length?{discoveredFrom:[...discoveredFrom]}:{}};
+   // Search can enrich discovery but cannot replace an already fetched original.
+   if(existing&&(existing.retrieval==='read'||existing.retrieval==='profile')&&retrieval==='search'){
+    clean.text=existing.text;clean.title=existing.title;clean.retrieval=existing.retrieval;clean.kind=existing.kind;clean.publishedAt=existing.publishedAt;clean.author=existing.author;clean.retrievedAt=existing.retrievedAt;clean.textTruncated=existing.textTruncated;clean.account=existing.account;clean.discoveredFrom=existing.discoveredFrom;
+    // Links remain discovery-only; they never inherit the original's factual support.
+    clean.links=[...new Set([...existing.links,...clean.links])].slice(0,100);clean.limitations=existing.limitations;
+   }
    if(existing)checkpoint.pages[checkpoint.pages.indexOf(existing)]=clean;else checkpoint.pages.push(clean);
    store.addSource(run.id,draft(clean,checkpoint.anchorUrl),checkpoint.pages.indexOf(clean));
    store.addEvent(run.id,'source',store.getSource(run.id,clean.sourceKey));
@@ -84,18 +111,22 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   checkpoint.phase='done';checkpoint.stopReason=reason;
   if(!options.signal.aborted){checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);}
   const pages=stillActivePages();const keys=new Set(pages.map(p=>p.sourceKey));
-  const claims=checkpoint.claims.filter(c=>keys.has(c.sourceKey));
+  const claims=checkpoint.claims.filter(c=>keys.has(c.sourceKey)&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')));
+  const coverage=researchDepthCoverage(claims,keys);
+  const gaps=coverage.filter(c=>c.state==='gap').map(c=>`${c.label}：${c.note}`);
+  const unread=[...new Set(pages.flatMap(p=>p.links))].filter(url=>!pages.some(p=>p.url===url));
+  const depthLimits=[...gaps,...unread.length?[`还有 ${unread.length} 条已发现链接未回读；它们是待判断线索，不等于均属于此人。`]:[]];
   const observations=claims.map(c=>({statement:c.statement,kind:c.kind,sourceKeys:[c.sourceKey],limitations:['来源原文摘录；身份归属与独立事实核实另行判断。']}));
   const budget=store.research.budget(run.id,limits);
   return {state,identity:checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates},sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl)),observations,
-   answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
+   answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
  };
  const verify=async():Promise<ProviderResult>=>{
   const claims=checkpoint.pendingClaims??[];
   const quoteFallback=(reason:'verification_budget'|'verification_unavailable'):ProviderResult=>{
    options.signal.throwIfAborted();store.research.assertActive(run.id);
    const pages=stillActivePages();
-   checkpoint.claims=claims.filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&p.text.includes(c.quote))).map(c=>({...c,statement:c.quote,kind:'page_statement'}));delete checkpoint.pendingClaims;
+   checkpoint.claims=claims.filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))).map(c=>({...c,statement:c.quote,kind:'page_statement',verified:false}));delete checkpoint.pendingClaims;
    checkpoint.unknowns.push('综合结论未通过独立语义核验，仅保留来源逐字摘录；摘录不代表结论已核实。');
    return finish(reason,'partial');
   };
@@ -119,9 +150,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   const partition=[...supportedIndexes,...rejectedIndexes];
   if(partition.some(i=>!Number.isInteger(i)||Number(i)<0||Number(i)>=claims.length)||new Set(partition).size!==partition.length||partition.length!==claims.length)return quoteFallback('verification_unavailable');
   const supported=new Set(supportedIndexes as number[]);
-  checkpoint.claims=claims.filter((_c,index)=>supported.has(index));delete checkpoint.pendingClaims;checkpoint.steps++;
+  checkpoint.claims=claims.filter((_c,index)=>supported.has(index)).map(c=>({...c,verified:true}));delete checkpoint.pendingClaims;checkpoint.steps++;
   if(Array.isArray(checked.rejected))for(const item of checked.rejected)if(object(item)&&typeof item.reason==='string')checkpoint.unknowns.push(sanitizeText(item.reason,500));
-  const complete=checkpoint.claims.length>0&&stillActivePages().length>1&&supported.size===claims.length;
+  const coverage=researchDepthCoverage(checkpoint.claims,new Set(stillActivePages().filter(p=>(p.retrieval==='read'||p.retrieval==='profile')).map(p=>p.sourceKey)));
+  const complete=checkpoint.claims.length>0&&stillActivePages().length>1&&supported.size===claims.length&&coverage.every(c=>c.state==='evidence_found');
   return finish(complete?'research_complete':'limited_evidence',complete?'completed':'partial');
  };
  try{
@@ -140,7 +172,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    if(parentCheckpoint?.identity?.status==='resolved'){
     const activeKeys=new Set(parentView.sources.filter(s=>!s.excluded).map(s=>s.sourceKey));
     checkpoint.anchorUrl=parentCheckpoint.anchorUrl;checkpoint.identity=parentCheckpoint.identity;
-    checkpoint.pages=parentCheckpoint.pages.filter(p=>activeKeys.has(p.sourceKey)).map((p,index)=>({...p,sourceKey:`S${index+1}`,inheritedFrom:{runId:parent.id,sourceKey:p.sourceKey}}));
+    const inherited=parentCheckpoint.pages.filter(p=>activeKeys.has(p.sourceKey));
+    const remap=new Map(inherited.map((p,index)=>[p.sourceKey,`S${index+1}`]));
+    checkpoint.pages=inherited.map(p=>({...p,sourceKey:remap.get(p.sourceKey)!,discoveredFrom:p.discoveredFrom?.map(key=>remap.get(key)).filter((key):key is string=>!!key),inheritedFrom:{runId:parent.id,sourceKey:p.sourceKey}}));
     checkpoint.pages.forEach((p,index)=>store.addSource(run.id,draft(p,checkpoint.anchorUrl),index));
    }
   }
@@ -161,10 +195,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    const profileLike=page.kind==='profile'||!!page.account||!!handle||['x.com','linkedin.com','www.linkedin.com'].includes(new URL(anchor).hostname);
    if(!profileLike)throw new NeedsInputError('该链接尚不能确定人物，请补充人物的公开主页。',[]);
    checkpoint.identity={displayName:sanitizeText(page.title,160)||page.account?.handle||anchor,handle:page.account?.handle??handle,profileUrl:anchor,status:'resolved',note:'已读取所选公开主页；跨平台账号关系尚未自动合并。',candidates:[]};
-   checkpoint.candidates=[];ingest(result);save();
+   checkpoint.candidates=[];ingest(result,action);save();
   }
   if(checkpoint.pendingClaims)return await verify();
-  const seen=new Set<string>();
+  const seen=new Set(store.research.receipts(run.id).filter(r=>r.kind==='tool').map(r=>digest(r.request)));
   while(checkpoint.steps<limits.modelCalls-1){
    active();progress('planning');
    const step=checkpoint.steps;
@@ -177,22 +211,54 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     if(!Array.isArray(decision.claims)||decision.claims.length>12)throw new ResearchStop('invalid_evidence');
     const claims:ResearchClaim[]=decision.claims.map(raw=>{
      if(!object(raw)||typeof raw.sourceKey!=='string'||typeof raw.quote!=='string'||raw.quote.length<3||raw.quote.length>600)throw new ResearchStop('invalid_evidence');
-     const page=activePages.find(p=>p.sourceKey===raw.sourceKey);if(!page||!page.text.includes(raw.quote))throw new ResearchStop('invalid_evidence');
+     const page=activePages.find(p=>p.sourceKey===raw.sourceKey);if(!page||(page.retrieval!=='read'&&page.retrieval!=='profile')||!page.text.includes(raw.quote))throw new ResearchStop('invalid_evidence');
      const kind=raw.kind??'page_statement';if(!['attributed_statement','page_statement','inference'].includes(String(kind)))throw new ResearchStop('invalid_evidence');
      const section=raw.section??(kind==='inference'?'analysis':'work');if(!['background','work','expression','analysis'].includes(String(section)))throw new ResearchStop('invalid_evidence');
      const statement=typeof raw.statement==='string'?sanitizeText(raw.statement,600):raw.quote;if(!statement)throw new ResearchStop('invalid_evidence');
-     return {sourceKey:raw.sourceKey,quote:raw.quote,statement,kind:kind as ResearchClaim['kind'],section:section as ResearchClaim['section']};
+     const facet=raw.facet;
+     if(facet!==undefined&&!RESEARCH_FACETS.some(f=>f.id===facet))throw new ResearchStop('invalid_evidence');
+     return {sourceKey:raw.sourceKey,quote:raw.quote,statement,kind:kind as ResearchClaim['kind'],section:section as ResearchClaim['section'],...(facet?{facet:facet as ResearchFacet}:{})};
     });
     checkpoint.claims=[];checkpoint.pendingClaims=claims;checkpoint.steps++;
     checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...Array.isArray(decision.unknowns)?decision.unknowns.filter((v):v is string=>typeof v==='string').map(v=>sanitizeText(v,600)):[]])].slice(0,24);
     checkpoint.phase='verifying';save();return await verify();
    }
-   let action:ResearchToolAction;
-   if(decision.action==='search'&&typeof decision.query==='string')action={type:'search',query:decision.query};
-   else if(['read','social','social_posts','firecrawl'].includes(decision.action)&&typeof decision.url==='string')action={type:decision.action==='social'?'social_profile':decision.action as 'read'|'social_posts'|'firecrawl',url:decision.url};
-   else throw new ResearchStop('invalid_decision');
-   const signature=digest(action);if(seen.has(signature))throw new ResearchStop('no_new_evidence');seen.add(signature);
-   progress('reading');const result=await perform(action);ingest(result);checkpoint.steps++;save();
+   const decisions=decision.action==='batch'?decision.actions:[decision];
+   if(!Array.isArray(decisions)||decisions.length<1||decisions.length>4)throw new ResearchStop('invalid_decision');
+   // Validate the whole batch before any request; each child still has its own receipt.
+   const actions:ResearchToolAction[]=decisions.map(item=>{
+    if(!object(item))throw new ResearchStop('invalid_decision');
+    if(item.action==='search'&&typeof item.query==='string')return {type:'search',query:item.query};
+    if(['read','social','social_posts','firecrawl'].includes(String(item.action))&&typeof item.url==='string'){
+     const url=normalizeResearchUrl(item.url);if(!url)throw new ResearchStop('url_not_discovered');
+     return {type:item.action==='social'?'social_profile':item.action as 'read'|'social_posts'|'firecrawl',url};
+    }
+    throw new ResearchStop('invalid_decision');
+   });
+   for(const action of actions){
+    if(action.type==='search'){if(!action.query.trim()||action.query.length>600)throw new ResearchStop('invalid_decision');}
+    else {const url=normalizeResearchUrl(action.url);if(!url||!allowedUrls().has(url))throw new ResearchStop('url_not_discovered');}
+   }
+   for(const action of actions){
+    active();
+    if(store.research.budget(run.id,limits).toolCalls>=limits.toolCalls){checkpoint.unknowns.push('本批读取额度已用完，剩余线索未读；保留分析与独立核验机会。');break;}
+    if(action.type!=='search'&&checkpoint.pages.length>=24&&!checkpoint.pages.some(p=>p.url===action.url)){checkpoint.unknowns.push('本批最多保留 24 个页面，未请求新页面；剩余发现线索保留，当前 alpha 不支持扩大页面集。');continue;}
+    const discoveredFrom=dependencies(action);
+    const signature=digest(action);
+    if(seen.has(signature)){checkpoint.unknowns.push('同一资料动作已执行，不重复付费；需要选择新的证据线索。');continue;}
+    seen.add(signature);progress(action.type==='search'?'searching':'reading');
+    try{const result=await perform(action);
+     if(discoveredFrom.length&&!discoveredFrom.some(key=>store.isResearchSourceActive(run.id,key,run.ownerId)))throw new ResearchStop('source_revoked');
+     ingest(result,action,discoveredFrom);}
+    catch(error){
+     if(options.signal.aborted||deadline.signal.aborted)throw error;
+     // A known adapter failure is a gap in this branch, not the end of all research.
+     // Its settled attempt is retained and never retried automatically.
+     if(error instanceof ProviderError){checkpoint.unknowns.push(`资料分支未读成功：${action.type==='search'?'检索':action.url}（${error.code}）；不代表无资料。`);save();continue;}
+     throw error;
+    }
+   }
+   checkpoint.steps++;save();
   }
   return finish('budget_exhausted','partial');
  }catch(error){

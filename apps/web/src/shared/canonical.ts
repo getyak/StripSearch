@@ -127,6 +127,12 @@ export function renderMarkdown(view: CanonicalView): string {
   lines.push('> 本报告整理公开资料，不代替对当事人的核实；自述保持为自述。');
   lines.push('');
 
+  if (view.research?.coverage) {
+    lines.push('## 研究问题与证据', '');
+    for (const facet of view.research.coverage) lines.push(`- ${escapeInline(facet.label)}：${facet.state === 'evidence_found' ? '有核验材料' : '待补查'}${cite(facet.sourceKeys)}`);
+    lines.push('', '有材料不代表历史、评论或平台范围已读完。', '');
+  }
+
   for (const section of view.answer) {
     lines.push(`## ${escapeInline(section.heading)}`);
     lines.push('');

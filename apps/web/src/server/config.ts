@@ -1,3 +1,5 @@
+import { RESEARCH_LIMITS } from './research/research-store.js';
+import type { ResearchBudgetLimits } from '../shared/types.js';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +42,7 @@ export interface AppConfig {
   deepseekModel?: string;
   firecrawlApiKey?: string | null;
   tikhubApiKey?: string | null;
+  researchLimits?: ResearchBudgetLimits;
   nodeEnv: string;
   isTest: boolean;
 }
@@ -143,6 +146,20 @@ function parseOrigin(origin: string): URL {
   return parsed;
 }
 
+export function loadResearchLimits(env: NodeJS.ProcessEnv): ResearchBudgetLimits {
+  const fields = {toolCalls: ['STRIPSEARCH_RESEARCH_TOOL_CALLS', 200], modelCalls: ['STRIPSEARCH_RESEARCH_MODEL_CALLS', 100], inputTokens: ['STRIPSEARCH_RESEARCH_INPUT_TOKENS', 10_000_000], outputTokens: ['STRIPSEARCH_RESEARCH_OUTPUT_TOKENS', 250_000], elapsedMs: ['STRIPSEARCH_RESEARCH_ELAPSED_MS', 3_600_000]} as const;
+  const limits = {...RESEARCH_LIMITS};
+  for (const field of Object.keys(fields) as (keyof ResearchBudgetLimits)[]) {
+    const [name, ceiling] = fields[field];
+    if (env[name] === undefined) continue;
+    const value = Number(env[name]);
+    if (!env[name]?.trim() || !Number.isSafeInteger(value) || value < 1 || value > ceiling) throw new Error(`${name} must be an integer between 1 and ${ceiling}.`);
+    limits[field] = value;
+  }
+  if (limits.modelCalls < 2 || limits.outputTokens < 5000) throw new Error('Research requires at least two model calls and 5000 output tokens including verification.');
+  return limits;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const deployment = parseDeployment(env.STRIPSEARCH_DEPLOYMENT);
   const hosted = deployment === 'hosted';
@@ -236,6 +253,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     deepseekModel: env.STRIPSEARCH_DEEPSEEK_MODEL?.trim() || 'deepseek-flash',
     firecrawlApiKey: env.FIRECRAWL_API_KEY?.trim() || null,
     tikhubApiKey: env.TIKHUB_API_KEY?.trim() || null,
+    researchLimits: loadResearchLimits(env),
     nodeEnv,
     isTest
   };

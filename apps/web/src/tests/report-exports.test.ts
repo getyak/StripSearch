@@ -105,3 +105,11 @@ test('PDF works with an unwritable host home and removes its temporary browser h
     for (const key of keys) { if (prior[key] === undefined) delete process.env[key]; else process.env[key] = prior[key]; }
   }
 });
+
+
+test('all report renderers expose the same research evidence gaps without inventing findings',async t=>{
+ const {view}=await setup(t);const {researchDepthCoverage}=await import('../shared/research-depth.js');const {renderMarkdown,renderJson}=await import('../shared/canonical.js');
+ view.research={phase:'done',steps:1,stopReason:'limited_evidence',unresolved:[],budget:{toolCalls:1,modelCalls:0,inputTokens:0,outputTokens:0,estimatedUsd:0,firecrawlCredits:0,unknownCost:false,limits:{toolCalls:12,modelCalls:8,inputTokens:150000,outputTokens:16000,elapsedMs:240000}},coverage:researchDepthCoverage([{sourceKey:'S1',facet:'work',verified:true}],new Set(['S1']))};
+ const markdown=renderMarkdown(view);const document=new JSDOM(renderReportHtml(view)).window.document;const json=JSON.parse(renderJson(view));
+ assert.match(markdown,/作品与个人贡献：有核验材料/);assert.match(markdown,/互动与本人回应：待补查/);assert.ok(document.body.textContent?.includes('互动与本人回应：待补查'));assert.equal(json.research.coverage.filter((c:{state:string})=>c.state==='gap').length,4);
+});

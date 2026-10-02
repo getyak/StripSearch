@@ -1,3 +1,4 @@
+import type { ResearchFacetCoverage } from './research-depth.js';
 /**
  * Canonical StripSearch web-alpha types shared by the server, the renderers and
  * the vanilla TypeScript client. This file has no runtime dependencies.
@@ -229,7 +230,7 @@ export interface ResearchBudget {
  estimatedUsd: number; firecrawlCredits: number; unknownCost: boolean; limits: ResearchBudgetLimits;
 }
 export interface ResearchMetadata {
- phase: string; steps: number; budget: ResearchBudget; stopReason: string | null; unresolved: string[];
+ phase: string; steps: number; budget: ResearchBudget; stopReason: string | null; unresolved: string[]; coverage?: ResearchFacetCoverage[];
 }
 export interface PersonObject {
  schemaVersion: 'stripsearch/person/v1';

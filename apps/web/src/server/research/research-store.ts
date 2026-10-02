@@ -1,12 +1,14 @@
+import type { ResearchFacet } from '../../shared/research-depth.js';
 import type { DB } from '../db/index.js';
 import type { IdentityCandidate, IdentityDraft, ResearchBudget, ResearchBudgetLimits } from '../../shared/types.js';
 import type { ResearchPage } from './tool-contracts.js';
 
 export const RESEARCH_LIMITS: ResearchBudgetLimits = { toolCalls:12, modelCalls:8, inputTokens:150_000, outputTokens:16_000, elapsedMs:240_000 };
-export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis' }
-export interface StoredPage extends ResearchPage { sourceKey: string; inheritedFrom?: {runId: string; sourceKey: string} }
+export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis'; facet?: ResearchFacet; verified?: boolean }
+export interface StoredPage extends ResearchPage { sourceKey: string; discoveredFrom?: string[]; inheritedFrom?: {runId: string; sourceKey: string} }
 export interface ResearchCheckpoint {
  phase: string; steps: number; startedAt: number; elapsedMs: number;
+ limits?: ResearchBudgetLimits;
  anchorUrl: string | null; identity: IdentityDraft | null; candidates: IdentityCandidate[];
  pages: StoredPage[]; claims: ResearchClaim[]; pendingClaims?: ResearchClaim[]; unknowns: string[]; stopReason: string | null;
 }

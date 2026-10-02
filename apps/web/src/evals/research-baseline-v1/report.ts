@@ -1,3 +1,4 @@
+import type { DatasetVersion } from './schema.js';
 /**
  * Report model for the research-baseline-v1 offline controller replay.
  *
@@ -150,7 +151,7 @@ export interface BaselineRunMeta {
 
 export interface BaselineReport {
   type: 'offline_controller_replay';
-  datasetVersion: 'research-baseline-v1';
+  datasetVersion: DatasetVersion;
   labels: { track: string; boundary: string };
   generatedAt: string;
   totalMonotonicElapsedMs: number;
@@ -167,6 +168,7 @@ export interface BaselineReport {
 }
 
 export interface BuildReportInput {
+  datasetVersion?: DatasetVersion;
   generatedAt: string;
   totalMonotonicElapsedMs: number;
   config: BaselineConfigMeta;
@@ -202,7 +204,7 @@ export function buildReport(caseReports: BaselineCaseReport[], input: BuildRepor
 
   return {
     type: 'offline_controller_replay',
-    datasetVersion: 'research-baseline-v1',
+    datasetVersion: input.datasetVersion ?? 'research-baseline-v1',
     labels: {
       track: 'offline controller replay (production runResearch + Store with injected scripted fixtures)',
       boundary: 'program-behaviour baseline only; unreviewed original synthetic fixtures, not human gold, not a research-quality benchmark'

@@ -212,6 +212,7 @@ export class Runner {
         tools: this.deps.researchTools ?? { async execute() { throw new ProviderError('provider_unavailable', '研究工具未配置。'); } },
         planner: this.deps.researchPlanner ?? createDshPlanner(this.deps.config.deepseekModel),
         transport: this.deps.transport, deepseekApiKey: this.deps.config.deepseekApiKey,
+        limits: this.deps.config.researchLimits,
         socialAvailable: Boolean(this.deps.config.tikhubApiKey), firecrawlAvailable: Boolean(this.deps.config.firecrawlApiKey)
       }) : await provider!.run(
         {
