@@ -7,6 +7,7 @@ This deployment does not complete the research-controller, CLI, MCP or benchmark
 ## Runtime contract
 
 - Node 22.23.2, locked npm dependencies; build from an exact Git revision using the root `Dockerfile`.
+- HTML entrypoints (including direct `index.html` and SPA fallback routes) and `/release.json` send `Cache-Control: no-store`; hashed assets retain their one-hour cache. This prevents newly received entrypoints from being reused with assets removed by later releases. Previously cached pages may still require one refresh; a new response cannot retroactively evict an older cache entry. See [HTTP cache directives](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control).
 - `deploy/compose.yml` uses Linux host networking so the non-root process still listens only at `127.0.0.1:4392`. Nginx is the public endpoint; do not expose this port through the firewall.
 - `/var/lib/stripsearch` holds SQLite and the generated `auth-secret`, outside release images. Keep it private and persistent. The runtime container is read-only except this directory and a bounded temporary filesystem.
 - Hosted mode accepts exactly one configured HTTPS origin and uses Secure, HttpOnly session cookies. Nginx must overwrite forwarded IP/host/protocol headers, preserve the actual browser Origin, and disable response buffering for SSE.
