@@ -38,3 +38,12 @@ test('legacy inspect cache is reconstructed from active pages and never trusted 
  const {buildResearchPrompt}=await import('../server/research/planner.js');const base={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:null,identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null,inspect:{sourceKey:'S2',offset:0,text:'REVOKED_SYNTHETIC_TEXT'}};
  assert.doesNotMatch(buildResearchPrompt({question:'fixture',checkpoint:base,remainingTools:null,remainingModels:null}),/REVOKED_SYNTHETIC_TEXT/);
 });
+
+test('oversized provider metadata is previewed without changing the stored source',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');
+ const page={sourceKey:'S1',url:'https://synthetic-author.dev/work',title:'Synthetic',text:'Dated original.',kind:'work' as const,author:'a'.repeat(600000),publishedAt:'d'.repeat(600000),retrievedAt:'r'.repeat(600000),links:[],limitations:[],retrieval:'read' as const};
+ const checkpoint={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:null,identity:null,candidates:[],pages:[page],claims:[],unknowns:[],stopReason:null};
+ const claim={statement:'Dated original.',facet:'work' as const,kind:'page_statement' as const,section:'work' as const,sourceKey:'S1',quote:'Dated original.'};
+ for(const mode of ['plan','verify'] as const){const prompt=buildResearchPrompt({question:'fixture',mode,claims:[claim],checkpoint,remainingTools:null,remainingModels:null});const data=JSON.parse(prompt);assert.ok(prompt.length<16000);assert.equal(data.sources[0].author.length,1000);assert.equal(data.sources[0].publishedAt.length,100);assert.equal(data.sources[0].metadataWindow.author,600000);}
+ assert.equal(page.author.length,600000);assert.equal(page.publishedAt.length,600000);
+});
