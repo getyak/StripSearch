@@ -316,7 +316,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     }
    }
    checkpoint.steps++;save();
-   if(!madeProgress&&limits.modelCalls===0&&(limits.toolCalls===0||store.research.budget(run.id,limits).toolCalls<limits.toolCalls))return finish('no_new_evidence','partial');
+   if(!madeProgress&&limits.modelCalls===0)return finish(limits.toolCalls>0&&store.research.budget(run.id,limits).toolCalls>=limits.toolCalls?'budget_exhausted':'no_new_evidence','partial');
   }
   return finish('budget_exhausted','partial');
  }catch(error){

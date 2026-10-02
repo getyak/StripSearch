@@ -286,3 +286,10 @@ test('revocation during model preparation prevents sending its stale prompt',asy
  const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,deepseekApiKey:'synthetic',transport:{async fetch(){modelCalls++;throw new Error('must never send');}},tools:{async execute(action){return {pages:[action.type==='github_profile'?profile:interview],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(_input,signal,invoke){if(++rounds===1)return {action:'read',url:interview.url};store.setSourceExcluded(run.id,'S2',true);await invoke({path:'/v1/messages',body:{max_tokens:2500},signal} as Parameters<typeof invoke>[0]);return {action:'finish',claims:[]};}}});
  assert.equal(modelCalls,0);assert.equal(result.stopReason,'source_revoked');db.close();
 });
+
+
+test('explicit tool cap with unlimited model calls stops when further planning cannot collect evidence',async()=>{
+ const {db,store,run}=setup();let rounds=0,calls=0;
+ const result=await runResearch({store,run,limits:{...unlimited,toolCalls:1},signal:new AbortController().signal,tools:{async execute(){calls++;return {pages:[profile],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<3);return {action:'read',url:interview.url};}}});
+ assert.equal(calls,1);assert.equal(rounds,1);assert.equal(result.stopReason,'budget_exhausted');db.close();
+});
