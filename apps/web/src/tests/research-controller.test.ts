@@ -213,9 +213,89 @@ test('withdrawing a linked social account revokes its posts rather than only che
  store.setSourceExcluded(run.id,'S2',true);assert.equal(store.isResearchSourceActive(run.id,'S3',run.ownerId),false);assert.equal(store.buildCanonicalView(run).research?.coverage?.find(c=>c.id==='expression')?.state,'gap');db.close();
 });
 
-test('full page capacity skips new paid reads with an explicit gap',async()=>{
- const {db,store,run}=setup();let step=0;let calls=0;
- const pages=Array.from({length:23},(_,index)=>({...interview,url:`https://fixture.test/page-${index}`,links:['https://fixture.test/overflow']}));
- const result=await runResearch({store,run,limits:{toolCalls:100,modelCalls:10,inputTokens:150000,outputTokens:30000,elapsedMs:240000},signal:new AbortController().signal,tools:{async execute(action){calls++;return {pages:action.type==='github_profile'?[profile]:pages.slice((calls-2)*12,(calls-1)*12),requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(input){if(input.mode==='verify')return {supported:[],rejected:[]};step++;return step<3?{action:'search',query:`batch ${step}`}:step===3?{action:'read',url:'https://fixture.test/overflow'}:{action:'finish',claims:[]};}}});
- assert.equal(calls,3);assert.equal(result.sources.length,24);assert.ok(result.limitations.some(s=>s.includes('24 个页面')&&s.includes('未请求')));db.close();
+test('all pages beyond 24 remain available and a new linked original can be read',async()=>{
+ const {db,store,run}=setup();let round=0,calls=0;
+ const pages=Array.from({length:31},(_,i)=>({...interview,url:`https://fixture.test/page-${i}`,links:['https://fixture.test/overflow']}));
+ const result=await runResearch({store,run,limits:{toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0},signal:new AbortController().signal,
+ tools:{async execute(action){calls++;return {pages:action.type==='github_profile'?[profile]:action.type==='search'?pages:[{...interview,url:'https://fixture.test/overflow'}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify')return {supported:[0],rejected:[]};return ++round===1?{action:'search',query:'all authored sources'}:round===2?{action:'read',url:'https://fixture.test/overflow'}:{action:'finish',claims:[{sourceKey:'S33',quote:interview.text}]};}}});
+ assert.equal(calls,3);assert.equal(result.sources.length,33);assert.equal(result.observations.length,1);assert.ok(!result.limitations.some(s=>s.includes('24 个页面')));db.close();
+});
+
+const unlimited={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0};
+test('unlimited controller passes old 12 tools and 8 planning rounds and remains cancellable',async()=>{
+ const {db,store,run}=setup();const abort=new AbortController();let calls=0,rounds=0;
+ await assert.rejects(runResearch({store,run,limits:unlimited,signal:abort.signal,
+ tools:{async execute(action){calls++;return {pages:action.type==='github_profile'?[profile]:[],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){assert.equal(input.remainingTools,null);assert.equal(input.remainingModels,null);if(++rounds===18){store.requestCancel(run.id);abort.abort(new Error('cancelled after old thresholds'));}return {action:'search',query:`unique round ${rounds}`};}}}));
+ assert.equal(calls,18);assert.equal(rounds,18);assert.equal(store.research.budget(run.id).toolCalls,18);db.close();
+});
+test('unlimited reservation accounts for model and tool usage beyond old totals',()=>{
+ const {db,store,run}=setup();
+ for(let i=0;i<15;i++)for(const kind of ['tool','model'] as const){store.research.reserve(run.id,`${kind}:${i}`,kind,{}, {inputTokens:30000,outputTokens:6000},unlimited);store.research.settle(run.id,`${kind}:${i}`,{}, {inputTokens:30000,outputTokens:6000,estimatedUsd:0});}
+ assert.equal(store.research.budget(run.id,unlimited).modelCalls,15);assert.equal(store.research.budget(run.id,unlimited).inputTokens,900000);db.close();
+});
+test('local inspect retains large originals, costs no tool request and removes revoked selection',async()=>{
+ const {db,store,run}=setup();let round=0,calls=0;const body='x'.repeat(70000)+'Ada Fixture original ending.';
+ await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,
+ tools:{async execute(action){calls++;return {pages:[action.type==='github_profile'?profile:{...interview,text:body}],requests:1,bytes:body.length,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){round++;if(round===1)return {action:'read',url:interview.url};if(round===2)return {action:'inspect',sourceKey:'S2',offset:70000};if(round===3){const {buildResearchPrompt}=await import('../server/research/planner.js');const prompt=JSON.parse(buildResearchPrompt(input));assert.equal(prompt.inspect.text,'Ada Fixture original ending.');assert.equal(prompt.inspect.textLength,body.length);store.setSourceExcluded(run.id,'S2',true);return {action:'search',query:'another known source'};}
+ const {buildResearchPrompt}=await import('../server/research/planner.js');assert.equal(JSON.parse(buildResearchPrompt(input)).inspect,undefined);return {action:'finish',claims:[]};}}});
+ assert.equal(calls,3);assert.equal(store.research.checkpoint(run.id)?.pages.find(p=>p.sourceKey==='S2')?.text,body);assert.equal(store.research.checkpoint(run.id)?.inspect,undefined);db.close();
+});
+for(const local of [false,true])test(`unlimited repeated ${local?'inspect':'tool'} stops without another paid action`,async()=>{
+ const {db,store,run}=setup();let calls=0,rounds=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(action){calls++;return {pages:[action.type==='github_profile'?profile:interview],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<5);return local?{action:'inspect',sourceKey:'S1',offset:0}:{action:'read',url:interview.url};}}});
+ assert.equal(result.stopReason,'no_new_evidence');assert.equal(rounds,2);assert.equal(calls,local?1:2);db.close();
+});
+test('historical checkpoint without limits keeps finite policy after fresh zero configuration',async()=>{
+ const {db,store,run}=setup();store.research.save(run.id,{phase:'planning',steps:8,startedAt:Date.now(),elapsedMs:0,anchorUrl:profile.url,identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null});
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){throw new Error('must not fetch');}},planner:{async decide(){throw new Error('must not plan');}}});
+ assert.equal(store.research.checkpoint(run.id)?.limits?.modelCalls,8);assert.notEqual(result.stopReason,'research_complete');db.close();
+});
+
+
+test('revisiting a local window cycle stops unlimited paid planning',async()=>{
+ const {db,store,run}=setup();let rounds=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[{...profile,text:'a'.repeat(4000)+'b'.repeat(4000)+'a'.repeat(2000)}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<6);return {action:'inspect',sourceKey:'S1',offset:rounds%2?0:4000};}}});
+ assert.equal(rounds,3);assert.equal(result.stopReason,'no_new_evidence');db.close();
+});
+
+
+test('out-of-range catalog offsets normalize to a real window and cannot loop forever',async()=>{
+ const {db,store,run}=setup();let rounds=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[profile],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<5);return {action:'catalog',offset:1000+rounds,linkOffset:1000+rounds,unknownOffset:1000+rounds};}}});
+ assert.equal(rounds,2);assert.equal(result.stopReason,'no_new_evidence');db.close();
+});
+for(const nextCursor of [null,'pending-next-page'])test(`provider coverage gaps keep all-five-facet synthesis partial (${nextCursor})`,async()=>{
+ const {db,store,run}=setup();let rounds=0;
+ const own={...profile,links:[interview.url]};const original={...interview,text:'Ada Fixture started in 2020. Ada Fixture wrote a compiler. Ada Fixture published an essay. Ada Fixture answered a reviewer. Ada Fixture corrected a mistake.',links:[]};
+ const facets=['background','work','expression','interaction','counterevidence'] as const;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(action){return {pages:[action.type==='github_profile'?own:original],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:['Costs are estimates.'],...(action.type!=='github_profile'?{nextCursor,coverageGaps:['Comments have not been read.']}: {})};}},planner:{async decide(input){if(input.mode==='verify')return {supported:[0,1,2,3,4],rejected:[]};return ++rounds===1?{action:'read',url:interview.url}:{action:'finish',claims:facets.map(facet=>({sourceKey:'S2',quote:original.text,facet}))};}}});
+ assert.equal(result.state,'partial');assert.equal(result.observations.length,5);assert.ok(result.limitations.includes('Comments have not been read.'));assert.deepEqual(store.research.checkpoint(run.id)?.unknowns,[]);db.close();
+});
+
+
+test('whitespace variants of a failed search cannot create another charged request',async()=>{
+ const {db,store,run}=setup();let rounds=0,calls=0;const {ProviderError}=await import('../server/adapters/types.js');
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(action){calls++;if(action.type==='search')throw new ProviderError('provider_timeout','unknown outcome');return {pages:[profile],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){return {action:'search',query:++rounds===1?'Ada works':' Ada works '};}}});
+ assert.equal(calls,2);assert.equal(result.stopReason,'no_new_evidence');assert.equal(store.research.receipts(run.id).filter(r=>r.request&&r.kind==='tool').length,2);db.close();
+});
+test('revocation during model preparation prevents sending its stale prompt',async()=>{
+ const {db,store,run}=setup();let rounds=0,modelCalls=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,deepseekApiKey:'synthetic',transport:{async fetch(){modelCalls++;throw new Error('must never send');}},tools:{async execute(action){return {pages:[action.type==='github_profile'?profile:interview],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(_input,signal,invoke){if(++rounds===1)return {action:'read',url:interview.url};store.setSourceExcluded(run.id,'S2',true);await invoke({path:'/v1/messages',body:{max_tokens:2500},signal} as Parameters<typeof invoke>[0]);return {action:'finish',claims:[]};}}});
+ assert.equal(modelCalls,0);assert.equal(result.stopReason,'source_revoked');db.close();
+});
+
+
+test('explicit tool cap with unlimited model calls stops when further planning cannot collect evidence',async()=>{
+ const {db,store,run}=setup();let rounds=0,calls=0;
+ const result=await runResearch({store,run,limits:{...unlimited,toolCalls:1},signal:new AbortController().signal,tools:{async execute(){calls++;return {pages:[profile],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<3);return {action:'read',url:interview.url};}}});
+ assert.equal(calls,1);assert.equal(rounds,1);assert.equal(result.stopReason,'budget_exhausted');db.close();
+});
+
+test('identical source excerpts at shifted offsets do not buy more unlimited planning',async()=>{
+ const {db,store,run}=setup();let rounds=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[{...profile,text:'a'.repeat(10000)}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<5);return {action:'inspect',sourceKey:'S1',offset:rounds-1};}}});
+ assert.equal(rounds,2);assert.equal(result.stopReason,'no_new_evidence');assert.equal(store.research.checkpoint(run.id)?.pages[0]?.text.length,10000);db.close();
 });

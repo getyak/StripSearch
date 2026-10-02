@@ -26,3 +26,31 @@ test('planning exposes research questions, retrieval provenance and independent 
  const data=JSON.parse(buildResearchPrompt({question:'fixture',checkpoint,remainingModels:5,remainingTools:6}));
  assert.equal(data.researchQuestions.length,5);assert.match(data.contract,/batch/);assert.match(data.contract,/retrieval=search/);assert.match(data.task,/identity JSON.*untrusted/);
 });
+
+
+test('source/link/unknown catalog windows keep the model context bounded without losing corpus',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');
+ const pages=Array.from({length:200},(_,i)=>({sourceKey:`S${i}`,url:`https://synthetic-author.dev/${i}`,title:'Synthetic',text:'x'.repeat(50000),kind:'work' as const,publishedAt:null,links:Array.from({length:1000},(_,j)=>`https://synthetic-author.dev/${i}/${j}`),limitations:[]}));
+ const checkpoint={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:null,identity:null,candidates:[],pages,claims:[],unknowns:Array.from({length:300},(_,i)=>`gap ${i}`),stopReason:null,catalog:{offset:30,linkOffset:100,unknownOffset:60}};
+ const data=JSON.parse(buildResearchPrompt({question:'fixture',checkpoint,remainingTools:null,remainingModels:null}));assert.equal(data.sources.length,12);assert.equal(data.sourceCatalog.total,200);assert.equal(data.sources[0].sourceKey,'S30');assert.equal(data.sources[0].links.length,20);assert.equal(data.sources[0].links[0],pages[30]!.links[100]);assert.equal(data.unknowns[0],'gap 60');assert.equal(data.unknownsTotal,300);assert.ok(JSON.stringify(data).length<40000);assert.equal(pages[30]!.text.length,50000);
+});
+test('legacy inspect cache is reconstructed from active pages and never trusted as text',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');const base={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:null,identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null,inspect:{sourceKey:'S2',offset:0,text:'REVOKED_SYNTHETIC_TEXT'}};
+ assert.doesNotMatch(buildResearchPrompt({question:'fixture',checkpoint:base,remainingTools:null,remainingModels:null}),/REVOKED_SYNTHETIC_TEXT/);
+});
+
+test('oversized provider metadata is previewed without changing the stored source',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');
+ const page={sourceKey:'S1',url:'https://synthetic-author.dev/work',title:'Synthetic',text:'Dated original.',kind:'work' as const,author:'a'.repeat(600000),publishedAt:'d'.repeat(600000),retrievedAt:'r'.repeat(600000),links:[],limitations:[],retrieval:'read' as const};
+ const checkpoint={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:null,identity:null,candidates:[],pages:[page],claims:[],unknowns:[],stopReason:null};
+ const claim={statement:'Dated original.',facet:'work' as const,kind:'page_statement' as const,section:'work' as const,sourceKey:'S1',quote:'Dated original.'};
+ for(const mode of ['plan','verify'] as const){const prompt=buildResearchPrompt({question:'fixture',mode,claims:[claim],checkpoint,remainingTools:null,remainingModels:null});const data=JSON.parse(prompt);assert.ok(prompt.length<16000);assert.equal(data.sources[0].author.length,1000);assert.equal(data.sources[0].publishedAt.length,100);assert.equal(data.sources[0].metadataWindow.author,600000);}
+ assert.equal(page.author.length,600000);assert.equal(page.publishedAt.length,600000);
+});
+
+test('catalog selection is clamped when active sources shrink after revocation',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');
+ const page={sourceKey:'S1',url:'https://synthetic-author.dev/work',title:'Synthetic',text:'Still active.',kind:'work' as const,publishedAt:null,links:[],limitations:[]};
+ const checkpoint={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:null,identity:null,candidates:[],pages:[page],claims:[],unknowns:[],stopReason:null,catalog:{offset:90,linkOffset:0,unknownOffset:0}};
+ const data=JSON.parse(buildResearchPrompt({question:'fixture',checkpoint,remainingTools:null,remainingModels:null}));assert.equal(data.sourceCatalog.offset,0);assert.equal(data.sources[0].sourceKey,'S1');assert.equal(checkpoint.catalog.offset,90);
+});

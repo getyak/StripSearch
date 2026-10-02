@@ -5,7 +5,7 @@ import { extractGitHubHandle, normalizeResearchUrl, sanitizeText } from '../../s
 import { ProviderError, type HttpTransport } from '../adapters/types.js';
 import type { Store, RunRecord } from '../store.js';
 import { type ResearchPlanner, invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
-import { RESEARCH_LIMITS, ResearchStop, type ResearchCheckpoint, type StoredPage, type ResearchClaim } from './research-store.js';
+import { RESEARCH_LIMITS, ResearchStop, remainingOf, type ResearchCheckpoint, type StoredPage, type ResearchClaim } from './research-store.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchTools } from './tool-contracts.js';
 
 export interface ResearchOptions {
@@ -16,6 +16,8 @@ export interface ResearchOptions {
 function object(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value);}
 function digest(value:unknown):string{return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);}
 function candidateId(url:string):string{return 'candidate_'+digest(url);}
+/** Keep everything a tool supplied: only control characters are stripped. */
+function retainText(value:unknown):string{return sanitizeText(value,Number.MAX_SAFE_INTEGER);}
 function draft(page:StoredPage,anchor:string|null):SourceDraft{return {key:page.sourceKey,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,excerptLocator:page.retrieval==='search'?'搜索发现材料，尚未回读原文':'公开页面文本',identityLabel:page.url===anchor?'所选公开主页':'来源归属未独立验证',identityConfirmed:page.url===anchor,fetchStatus:page.text?'ok':'inaccessible',limits:[...page.limitations,...page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
 
 export async function runResearch(options:ResearchOptions):Promise<ProviderResult>{
@@ -29,17 +31,20 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  // from a completed, matching action receipt; missing proof stays unread.
  for(const page of checkpoint.pages){
   if(page.retrieval)continue;
-  const matching=store.research.receipts(run.id).filter(r=>r.kind==='tool'&&r.state==='completed'&&object(r.request)&&object(r.result)&&Array.isArray(r.result.pages)&&r.result.pages.some((p:unknown)=>object(p)&&p.url===page.url&&typeof p.text==='string'&&sanitizeText(p.text,24000).startsWith(page.text)));
+  const matching=store.research.receipts(run.id).filter(r=>r.kind==='tool'&&r.state==='completed'&&object(r.request)&&object(r.result)&&Array.isArray(r.result.pages)&&r.result.pages.some((p:unknown)=>object(p)&&p.url===page.url&&typeof p.text==='string'&&retainText(p.text).startsWith(page.text)));
   const read=matching.find(r=>object(r.request)&&['read','firecrawl','social_profile','social_posts','github_profile'].includes(String(r.request.type)));
   if(read&&object(read.request))page.retrieval=['social_profile','github_profile'].includes(String(read.request.type))?'profile':'read';
   else if(matching.length)page.retrieval='search';
  }
 
  const priorElapsed=checkpoint.elapsedMs;
- const deadline=new AbortController();const remaining=Math.max(1,limits.elapsedMs-priorElapsed);
- const timer=setTimeout(()=>deadline.abort(new ResearchStop('budget_exhausted')),remaining);
+ const deadline=new AbortController();
+ // Zero elapsed total is no fixed deadline: only cancel/stop can end the run.
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ const scheduleDeadline=()=>{const remaining=limits.elapsedMs-priorElapsed-(Date.now()-launched);timer=setTimeout(()=>{if(priorElapsed+Date.now()-launched>=limits.elapsedMs)deadline.abort(new ResearchStop('budget_exhausted'));else scheduleDeadline();},Math.min(2_147_483_647,Math.max(1,remaining)));};
+ if(limits.elapsedMs>0)scheduleDeadline();
  const signal=AbortSignal.any([options.signal,deadline.signal]);
- const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);if(priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
+ const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
  const save=()=>{active();checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);};
  const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':'读取相关资料',status:'active'});};
  const stillActivePages=()=>checkpoint.pages.filter(page=>store.isResearchSourceActive(run.id,page.sourceKey,run.ownerId));
@@ -52,23 +57,25 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  };
  const ingest=(result:ResearchToolResult,action:ResearchToolAction,discoveredFrom:string[]=[])=>{
   active();
-  for(const page of result.pages.slice(0,12)){
+  // No page cap and no slicing: every supplied page, its full original text
+  // and all its links stay in the corpus; model scope is a separate window.
+  for(const page of result.pages){
    const url=normalizeResearchUrl(page.url);if(!url)continue;
    const existing=checkpoint.pages.find(p=>p.url===url);
-   if(!existing&&checkpoint.pages.length>=24){checkpoint.unknowns.push('本批最多保留 24 个页面；超出部分未纳入证据，剩余发现线索保留，当前 alpha 不支持扩大页面集。');continue;}
    const retrieval=action.type==='search'?'search':action.type==='github_profile'||action.type==='social_profile'?'profile':'read';
-   const clean:StoredPage={...page,retrieval,url,title:sanitizeText(page.title,200),text:sanitizeText(page.text,24000),links:[...new Set(page.links.map(normalizeResearchUrl).filter((v):v is string=>!!v))].slice(0,100),limitations:page.limitations.map(v=>sanitizeText(v,500)),sourceKey:existing?.sourceKey??`S${checkpoint.pages.length+1}`,...existing?.inheritedFrom?{inheritedFrom:existing.inheritedFrom}:{},...discoveredFrom.length?{discoveredFrom:[...discoveredFrom]}:{}};
+   const clean:StoredPage={...page,retrieval,url,title:sanitizeText(page.title,200),text:retainText(page.text),links:[...new Set(page.links.map(normalizeResearchUrl).filter((v):v is string=>!!v))],limitations:page.limitations.map(v=>sanitizeText(v,500)),sourceKey:existing?.sourceKey??`S${checkpoint.pages.length+1}`,...existing?.inheritedFrom?{inheritedFrom:existing.inheritedFrom}:{},...discoveredFrom.length?{discoveredFrom:[...discoveredFrom]}:{}};
    // Search can enrich discovery but cannot replace an already fetched original.
    if(existing&&(existing.retrieval==='read'||existing.retrieval==='profile')&&retrieval==='search'){
     clean.text=existing.text;clean.title=existing.title;clean.retrieval=existing.retrieval;clean.kind=existing.kind;clean.publishedAt=existing.publishedAt;clean.author=existing.author;clean.retrievedAt=existing.retrievedAt;clean.textTruncated=existing.textTruncated;clean.account=existing.account;clean.discoveredFrom=existing.discoveredFrom;
     // Links remain discovery-only; they never inherit the original's factual support.
-    clean.links=[...new Set([...existing.links,...clean.links])].slice(0,100);clean.limitations=existing.limitations;
+    clean.links=[...new Set([...existing.links,...clean.links])];clean.limitations=existing.limitations;
    }
    if(existing)checkpoint.pages[checkpoint.pages.indexOf(existing)]=clean;else checkpoint.pages.push(clean);
    store.addSource(run.id,draft(clean,checkpoint.anchorUrl),checkpoint.pages.indexOf(clean));
    store.addEvent(run.id,'source',store.getSource(run.id,clean.sourceKey));
   }
-  checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...result.limitations.map(v=>sanitizeText(v,500))])].slice(0,24);save();
+  checkpoint.notes=[...new Set([...(checkpoint.notes??[]),...result.limitations.map(v=>sanitizeText(v,500))])];
+  checkpoint.coverageGaps=[...new Set([...(checkpoint.coverageGaps??[]),...(result.coverageGaps??[]).map(v=>sanitizeText(v,500)),...(result.nextCursor?['供应商返回下一页游标，历史尚未枚举完成。']:[])])];save();
  };
  const perform=async(action:ResearchToolAction):Promise<ResearchToolResult>=>{
   active();
@@ -93,9 +100,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   }
  };
  const ask=async(mode:'plan'|'verify',claims?:ResearchClaim[]):Promise<unknown>=>{
-  const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
-  return await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages},remainingTools:limits.toolCalls-budget.toolCalls,remainingModels:limits.modelCalls-budget.modelCalls},signal,async request=>{
-    active();if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
+  active();const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
+  if(checkpoint.inspect&&!activePages.some(p=>p.sourceKey===checkpoint.inspect!.sourceKey))delete checkpoint.inspect;
+  return await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
+    active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const key=`model:${step}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
     const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path},{inputTokens:inputBound,outputTokens:2500},limits);
@@ -107,19 +115,29 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     }catch(error){if(!options.signal.aborted){try{store.research.settle(run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');}catch{}}throw error;}
    });
  };
+ // Completeness blockers are counted, never hidden: discovery-only sources,
+ // unread discovered links, truncated originals and explicit unresolved items.
+ const scopeGaps=()=>{const pages=stillActivePages();return {pages,
+  discoveryOnly:pages.filter(p=>p.retrieval==='search'),
+  unread:[...new Set(pages.flatMap(p=>p.links))].filter(url=>!pages.some(p=>p.url===url)),
+  truncated:pages.filter(p=>p.textTruncated),
+  unresolved:[...checkpoint.unknowns,...(checkpoint.coverageGaps??[])]};};
  const finish=(reason:string,state:'completed'|'partial'):ProviderResult=>{
   checkpoint.phase='done';checkpoint.stopReason=reason;
   if(!options.signal.aborted){checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);}
-  const pages=stillActivePages();const keys=new Set(pages.map(p=>p.sourceKey));
+  const scope=scopeGaps();const pages=scope.pages;const keys=new Set(pages.map(p=>p.sourceKey));
   const claims=checkpoint.claims.filter(c=>keys.has(c.sourceKey)&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')));
   const coverage=researchDepthCoverage(claims,keys);
   const gaps=coverage.filter(c=>c.state==='gap').map(c=>`${c.label}：${c.note}`);
-  const unread=[...new Set(pages.flatMap(p=>p.links))].filter(url=>!pages.some(p=>p.url===url));
-  const depthLimits=[...gaps,...unread.length?[`还有 ${unread.length} 条已发现链接未回读；它们是待判断线索，不等于均属于此人。`]:[]];
+  const depthLimits=[...gaps,
+   ...scope.discoveryOnly.length?[`${scope.discoveryOnly.length} 个来源只有搜索发现材料、未回读原文；只能当线索，不算已读证据。`]:[],
+   ...scope.unread.length?[`还有 ${scope.unread.length} 条已发现链接未回读；它们是待判断线索，不等于均属于此人。`]:[],
+   ...scope.truncated.length?[`${scope.truncated.length} 个来源的原文被截断或不完整；截断部分仍是缺口，不能当作完整原文。`]:[],
+   ...scope.unresolved.length?[`还有 ${scope.unresolved.length} 项未解决记录（unresolved）；存在明确未解决项时不能称全平台或全部历史研究完成。`]:[]];
   const observations=claims.map(c=>({statement:c.statement,kind:c.kind,sourceKeys:[c.sourceKey],limitations:['来源原文摘录；身份归属与独立事实核实另行判断。']}));
   const budget=store.research.budget(run.id,limits);
   return {state,identity:checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates},sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl)),observations,
-   answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
+   answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
  };
  const verify=async():Promise<ProviderResult>=>{
   const claims=checkpoint.pendingClaims??[];
@@ -130,7 +148,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    checkpoint.unknowns.push('综合结论未通过独立语义核验，仅保留来源逐字摘录；摘录不代表结论已核实。');
    return finish(reason,'partial');
   };
-  if(checkpoint.steps>=limits.modelCalls||store.research.budget(run.id,limits).modelCalls>=limits.modelCalls){
+  if(limits.modelCalls>0&&(checkpoint.steps>=limits.modelCalls||store.research.budget(run.id,limits).modelCalls>=limits.modelCalls)){
    return quoteFallback('verification_budget');
   }
   progress('verifying');
@@ -153,7 +171,12 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   checkpoint.claims=claims.filter((_c,index)=>supported.has(index)).map(c=>({...c,verified:true}));delete checkpoint.pendingClaims;checkpoint.steps++;
   if(Array.isArray(checked.rejected))for(const item of checked.rejected)if(object(item)&&typeof item.reason==='string')checkpoint.unknowns.push(sanitizeText(item.reason,500));
   const coverage=researchDepthCoverage(checkpoint.claims,new Set(stillActivePages().filter(p=>(p.retrieval==='read'||p.retrieval==='profile')).map(p=>p.sourceKey)));
-  const complete=checkpoint.claims.length>0&&stillActivePages().length>1&&supported.size===claims.length&&coverage.every(c=>c.state==='evidence_found');
+  // Five facets with evidence never prove all-platform or full-history
+  // completion: any discovery-only source, unread discovered link, truncated
+  // original or explicit unresolved record keeps the run partial.
+  const scope=scopeGaps();
+  const complete=checkpoint.claims.length>0&&scope.pages.length>1&&supported.size===claims.length&&coverage.every(c=>c.state==='evidence_found')
+   &&scope.discoveryOnly.length===0&&scope.unread.length===0&&scope.truncated.length===0&&scope.unresolved.length===0;
   return finish(complete?'research_complete':'limited_evidence',complete?'completed':'partial');
  };
  try{
@@ -199,7 +222,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   }
   if(checkpoint.pendingClaims)return await verify();
   const seen=new Set(store.research.receipts(run.id).filter(r=>r.kind==='tool').map(r=>digest(r.request)));
-  while(checkpoint.steps<limits.modelCalls-1){
+  while(limits.modelCalls===0||checkpoint.steps<limits.modelCalls-1){
    active();progress('planning');
    const step=checkpoint.steps;
    const budget=store.research.budget(run.id,limits);
@@ -208,7 +231,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    active();
    if(!object(decision)||typeof decision.action!=='string')throw new ResearchStop('invalid_decision');
    if(decision.action==='finish'){
-    if(!Array.isArray(decision.claims)||decision.claims.length>12)throw new ResearchStop('invalid_evidence');
+    if(!Array.isArray(decision.claims))throw new ResearchStop('invalid_evidence');
     const claims:ResearchClaim[]=decision.claims.map(raw=>{
      if(!object(raw)||typeof raw.sourceKey!=='string'||typeof raw.quote!=='string'||raw.quote.length<3||raw.quote.length>600)throw new ResearchStop('invalid_evidence');
      const page=activePages.find(p=>p.sourceKey===raw.sourceKey);if(!page||(page.retrieval!=='read'&&page.retrieval!=='profile')||!page.text.includes(raw.quote))throw new ResearchStop('invalid_evidence');
@@ -220,33 +243,67 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      return {sourceKey:raw.sourceKey,quote:raw.quote,statement,kind:kind as ResearchClaim['kind'],section:section as ResearchClaim['section'],...(facet?{facet:facet as ResearchFacet}:{})};
     });
     checkpoint.claims=[];checkpoint.pendingClaims=claims;checkpoint.steps++;
-    checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...Array.isArray(decision.unknowns)?decision.unknowns.filter((v):v is string=>typeof v==='string').map(v=>sanitizeText(v,600)):[]])].slice(0,24);
+    checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...Array.isArray(decision.unknowns)?decision.unknowns.filter((v):v is string=>typeof v==='string').map(v=>sanitizeText(v,600)):[]])];
     checkpoint.phase='verifying';save();return await verify();
    }
    const decisions=decision.action==='batch'?decision.actions:[decision];
    if(!Array.isArray(decisions)||decisions.length<1||decisions.length>4)throw new ResearchStop('invalid_decision');
-   // Validate the whole batch before any request; each child still has its own receipt.
-   const actions:ResearchToolAction[]=decisions.map(item=>{
+   type Planned={kind:'inspect';sourceKey:string;offset:number}|{kind:'catalog';offset:number;linkOffset:number;unknownOffset:number}|{kind:'tool';action:ResearchToolAction};
+   // Validate the whole batch before any request or local inspect.
+   const planned:Planned[]=decisions.map(item=>{
     if(!object(item))throw new ResearchStop('invalid_decision');
-    if(item.action==='search'&&typeof item.query==='string')return {type:'search',query:item.query};
+    if(item.action==='catalog'){
+     const values=[item.offset,item.linkOffset??0,item.unknownOffset??0];
+     if(values.some(v=>typeof v!=='number'||!Number.isSafeInteger(v)||v<0))throw new ResearchStop('invalid_decision');
+     return {kind:'catalog',offset:Number(values[0]),linkOffset:Number(values[1]),unknownOffset:Number(values[2])};
+    }
+    if(item.action==='inspect'){
+     // Offline local excerpt of an already stored source: no provider request.
+     if(typeof item.sourceKey!=='string'||typeof item.offset!=='number'||!Number.isSafeInteger(item.offset)||item.offset<0)throw new ResearchStop('invalid_decision');
+     return {kind:'inspect',sourceKey:item.sourceKey,offset:item.offset};
+    }
+    if(item.action==='search'&&typeof item.query==='string')return {kind:'tool',action:{type:'search',query:item.query.trim()}};
     if(['read','social','social_posts','firecrawl'].includes(String(item.action))&&typeof item.url==='string'){
      const url=normalizeResearchUrl(item.url);if(!url)throw new ResearchStop('url_not_discovered');
-     return {type:item.action==='social'?'social_profile':item.action as 'read'|'social_posts'|'firecrawl',url};
+     return {kind:'tool',action:{type:item.action==='social'?'social_profile':item.action as 'read'|'social_posts'|'firecrawl',url}};
     }
     throw new ResearchStop('invalid_decision');
    });
-   for(const action of actions){
+   for(const step of planned){
+    if(step.kind!=='tool')continue;
+    const action=step.action;
     if(action.type==='search'){if(!action.query.trim()||action.query.length>600)throw new ResearchStop('invalid_decision');}
     else {const url=normalizeResearchUrl(action.url);if(!url||!allowedUrls().has(url))throw new ResearchStop('url_not_discovered');}
    }
-   for(const action of actions){
+   let madeProgress=false;
+   const localWindows=new Set(checkpoint.localWindows??[]);
+   for(const step of planned){
     active();
-    if(store.research.budget(run.id,limits).toolCalls>=limits.toolCalls){checkpoint.unknowns.push('本批读取额度已用完，剩余线索未读；保留分析与独立核验机会。');break;}
-    if(action.type!=='search'&&checkpoint.pages.length>=24&&!checkpoint.pages.some(p=>p.url===action.url)){checkpoint.unknowns.push('本批最多保留 24 个页面，未请求新页面；剩余发现线索保留，当前 alpha 不支持扩大页面集。');continue;}
+    if(step.kind==='catalog'){
+     const activePages=stillActivePages();const offset=Math.min(step.offset,Math.max(0,activePages.length-1));
+     const maxLinks=Math.max(0,...activePages.slice(offset,offset+12).map(p=>p.links.length-1));
+     const selected={offset,linkOffset:Math.min(step.linkOffset,maxLinks),unknownOffset:Math.min(step.unknownOffset,Math.max(0,checkpoint.unknowns.length-1))};
+     const signature='catalog:'+digest({pages:stillActivePages().slice(selected.offset,selected.offset+12).map(p=>({key:p.sourceKey,text:p.text.slice(0,600),links:p.links.slice(selected.linkOffset,selected.linkOffset+20)})),unknowns:checkpoint.unknowns.slice(selected.unknownOffset,selected.unknownOffset+30)});
+     if(!localWindows.has(signature)){localWindows.add(signature);checkpoint.catalog=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];save();}
+     continue;
+    }
+    if(step.kind==='inspect'){
+     // Selecting a stored excerpt is free and offline. Inactive or unknown
+     // sources are denied: nothing is served and no receipt is created.
+     const page=checkpoint.pages.find(p=>p.sourceKey===step.sourceKey);
+     if(!page)throw new ResearchStop('invalid_decision');
+     if(!stillActivePages().some(p=>p.sourceKey===step.sourceKey))throw new ResearchStop('source_revoked');
+     const selected={sourceKey:page.sourceKey,offset:Math.min(step.offset,page.text.length)};
+     const signature='inspect:'+digest({sourceKey:selected.sourceKey,text:page.text.slice(selected.offset,selected.offset+4000)});
+     if(!localWindows.has(signature)){localWindows.add(signature);checkpoint.inspect=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];}
+     save();continue;
+    }
+    const action=step.action;
+    if(limits.toolCalls>0&&store.research.budget(run.id,limits).toolCalls>=limits.toolCalls){checkpoint.unknowns.push('本批读取额度已用完，剩余线索未读；保留分析与独立核验机会。');break;}
     const discoveredFrom=dependencies(action);
     const signature=digest(action);
     if(seen.has(signature)){checkpoint.unknowns.push('同一资料动作已执行，不重复付费；需要选择新的证据线索。');continue;}
-    seen.add(signature);progress(action.type==='search'?'searching':'reading');
+    seen.add(signature);madeProgress=true;progress(action.type==='search'?'searching':'reading');
     try{const result=await perform(action);
      if(discoveredFrom.length&&!discoveredFrom.some(key=>store.isResearchSourceActive(run.id,key,run.ownerId)))throw new ResearchStop('source_revoked');
      ingest(result,action,discoveredFrom);}
@@ -259,6 +316,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     }
    }
    checkpoint.steps++;save();
+   if(!madeProgress&&limits.modelCalls===0)return finish(limits.toolCalls>0&&store.research.budget(run.id,limits).toolCalls>=limits.toolCalls?'budget_exhausted':'no_new_evidence','partial');
   }
   return finish('budget_exhausted','partial');
  }catch(error){

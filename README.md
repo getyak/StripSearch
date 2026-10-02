@@ -6,7 +6,7 @@
 
 StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web Agent。输入姓名或公开主页链接，系统核对身份、选择资料工具、整理带出处的 Person Object，并导出 JSON、HTML、PDF 或 Markdown。
 
-> **当前阶段：有预算边界的人物研究 Web alpha，2026-09-26。** DeepSeek / DSH 决策、Exa 网页检索、TikHub X 公开账号与帖子、按需 Firecrawl、持久化动作账本和证据撤回已实现。CLI、MCP、多平台覆盖与研究质量 benchmark 尚未交付。具体运行边界见[本轮实现说明](docs/person-research-release.md)。
+> **当前阶段：人物研究 Web alpha，2026-10-02。新作业默认无固定累计上限，旧账本保留原限制。** DeepSeek / DSH 决策、Exa 网页检索、TikHub X 公开账号与帖子、按需 Firecrawl、持久化动作账本和证据撤回已实现。CLI、MCP、多平台覆盖与研究质量 benchmark 尚未交付。具体运行边界见[本轮实现说明](docs/person-research-release.md)。
 
 **在线官网与工作台：** <https://stripsearch.103.195.188.236.sslip.io>（临时地址；登录受限，尚无邮件找回）。
 
@@ -48,7 +48,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 
 先看一份[合成报告](examples/report.md)，再对照[同一份 JSON](examples/report.json)和[请求配置](examples/request.json)。样例域名 `example.org` 是占位标识，不应抓取。
 
-2026-10-02 研究增量：[深度契约](docs/research-depth-contract.md)修复搜索摘要冒充原文、批次分支失败、资料截断后的自链发现和过早完成判断。五类研究问题分别显示已核验材料与缺口，四种导出共享同一状态；当前控制器回放采用版本化 [v2](evals/research-baseline-v2/README.md)。它仍是有界 alpha，未验收新的长研究运行时或自主规划质量。
+2026-10-02 研究增量：[深度契约](docs/research-depth-contract.md)修复搜索摘要冒充原文、批次分支失败、资料截断后的自链发现和过早完成判断。五类研究问题分别显示已核验材料与缺口，四种导出共享同一状态；当前控制器回放采用版本化 [v2](evals/research-baseline-v2/README.md)。原始页面和正文不再固定裁剪，本地目录/正文窗口控制单次模型上下文；未验收新的长研究运行时、全平台完整历史或自主规划质量。
 
 ## 部署
 

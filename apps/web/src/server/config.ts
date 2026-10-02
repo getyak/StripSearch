@@ -1,4 +1,3 @@
-import { RESEARCH_LIMITS } from './research/research-store.js';
 import type { ResearchBudgetLimits } from '../shared/types.js';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
@@ -42,6 +41,7 @@ export interface AppConfig {
   deepseekModel?: string;
   firecrawlApiKey?: string | null;
   tikhubApiKey?: string | null;
+  /** Fresh API research totals; `0` per field means no fixed total cap. */
   researchLimits?: ResearchBudgetLimits;
   nodeEnv: string;
   isTest: boolean;
@@ -146,17 +146,30 @@ function parseOrigin(origin: string): URL {
   return parsed;
 }
 
+/**
+ * Production research totals for fresh API runs. Each field defaults to `0` =
+ * no fixed total cap; an explicit `0` or any positive safe integer is accepted
+ * with no arbitrary ceiling. Legacy finite defaults only survive in frozen
+ * checkpoints without a `limits` field and in direct controller replays
+ * (`RESEARCH_LIMITS`); the service runner always passes this config.
+ */
 export function loadResearchLimits(env: NodeJS.ProcessEnv): ResearchBudgetLimits {
-  const fields = {toolCalls: ['STRIPSEARCH_RESEARCH_TOOL_CALLS', 200], modelCalls: ['STRIPSEARCH_RESEARCH_MODEL_CALLS', 100], inputTokens: ['STRIPSEARCH_RESEARCH_INPUT_TOKENS', 10_000_000], outputTokens: ['STRIPSEARCH_RESEARCH_OUTPUT_TOKENS', 250_000], elapsedMs: ['STRIPSEARCH_RESEARCH_ELAPSED_MS', 3_600_000]} as const;
-  const limits = {...RESEARCH_LIMITS};
-  for (const field of Object.keys(fields) as (keyof ResearchBudgetLimits)[]) {
-    const [name, ceiling] = fields[field];
+  const fields: [keyof ResearchBudgetLimits, string][] = [
+    ['toolCalls', 'STRIPSEARCH_RESEARCH_TOOL_CALLS'],
+    ['modelCalls', 'STRIPSEARCH_RESEARCH_MODEL_CALLS'],
+    ['inputTokens', 'STRIPSEARCH_RESEARCH_INPUT_TOKENS'],
+    ['outputTokens', 'STRIPSEARCH_RESEARCH_OUTPUT_TOKENS'],
+    ['elapsedMs', 'STRIPSEARCH_RESEARCH_ELAPSED_MS']
+  ];
+  const limits: ResearchBudgetLimits = { toolCalls: 0, modelCalls: 0, inputTokens: 0, outputTokens: 0, elapsedMs: 0 };
+  for (const [field, name] of fields) {
     if (env[name] === undefined) continue;
-    const value = Number(env[name]);
-    if (!env[name]?.trim() || !Number.isSafeInteger(value) || value < 1 || value > ceiling) throw new Error(`${name} must be an integer between 1 and ${ceiling}.`);
+    const raw = env[name]!.trim();
+    const value = Number(raw);
+    // 0 disables that fixed total cap; positive safe integers cap explicitly.
+    if (!raw || !Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be 0 (no fixed total limit) or a positive safe integer.`);
     limits[field] = value;
   }
-  if (limits.modelCalls < 2 || limits.outputTokens < 5000) throw new Error('Research requires at least two model calls and 5000 output tokens including verification.');
   return limits;
 }
 

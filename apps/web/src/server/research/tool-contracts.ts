@@ -11,6 +11,8 @@ export interface ResearchPage {
 export interface ResearchToolResult {
  pages: ResearchPage[]; requests: number; bytes: number;
  estimatedUsd: number | null; credits: number | null; limitations: string[]; nextCursor?: string | null;
+ /** Unread history, media, discussion or extraction completeness, distinct from cost notes. */
+ coverageGaps?: string[];
 }
 export interface ResearchToolsOptions {
  transport: HttpTransport; exaApiKey: string | null; firecrawlApiKey: string | null;

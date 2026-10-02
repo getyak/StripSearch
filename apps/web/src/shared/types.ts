@@ -224,6 +224,13 @@ export interface SessionUser {
 
 
 export interface IdentityCandidate { label: string; detail: string; candidateId?: string; profileUrl?: string }
+/**
+ * Research run totals. Every field uses `0` = no fixed total cap (research
+ * continues until the model finishes, the run is cancelled, or a per-request
+ * bound fires); a positive safe integer is an explicit per-run cap chosen by
+ * the user or deployment. Frozen legacy checkpoints without a `limits` field
+ * keep the historical finite defaults (see `RESEARCH_LIMITS`).
+ */
 export interface ResearchBudgetLimits { toolCalls: number; modelCalls: number; inputTokens: number; outputTokens: number; elapsedMs: number }
 export interface ResearchBudget {
  toolCalls: number; modelCalls: number; inputTokens: number; outputTokens: number;
