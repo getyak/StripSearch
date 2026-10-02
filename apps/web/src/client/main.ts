@@ -1,5 +1,6 @@
 import { isTerminalState } from '../shared/types.js';
 import type { CanonicalView, RunEventRecord, RunSummary, SessionUser } from '../shared/types.js';
+import { stateLabel } from '../shared/canonical.js';
 import {
   validateQuestion,
   validateSeedUrl
@@ -7,9 +8,13 @@ import {
 import { ApiClient, ApiError } from './api.js';
 import type { ExportFormat, ResumeInput } from './api.js';
 import { createAuthController, renderUserNav, showToast } from './auth.js';
+import { createCitationReturn } from './citation-return.js';
 import { byId, clear, make, setText, show } from './dom.js';
 import { createHomeMotion } from './home-motion.js';
+import { createLocalSearch } from './local-search.js';
+import type { LocalSearchItem } from './local-search.js';
 import { createReviewWorkbench } from './review.js';
+import { sourceStatusLabel } from './render.js';
 import {
   renderActivity,
   renderFollowupRail,
@@ -111,9 +116,12 @@ const els = {
   historyRail: byId('history-list'),
   drawerHistory: byId('drawer-history-list'),
   workTitle: byId('work-title-text'),
+  workBody: byId('work-body'),
   deskState: byId('desk-state'),
   workRevision: byId('work-revision'),
   stopRun: byId<HTMLButtonElement>('stop-run'),
+  openSearch: byId<HTMLButtonElement>('open-search'),
+  openMobileSources: byId<HTMLButtonElement>('open-mobile-sources'),
   copyReport: byId<HTMLButtonElement>('copy-report'),
   downloadMd: byId<HTMLButtonElement>('download-md'),
   downloadJson: byId<HTMLButtonElement>('download-json'),
@@ -154,6 +162,108 @@ const els = {
   review: byId('view-review'),
   openReview: byId<HTMLButtonElement>('open-review')
 };
+
+/* ---------------- citation return & local search ---------------- */
+
+/**
+ * Drawer close intents are durable: native dialog close events are queued, so
+ * the intent recorded at close time must survive until the event is consumed.
+ * A stale event (drawer reopened or reset meanwhile) must do nothing.
+ */
+const drawerEpochs = new WeakMap<HTMLDialogElement, number>();
+const drawerCloseIntents = new WeakMap<HTMLDialogElement, { restore: boolean; epoch: number }[]>();
+
+function bumpDrawerEpoch(dialog: HTMLDialogElement): number {
+  const next = (drawerEpochs.get(dialog) ?? 0) + 1;
+  drawerEpochs.set(dialog, next);
+  return next;
+}
+
+function closeDrawer(dialog: HTMLDialogElement, restoreFocus: boolean): void {
+  if (!dialog.open) return;
+  const epoch = drawerEpochs.get(dialog) ?? 0;
+  const queue = drawerCloseIntents.get(dialog) ?? [];
+  queue.push({ restore: restoreFocus, epoch });
+  drawerCloseIntents.set(dialog, queue);
+  dialog.close();
+}
+
+function openDrawer(dialog: HTMLDialogElement): void {
+  bumpDrawerEpoch(dialog);
+  dialog.showModal();
+}
+
+/** null = stale close event (the dialog generation moved on): do nothing. */
+function consumeDrawerClose(dialog: HTMLDialogElement): { restore: boolean } | null {
+  const intent = drawerCloseIntents.get(dialog)?.shift() ?? null;
+  const epoch = drawerEpochs.get(dialog) ?? 0;
+  if (!intent) return null;
+  return intent.epoch === epoch ? intent : null;
+}
+
+/** Opener of the mobile history drawer, for safe focus return on close. */
+let historyTrigger: HTMLElement | null = null;
+
+const citationReturn = createCitationReturn({
+  report: () => els.report,
+  scroller: () => els.workBody,
+  runId: () => state.run?.runId ?? null,
+  reducedMotion: () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+});
+
+/**
+ * Only the data already loaded into this account's interface: history report
+ * questions and the current report's source titles/URLs/excerpts. No provider
+ * request, no full-text retrieval, no other account's data.
+ */
+function searchItems(): LocalSearchItem[] {
+  const items: LocalSearchItem[] = [];
+  for (const run of state.runs) {
+    items.push({
+      id: run.runId,
+      kind: 'history',
+      title: run.question,
+      meta: `${stateLabel(run.state)} · ${run.sourceCount} 个来源${run.reviewCount > 0 ? ` · ${run.reviewCount} 处待复核` : ''}`,
+      haystack: run.question.toLowerCase()
+    });
+  }
+  const run = state.run;
+  // Sources belong to exactly one report: expose them only while that report is
+  // both the active selection and the rendered one, so a failed or delayed
+  // navigation can never show the previous report's sources as the new one.
+  if (run && run.runId === state.activeRunId && els.report.dataset.runId === run.runId) {
+    for (const source of run.sources) {
+      // Status comes first so a cached excerpt is never read as adopted evidence.
+      const status = sourceStatusLabel(source);
+      const attribution = source.identityConfirmed ? '' : ' · 归属未确认';
+      items.push({
+        id: source.sourceKey,
+        kind: 'source',
+        title: source.title,
+        meta: `${status}${attribution} · ${source.url}${source.excerpt ? ` · ${source.excerpt}` : ''}`,
+        haystack: `${source.title} ${source.url} ${source.excerpt ?? ''}`.toLowerCase()
+      });
+    }
+  }
+  return items;
+}
+
+const localSearch = createLocalSearch({
+  getItems: searchItems,
+  onSelect: (item) => {
+    if (item.kind === 'history') {
+      // Existing route: the hash router owns run selection.
+      const target = `#/app/${encodeURIComponent(item.id)}`;
+      if (window.location.hash !== target) window.location.hash = target;
+      else void selectRun(item.id);
+      return;
+    }
+    focusSource(item.id, 'search', els.openSearch);
+  },
+  isAvailable: () => document.body.dataset.view === 'app' && Boolean(state.user),
+  getFallbackFocus: () => (els.openSearch.isConnected ? els.openSearch : null),
+  reducedMotion: () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+});
 
 const review = createReviewWorkbench({
   api,
@@ -197,6 +307,11 @@ function clearPrivateState(): void {
   setFormStatus('');
   state.runEpoch += 1;
   closeStream();
+  // Search queries/results and citation returns are owner-private as well.
+  localSearch.reset();
+  citationReturn.clear();
+  closeDrawer(els.sourceDrawer, false);
+  closeDrawer(els.historyDrawer, false);
   review.reset();
   renderUserNav(null);
   // Render the cleared DOM synchronously so an identity switch can never
@@ -422,6 +537,13 @@ async function selectRun(runId: string): Promise<void> {
   state.copyToken += 1;
   state.copiedRevision = null;
   closeStream();
+  // A report switch invalidates citation returns and open source drawers.
+  citationReturn.clear();
+  closeDrawer(els.sourceDrawer, false);
+  closeDrawer(els.historyDrawer, false);
+  // Drop the previous report's source results immediately; the fetch below may
+  // fail or arrive late and must not keep exposing them as the new report.
+  localSearch.refresh();
   let snapshot: { run: CanonicalView; events: RunEventRecord[]; latestSeq: number };
   try {
     snapshot = await api.getRun(runId);
@@ -659,17 +781,103 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
 
 /* ---------------- rendering ---------------- */
 
+type FocusAnchor = { containerId: string; selector: string; runId: string; sourceKey?: string; mode: 'dom-run' | 'row-id' };
+
+function attr(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    .replace(/[\n\r\f]/g, (character) => `\\${character.charCodeAt(0).toString(16)} `);
+}
+
+/**
+ * Polling snapshot refreshes re-render report and source DOM. Record what the
+ * user is focused on and put focus back afterwards. The anchor is stamped with
+ * the run id OF THE RENDERED DOM (report/list data-run-id), never with
+ * state.run at restore time, and citations are identified by their semantic
+ * report anchor so repeated citations of one source stay distinct.
+ */
+function captureFocusAnchor(): FocusAnchor | null {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || typeof active.closest !== 'function') return null;
+  const detail = active.closest('.source-detail') as HTMLElement | null;
+  if (detail?.id && detail.dataset.runId) {
+    const control = active.closest('[data-source-focus]') as HTMLElement | null;
+    if (active === detail || control) return {
+      containerId: detail.id,
+      selector: control ? `[data-source-focus="${attr(control.dataset.sourceFocus ?? '')}"]` : '',
+      runId: detail.dataset.runId,
+      sourceKey: detail.dataset.sourceKey,
+      mode: 'dom-run'
+    };
+  }
+  const citation = active.closest('button.citation[data-citation-anchor]') as HTMLElement | null;
+  if (citation && els.report.contains(citation)) {
+    const runId = els.report.dataset.runId ?? '';
+    if (!runId) return null;
+    return {
+      containerId: els.report.id || 'report',
+      selector: `button.citation[data-citation-anchor="${attr(citation.dataset.citationAnchor ?? '')}"][data-source="${attr(citation.dataset.source ?? '')}"][data-citation-context="${attr(citation.dataset.citationContext ?? '')}"]`,
+      runId,
+      mode: 'dom-run'
+    };
+  }
+  const row = active.closest('button.source-row[data-source-key]') as HTMLElement | null;
+  if (row) {
+    const list = row.closest('.source-list') as HTMLElement | null;
+    const runId = list?.dataset.runId ?? '';
+    if (!list?.id || !runId) return null;
+    return {
+      containerId: list.id,
+      selector: `button.source-row[data-source-key="${attr(row.dataset.sourceKey ?? '')}"]`,
+      runId,
+      mode: 'dom-run'
+    };
+  }
+  const item = active.closest('button.history-item[data-run-id]') as HTMLElement | null;
+  if (item) {
+    const container = item.parentElement;
+    const runId = item.dataset.runId ?? '';
+    if (!container?.id || !runId) return null;
+    return {
+      containerId: container.id,
+      selector: `button.history-item[data-run-id="${attr(runId)}"]`,
+      runId,
+      mode: 'row-id'
+    };
+  }
+  return null;
+}
+
+function restoreFocusAnchor(anchor: FocusAnchor | null): void {
+  if (!anchor) return;
+  const container = document.getElementById(anchor.containerId);
+  if (!container) return;
+  if (anchor.mode === 'dom-run') {
+    // The container must still show the report the anchor was taken from.
+    if (container.dataset.runId !== anchor.runId) return;
+  } else if (!state.runs.some((item) => item.runId === anchor.runId)) {
+    return;
+  }
+  if (anchor.sourceKey !== undefined && container.dataset.sourceKey !== anchor.sourceKey) return;
+  const target = anchor.selector ? container.querySelector<HTMLElement>(anchor.selector) : container;
+  if (target && target.isConnected && typeof target.focus === 'function') target.focus({ preventScroll: true });
+}
+
 function renderAll(): void {
+  const anchor = captureFocusAnchor();
   renderHeader();
   renderNeedsPanel();
   renderRunSummary();
   renderActivityPanel();
   renderReportView();
+  citationReturn.sync();
   renderSourcePanels();
   renderHistoryRail();
   renderMessages(els.chatLog, state.messages);
   renderFollowup();
   updateStreamHint();
+  // Run switches, deletions and account changes refresh what search shows.
+  localSearch.refresh();
+  restoreFocusAnchor(anchor);
 }
 
 const RUN_STATE_LABELS: Record<CanonicalView['state'], string> = {
@@ -836,6 +1044,7 @@ function renderActivityPanel(): void {
 function renderReportView(): void {
   if (!state.run && state.runs.length === 0) {
     clear(els.report);
+    els.report.removeAttribute('data-run-id');
     const empty = make('div', { className: 'stage-panel enter' });
     const content = make('div', { className: 'panel-content' });
     content.appendChild(make('h3', { text: '从一个公开账号开始' }));
@@ -853,17 +1062,30 @@ function renderReportView(): void {
     return;
   }
   renderReport(els.report, state.run, {
-    onCitation: (sourceKey) => focusSource(sourceKey)
+    onCitation: (sourceKey, button) => focusSource(sourceKey, 'citation', button)
   });
 }
 
 function renderSourcePanels(): void {
+  const anchor = captureFocusAnchor();
   const run = state.run;
+  const entry = citationReturn.entry();
   const handlers = {
-    onSelect: (key: string) => focusSource(key),
+    onSelect: (key: string, row: HTMLElement | null) => focusSource(key, 'list', row),
     onExclude: (key: string) => void toggleExclusion(key, true),
     onRestore: (key: string) => void toggleExclusion(key, false),
-    onUndo: (key: string) => void toggleExclusion(key, false)
+    onUndo: (key: string) => void toggleExclusion(key, false),
+    canReturnToCitation: Boolean(
+      entry && entry.kind === 'citation' && entry.sourceKey === state.selectedSourceKey && citationReturn.canReturn()
+    ),
+    onReturnToCitation: () => {
+      // On mobile the source drawer is modal and its background is inert, so
+      // focus cannot reach the citation behind it. Close the drawer first with
+      // a durable "no focus restore" intent; the delayed close event must not
+      // override the citation focus afterwards.
+      closeDrawer(els.sourceDrawer, false);
+      citationReturn.returnToCitation();
+    }
   };
   const filters = (container: HTMLElement): void =>
     renderSourceFilters(container, run, state.filter, (filter) => {
@@ -876,12 +1098,13 @@ function renderSourcePanels(): void {
   renderSourceList(els.drawerSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect);
   renderSourceDetail(els.inspectorDetail, run, state.selectedSourceKey, handlers);
   renderSourceDetail(els.drawerSourceDetail, run, state.selectedSourceKey, handlers);
+  restoreFocusAnchor(anchor);
 }
 
 function renderHistoryRail(): void {
   renderHistory(els.historyRail, state.runs, state.activeRunId, (runId) => void selectRun(runId));
   renderHistory(els.drawerHistory, state.runs, state.activeRunId, (runId) => {
-    els.historyDrawer.close();
+    closeDrawer(els.historyDrawer, true);
     void selectRun(runId);
   });
 }
@@ -899,22 +1122,35 @@ function updateStreamHint(): void {
   }
 }
 
-function focusSource(sourceKey: string): void {
+type SourceOrigin = 'citation' | 'list' | 'search';
+
+function focusSource(sourceKey: string, origin: SourceOrigin = 'citation', trigger: HTMLElement | null = null): void {
   if (!state.run) return;
   state.selectedSourceKey = sourceKey;
-  state.filter = 'all';
+  if (origin !== 'list') state.filter = 'all';
   const narrow = isNarrow();
   if (!narrow) {
     els.appShell.classList.remove('inspector-collapsed');
     els.toggleInspector.setAttribute('aria-pressed', 'true');
     els.toggleInspector.textContent = '收起出处';
   }
+  // Citation clicks are the only thing that arms "返回原句"; a list entry only
+  // records where the panel was entered from when nothing else did.
+  if (origin === 'citation') {
+    citationReturn.enterViaCitation(sourceKey, trigger?.dataset.citationAnchor ?? '', trigger);
+  } else if (origin === 'search') citationReturn.enterViaSearch(sourceKey, els.openSearch);
+  else citationReturn.enterViaList(sourceKey, trigger);
   renderSourcePanels();
   const detail = narrow ? els.drawerSourceDetail : els.inspectorDetail;
-  detail.classList.add('emphasis');
-  window.setTimeout(() => detail.classList.remove('emphasis'), 400);
-  if (narrow && !els.sourceDrawer.open) els.sourceDrawer.showModal();
+  citationReturn.emphasize(detail);
+  if (narrow && !els.sourceDrawer.open) openDrawer(els.sourceDrawer);
   detail.scrollIntoView({ block: 'nearest' });
+  // Citation and search entries land focus on the located source; plain list
+  // browsing keeps focus on the row that renderSourcePanels re-focused.
+  if (origin !== 'list') {
+    detail.setAttribute('tabindex', '-1');
+    detail.focus();
+  }
 }
 
 function restoreSourceFocus(): void {
@@ -1230,29 +1466,56 @@ function wire(): void {
   els.downloadPdf.addEventListener('click', () => void downloadReport('pdf'));
   els.resumeRun.addEventListener('click', () => void resumeRun());
 
+  els.openSearch.addEventListener('click', () => localSearch.open(els.openSearch));
+  window.addEventListener('keydown', (event) => {
+    localSearch.handleKeyDown(event);
+  });
   els.toggleInspector.addEventListener('click', () => {
     const collapsed = els.appShell.classList.toggle('inspector-collapsed');
     els.toggleInspector.setAttribute('aria-pressed', String(!collapsed));
     els.toggleInspector.textContent = collapsed ? '展开出处' : '收起出处';
+    if (collapsed) citationReturn.restoreEntryFocus(els.toggleInspector);
   });
   byId<HTMLButtonElement>('desktop-close-inspector').addEventListener('click', () => {
     els.appShell.classList.add('inspector-collapsed');
     els.toggleInspector.setAttribute('aria-pressed', 'false');
     els.toggleInspector.textContent = '展开出处';
+    citationReturn.restoreEntryFocus(els.toggleInspector);
   });
-  byId<HTMLButtonElement>('open-mobile-history').addEventListener('click', () => {
+  byId<HTMLButtonElement>('open-mobile-history').addEventListener('click', (event) => {
+    historyTrigger = event.currentTarget as HTMLElement;
     renderHistoryRail();
-    els.historyDrawer.showModal();
+    openDrawer(els.historyDrawer);
   });
-  byId<HTMLButtonElement>('open-mobile-sources').addEventListener('click', () => {
+  byId<HTMLButtonElement>('open-mobile-sources').addEventListener('click', (event) => {
+    citationReturn.enterViaButton(state.selectedSourceKey ?? '', event.currentTarget as HTMLElement);
     renderSourcePanels();
-    els.sourceDrawer.showModal();
+    openDrawer(els.sourceDrawer);
+  });
+  for (const drawer of [els.sourceDrawer, els.historyDrawer]) {
+    drawer.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      closeDrawer(drawer, true);
+    });
+  }
+  els.sourceDrawer.addEventListener('close', () => {
+    const intent = consumeDrawerClose(els.sourceDrawer);
+    if (!intent || !intent.restore) return;
+    // Escape and the close button return to the actual entry point.
+    citationReturn.restoreEntryFocus(els.openMobileSources);
+  });
+  els.historyDrawer.addEventListener('close', () => {
+    const intent = consumeDrawerClose(els.historyDrawer);
+    if (!intent || !intent.restore) return;
+    const target = historyTrigger;
+    historyTrigger = null;
+    if (target && target.isConnected && typeof target.focus === 'function') target.focus();
   });
   for (const element of document.querySelectorAll('[data-close-history]')) {
-    element.addEventListener('click', () => els.historyDrawer.close());
+    element.addEventListener('click', () => closeDrawer(els.historyDrawer, true));
   }
   for (const element of document.querySelectorAll('[data-close-source]')) {
-    element.addEventListener('click', () => els.sourceDrawer.close());
+    element.addEventListener('click', () => closeDrawer(els.sourceDrawer, true));
   }
 
   els.chatForm.addEventListener('submit', (event) => {
@@ -1265,7 +1528,9 @@ function wire(): void {
   });
 
   window.matchMedia('(max-width: 1220px)').addEventListener('change', () => {
-    if (els.sourceDrawer.open) els.sourceDrawer.close();
+    // Crossing the breakpoint closes the mobile drawer but still returns focus
+    // to the recorded entry when that element survives.
+    closeDrawer(els.sourceDrawer, true);
   });
 }
 
@@ -1338,5 +1603,8 @@ export const __test = {
   renderAll,
   isCurrentRun,
   isCurrentUser,
-  homeMotion
+  homeMotion,
+  localSearch,
+  citationReturn,
+  focusSource
 };
