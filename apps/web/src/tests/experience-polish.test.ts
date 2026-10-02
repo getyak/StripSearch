@@ -603,7 +603,9 @@ test('mobile toolbar reopening records its own opener and ignores stale queued d
   try {
     secondCitation().click(); close.click();
     for (const task of queued.splice(0)) task();
-    opener.click(); close.click();
+    opener.click();
+    assert.equal(drawer.querySelector('.return-citation'), null, 'toolbar entry has no stale return action');
+    close.click();
     for (const task of queued.splice(0)) task();
     assert.equal(env.document.activeElement, opener, 'toolbar entry replaces the old citation entry');
     opener.click(); close.click(); opener.click();

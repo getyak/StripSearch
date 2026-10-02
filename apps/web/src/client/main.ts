@@ -1488,8 +1488,8 @@ function wire(): void {
     openDrawer(els.historyDrawer);
   });
   byId<HTMLButtonElement>('open-mobile-sources').addEventListener('click', (event) => {
-    renderSourcePanels();
     citationReturn.enterViaButton(state.selectedSourceKey ?? '', event.currentTarget as HTMLElement);
+    renderSourcePanels();
     openDrawer(els.sourceDrawer);
   });
   for (const drawer of [els.sourceDrawer, els.historyDrawer]) {
