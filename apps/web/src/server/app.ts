@@ -105,8 +105,18 @@ export function createApp(deps: AppDeps): Express {
 
   const clientIndex = path.join(deps.clientDir, 'index.html');
   if (existsSync(clientIndex)) {
-    app.use(express.static(deps.clientDir, { index: false, maxAge: '1h' }));
+    app.use(express.static(deps.clientDir, {
+      index: false,
+      maxAge: '1h',
+      setHeaders: (res, filePath) => {
+        // Release-specific entrypoints must not outlive their hashed assets.
+        if (path.basename(filePath) === 'index.html' || path.basename(filePath) === 'release.json') {
+          res.setHeader('Cache-Control', 'no-store');
+        }
+      }
+    }));
     app.get(/^(?!\/api\/).*/, (_req, res, next) => {
+      res.set('Cache-Control', 'no-store');
       res.sendFile('index.html', { root: deps.clientDir, cacheControl: false }, (error) => {
         if (error) next(error);
       });
