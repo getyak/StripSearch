@@ -21,7 +21,7 @@ Node 22.23.2、TypeScript、Express 5.2.1、Better Auth 1.7.5、SQLite（better-
 - `local` 保持既有 HTTP loopback 行为：`STRIPSEARCH_PUBLIC_ORIGIN` 默认 `http://localhost:PORT`，必须是 loopback HTTP 且端口匹配 `PORT`，cookie 不带 Secure。
 - `hosted` 要求显式 HTTPS `STRIPSEARCH_PUBLIC_ORIGIN`（无凭据、路径、查询、片段或通配符），只信任这一个 Origin，cookie 变为 Secure（名称为 `__Secure-stripsearch.*`），仍只绑定 loopback，由本机反向代理终止 TLS。`host/port` 与反向代理无关：进程继续监听 loopback `PORT`，公网端口不必等于 `PORT`。
 - `baseURL` 固定为配置的 Origin，不信任 `X-Forwarded-Host` / `X-Forwarded-Proto`。hosted 下认证变更（注册 / 登录 / 退出）与其它变更接口一样必须携带精确 Origin，缺失或外来 Origin 返回 403。
-- hosted 注册默认 `STRIPSEARCH_SIGNUP_MODE=allowlist`，使用服务端 `STRIPSEARCH_SIGNUP_EMAILS`（逗号分隔、大小写不敏感、精确地址，不支持通配符）。名单为空时拒绝全部新注册，但已存在账号仍可登录；被拒注册在 UI 显示可读提示。显式 `STRIPSEARCH_SIGNUP_MODE=open` 允许任意有效邮箱注册，认证限流、HTTPS cookie 和精确 Origin 校验继续生效；邮箱所有权仍未验证。local 模式不受此名单限制。
+- hosted 注册默认 `STRIPSEARCH_SIGNUP_MODE=open`，任意有效邮箱均可注册；旧 `STRIPSEARCH_SIGNUP_EMAILS` 单独存在不会重新启用限制。仅运营者显式设置 `STRIPSEARCH_SIGNUP_MODE=allowlist` 时才检查名单（逗号分隔、大小写不敏感、精确地址，无通配符）；该模式下名单为空拒绝全部新注册，已有账号仍可登录。认证限流、HTTPS cookie 和精确 Origin 校验继续生效；邮箱所有权仍未验证。local 模式不受此名单限制。
 - 反向代理头契约：代理终止公网 HTTPS，并转发到 loopback `PORT`，用客户端真实 IP **覆盖**（不是追加）`X-Forwarded-For`，可选择同时覆盖 `X-Real-IP`。服务端仅在 hosted 模式信任来自 loopback（`127.0.0.1` / `::1`）的这些头，用于认证限流的 IP 归并；不信任任意转发头来改写 origin、主机或协议。
 - 部署拓扑、持久化和线上验收流程见[部署说明](deployment.md)。离线检查不代替证书、代理、真实会话和重启持久化验收。
 

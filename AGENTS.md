@@ -2,6 +2,7 @@
 
 - Read README, the relevant design document, and docs/roadmap.md before changing behavior.
 - The design baseline now has a local Web alpha in apps/web. Keep its verified GitHub/authentication scope separate from unverified Exa, broader Agent/MCP milestones, benchmarks and deployment. Never claim a capability without verification.
+- Hosted registration is open by default. Do not reintroduce implicit email allowlists or close signup when environment settings are omitted. Restricted deployments require an explicit operator-selected `STRIPSEARCH_SIGNUP_MODE=allowlist` policy.
 - Keep identity linkage, factual support and analysis separate. Preserve uncertainty, counterevidence, provenance and revocation dependencies.
 - Never fetch example.org fixture URLs. No network or paid API calls in offline checks.
 - Never commit credentials, user research archives, local paths, private Notion URLs or third-party full text without an explicit redistribution grant.

@@ -12,6 +12,7 @@ function hostedEnv(signupEmails: string): NodeJS.ProcessEnv {
   return {
     STRIPSEARCH_DEPLOYMENT: 'hosted',
     STRIPSEARCH_PUBLIC_ORIGIN: HOSTED_ORIGIN,
+    STRIPSEARCH_SIGNUP_MODE: 'allowlist',
     STRIPSEARCH_SIGNUP_EMAILS: signupEmails
   };
 }

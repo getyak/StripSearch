@@ -8,7 +8,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 
 > **当前阶段：人物研究 Web alpha，2026-10-02。新作业默认无固定累计上限，旧账本保留原限制。** DeepSeek / DSH 决策、Exa 网页检索、TikHub X 公开账号与帖子、按需 Firecrawl、持久化动作账本和证据撤回已实现。CLI、MCP、多平台覆盖与研究质量 benchmark 尚未交付。具体运行边界见[本轮实现说明](docs/person-research-release.md)。
 
-**在线官网与工作台：** <https://stripsearch.103.195.188.236.sslip.io>（临时地址；登录受限，尚无邮件找回）。
+**在线官网与工作台：** <https://stripsearch.103.195.188.236.sslip.io>（临时地址；注册默认开放，尚无邮件找回）。
 
 **Web 入口：** [`apps/web`](apps/web/README.md) 提供同一份 canonical 报告上的真实认证、按账号隔离的 SQLite 研究作业、有预算的多步人物研究、公开资料读取与四种格式导出。运行方式、实际限制与未验证边界见该说明；这不代表 M1–M4 整体通过。
 

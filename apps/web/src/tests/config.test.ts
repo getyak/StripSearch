@@ -132,6 +132,7 @@ test('hosted mode requires an explicit HTTPS origin and derives secure cookies',
       STRIPSEARCH_DEPLOYMENT: 'hosted',
       STRIPSEARCH_DATA_DIR: dir,
       STRIPSEARCH_PUBLIC_ORIGIN: 'https://search.example.test',
+      STRIPSEARCH_SIGNUP_MODE: 'allowlist',
       STRIPSEARCH_SIGNUP_EMAILS: ' Alice@Example.Test , bob@example.test ,alice@example.test '
     });
     assert.equal(config.deployment, 'hosted');
@@ -152,8 +153,8 @@ test('hosted mode requires an explicit HTTPS origin and derives secure cookies',
     });
     assert.equal(withPort.origin, 'https://search.example.test:8443');
 
-    // Hosted mode with no configured list means every new signup is denied.
-    assert.deepEqual(withPort.signupEmails, []);
+    // Hosted signup is open without an explicit restriction.
+    assert.equal(withPort.signupEmails, null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -196,6 +197,7 @@ test('hosted mode rejects missing, insecure or malformed origins', () => {
         loadConfig({
           ...base,
           STRIPSEARCH_PUBLIC_ORIGIN: 'https://search.example.test',
+          STRIPSEARCH_SIGNUP_MODE: 'allowlist',
           STRIPSEARCH_SIGNUP_EMAILS: 'alice@example.test,*@example.test'
         }),
       /exact addresses/
@@ -205,7 +207,7 @@ test('hosted mode rejects missing, insecure or malformed origins', () => {
   }
 });
 
-test('hosted signup opens only with the explicit open policy and rejects misspelled policies', () => {
+test('hosted signup defaults open, ignores legacy lists and requires explicit allowlist restrictions', () => {
   const dir = tempDir();
   const env = {
     STRIPSEARCH_DEPLOYMENT: 'hosted',
@@ -214,8 +216,12 @@ test('hosted signup opens only with the explicit open policy and rejects misspel
     STRIPSEARCH_SIGNUP_EMAILS: 'alice@example.test'
   };
   try {
+    for (const emails of [undefined, '', 'alice@example.test', '*@example.test']) {
+      assert.equal(loadConfig({ ...env, STRIPSEARCH_SIGNUP_EMAILS: emails }).signupEmails, null);
+    }
     assert.equal(loadConfig({ ...env, STRIPSEARCH_SIGNUP_MODE: ' OPEN ' }).signupEmails, null);
     assert.deepEqual(loadConfig({ ...env, STRIPSEARCH_SIGNUP_MODE: 'allowlist' }).signupEmails, ['alice@example.test']);
+    assert.deepEqual(loadConfig({ ...env, STRIPSEARCH_SIGNUP_MODE: 'allowlist', STRIPSEARCH_SIGNUP_EMAILS: '' }).signupEmails, []);
     for (const mode of ['opne', '', 'true', '*']) {
       assert.throws(() => loadConfig({ ...env, STRIPSEARCH_SIGNUP_MODE: mode }), /STRIPSEARCH_SIGNUP_MODE/);
     }
