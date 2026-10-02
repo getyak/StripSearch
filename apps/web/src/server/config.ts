@@ -27,8 +27,8 @@ export interface AppConfig {
   /** Secure cookies are derived from hosted HTTPS only. */
   secureCookies: boolean;
   /**
-   * Normalized lowercase signup allowlist. `null` means local mode or explicitly
-   * open hosted signup; an empty array rejects every new signup.
+   * Normalized lowercase signup allowlist. `null` means local mode or
+   * open hosted signup (the default); an empty array rejects every new signup.
    */
   signupEmails: string[] | null;
   authSecret: string;
@@ -119,7 +119,7 @@ function parseSignupEmails(raw: string | undefined): string[] {
 }
 
 function parseHostedSignupEmails(env: NodeJS.ProcessEnv): string[] | null {
-  const mode = (env.STRIPSEARCH_SIGNUP_MODE ?? 'allowlist').trim().toLowerCase();
+  const mode = (env.STRIPSEARCH_SIGNUP_MODE ?? 'open').trim().toLowerCase();
   if (mode === 'open') return null;
   if (mode !== 'allowlist') {
     throw new Error('STRIPSEARCH_SIGNUP_MODE must be "allowlist" or "open".');

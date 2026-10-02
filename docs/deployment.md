@@ -11,7 +11,7 @@ This deployment does not complete the research-controller, CLI, MCP or benchmark
 - `deploy/compose.yml` uses Linux host networking so the non-root process still listens only at `127.0.0.1:4392`. Nginx is the public endpoint; do not expose this port through the firewall.
 - `/var/lib/stripsearch` holds SQLite and the generated `auth-secret`, outside release images. Keep it private and persistent. The runtime container is read-only except this directory and a bounded temporary filesystem.
 - Hosted mode accepts exactly one configured HTTPS origin and uses Secure, HttpOnly session cookies. Nginx must overwrite forwarded IP/host/protocol headers, preserve the actual browser Origin, and disable response buffering for SSE.
-- Registration defaults to the operator-controlled `STRIPSEARCH_SIGNUP_MODE=allowlist` policy. An email allowlist is **not email ownership verification**. For restricted registration, create the owner's account through a loopback-only connection, then empty `STRIPSEARCH_SIGNUP_EMAILS` and restart. To explicitly open registration, set `STRIPSEARCH_SIGNUP_MODE=open` and restart; HTTPS cookies, exact Origin checks and auth rate limits still apply. Existing accounts can log in; email delivery, verification and password recovery are not configured.
+- Registration defaults to `STRIPSEARCH_SIGNUP_MODE=open`: any valid email can register, and legacy `STRIPSEARCH_SIGNUP_EMAILS` alone does not impose a restriction. Set `STRIPSEARCH_SIGNUP_MODE=open` in the runtime environment as well, so older images used for rollback keep registration open. Restricted operators must explicitly set `STRIPSEARCH_SIGNUP_MODE=allowlist` and supply exact addresses; an empty list then rejects new accounts while existing login works. Upgrading changes the default: deployments that require restricted signup must set `allowlist` before upgrading. HTTPS cookies, exact Origin checks and auth rate limits still apply. Neither mode verifies email ownership; email delivery and password recovery are not configured.
 - Provider keys stay in `/etc/stripsearch/runtime.env` (`0600`, root-owned), never in Git, image layers, browser output, health responses or deployment receipts. Exa is optional; do not reuse an unrelated GitHub account token.
 
 ## First deployment
@@ -26,10 +26,10 @@ This deployment does not complete the research-controller, CLI, MCP or benchmark
    STRIPSEARCH_DEPLOYMENT=hosted
    STRIPSEARCH_PUBLIC_ORIGIN=https://YOUR_HOSTNAME
    STRIPSEARCH_DATA_DIR=/var/lib/stripsearch
-   STRIPSEARCH_SIGNUP_EMAILS=
+   STRIPSEARCH_SIGNUP_MODE=open
    ```
 
-3. Transfer only `git archive <full-commit-sha>` into `/opt/stripsearch/releases/<full-commit-sha>`, then run `bash deploy/release.sh <full-commit-sha>` there as root. It builds the image, snapshots existing data, deploys it, checks container health and the served revision, and enables the backup timer. Bootstrap an owner privately before enabling the public HTTPS virtual host.
+3. Transfer only `git archive <full-commit-sha>` into `/opt/stripsearch/releases/<full-commit-sha>`, then run `bash deploy/release.sh <full-commit-sha>` there as root. It builds the image, snapshots existing data, deploys it, checks container health and the served revision, and enables the backup timer. For an intentionally restricted deployment, set `allowlist` and bootstrap an owner privately before enabling the public HTTPS virtual host.
 4. Verify the public HTTPS homepage and assets, `/api/health`, `/release.json`, authentication, Origin rejection, research/SSE, source revision/export and logout. Restart this project's container and prove a saved account/report survives. Repeat release verification after merging so the deployed SHA equals `origin/main`.
 
 The release script rolls back the image if startup or served-revision verification fails. It does not reverse schema changes. Review future migrations for rollback compatibility before deployment. Keep the previous source/image and pre-upgrade backup until acceptance passes.

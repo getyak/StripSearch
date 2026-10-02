@@ -28,13 +28,13 @@ npm --prefix apps/web start        # 单端口同源服务 http://localhost:4392
 ```bash
 STRIPSEARCH_DEPLOYMENT=hosted \
 STRIPSEARCH_PUBLIC_ORIGIN=https://search.example.com \
-STRIPSEARCH_SIGNUP_EMAILS=alice@example.com,bob@example.com \
+STRIPSEARCH_SIGNUP_MODE=open \
 PORT=4392 npm --prefix apps/web start
 ```
 
 - `STRIPSEARCH_PUBLIC_ORIGIN` 必填，必须是 HTTPS，且无凭据 / 路径 / 查询 / 片段 / 通配符；hosted 只信任这一个 Origin，`baseURL` 固定为它。
 - cookie 变为 Secure（名称 `__Secure-stripsearch.*`），其余属性不变。
-- 默认 `STRIPSEARCH_SIGNUP_MODE=allowlist`：`STRIPSEARCH_SIGNUP_EMAILS` 是逗号分隔、大小写不敏感、精确地址的注册允许名单。未设置或为空时拒绝全部新注册，但已有账号仍可登录；被拒时 UI 显示可读提示。显式设置 `STRIPSEARCH_SIGNUP_MODE=open` 允许任意有效邮箱注册，沿用 HTTPS 会话、Origin 校验与认证限流；不代表邮箱所有权已验证。
+- 默认 `STRIPSEARCH_SIGNUP_MODE=open`，允许任意有效邮箱注册，忽略旧邮箱名单。仅显式设置 `STRIPSEARCH_SIGNUP_MODE=allowlist` 时，才按 `STRIPSEARCH_SIGNUP_EMAILS` 的精确地址名单限制注册（逗号分隔、大小写不敏感）；该模式下名单为空拒绝全部新注册，已有账号仍可登录。HTTPS 会话、Origin 校验与认证限流继续生效；不代表邮箱所有权已验证。
 - 反向代理契约：代理终止公网 HTTPS，并转发到 loopback `PORT`，用真实客户端 IP **覆盖**（不要追加）`X-Forwarded-For`，可选覆盖 `X-Real-IP`。服务端只在 hosted 模式信任来自 loopback（`127.0.0.1` / `::1`）的这些头，用于认证限流 IP 归并；不信任 `X-Forwarded-Host` / `X-Forwarded-Proto`。hosted 认证变更与业务变更都要求精确 Origin，缺失或外来 Origin 返回 403。
 - 部署、持久化、备份与发布验收步骤见[部署说明](../../docs/deployment.md)。
 
@@ -74,10 +74,10 @@ SSE 终态与会话撤销，以及基于 jsdom 的真实控制器回归（迟到
 | `GITHUB_TOKEN` | 可选。GitHub 公开读取无需 token；配置后只提高匿名配额。 |
 | `PORT` | 默认 `4392`。 |
 | `STRIPSEARCH_DATA_DIR` | 默认 `apps/web/.data`（已忽略）。 |
-| `STRIPSEARCH_DEPLOYMENT` | 默认 `local`；`hosted` 启用 HTTPS 部署约束、Secure cookie 与注册名单。 |
+| `STRIPSEARCH_DEPLOYMENT` | 默认 `local`；`hosted` 启用 HTTPS 部署约束与 Secure cookie，默认开放注册。 |
 | `STRIPSEARCH_PUBLIC_ORIGIN` | 受信任的同源地址。local 默认 `http://localhost:4392` 且必须是 loopback HTTP 并匹配 `PORT`；hosted 必填 HTTPS，无路径 / 凭据 / 通配符，仅信任该 Origin。 |
-| `STRIPSEARCH_SIGNUP_EMAILS` | 仅 hosted 生效。逗号分隔、大小写不敏感的注册允许名单；为空则拒绝全部新注册，已有账号仍可登录。 |
-| `STRIPSEARCH_SIGNUP_MODE` | 仅 hosted 生效。默认 `allowlist`；显式 `open` 放开注册，不检查邮箱名单。其他值导致配置错误。 |
+| `STRIPSEARCH_SIGNUP_EMAILS` | 仅 hosted 且显式 `allowlist` 模式生效。逗号分隔、大小写不敏感的精确地址名单；该模式下为空拒绝新注册，已有账号仍可登录。 |
+| `STRIPSEARCH_SIGNUP_MODE` | 仅 hosted 生效。默认 `open`，不检查邮箱名单；显式 `allowlist` 启用名单限制。其他值导致配置错误。 |
 | `BETTER_AUTH_SECRET` | 可选。缺省时在数据目录生成一次 `auth-secret`（权限 `0600`），没有共享默认值。 |
 
 服务端绝不把供应商密钥写入客户端 bundle、日志或 `/api/health`。
