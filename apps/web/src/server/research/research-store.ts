@@ -29,8 +29,10 @@ export interface ResearchCheckpoint {
  /** Latest locally inspected source window (an excerpt scope window, not full text). */
  inspect?: {sourceKey:string;offset:number};
  catalog?: {offset:number;linkOffset:number;unknownOffset:number};
+ localWindows?:string[];
  anchorUrl: string | null; identity: IdentityDraft | null; candidates: IdentityCandidate[];
  notes?:string[];
+ coverageGaps?:string[];
  pages: StoredPage[]; claims: ResearchClaim[]; pendingClaims?: ResearchClaim[]; unknowns: string[]; stopReason: string | null;
 }
 export interface ActionUsage { inputTokens?: number; outputTokens?: number; estimatedUsd?: number | null; credits?: number | null; bytes?: number; unknownCost?: boolean }

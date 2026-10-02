@@ -74,7 +74,8 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    store.addSource(run.id,draft(clean,checkpoint.anchorUrl),checkpoint.pages.indexOf(clean));
    store.addEvent(run.id,'source',store.getSource(run.id,clean.sourceKey));
   }
-  checkpoint.notes=[...new Set([...(checkpoint.notes??[]),...result.limitations.map(v=>sanitizeText(v,500))])];save();
+  checkpoint.notes=[...new Set([...(checkpoint.notes??[]),...result.limitations.map(v=>sanitizeText(v,500))])];
+  checkpoint.coverageGaps=[...new Set([...(checkpoint.coverageGaps??[]),...(result.coverageGaps??[]).map(v=>sanitizeText(v,500)),...(result.nextCursor?['供应商返回下一页游标，历史尚未枚举完成。']:[])])];save();
  };
  const perform=async(action:ResearchToolAction):Promise<ResearchToolResult>=>{
   active();
@@ -102,7 +103,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   active();const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
   if(checkpoint.inspect&&!activePages.some(p=>p.sourceKey===checkpoint.inspect!.sourceKey))delete checkpoint.inspect;
   return await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
-    active();if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
+    active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const key=`model:${step}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
     const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path},{inputTokens:inputBound,outputTokens:2500},limits);
@@ -120,7 +121,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   discoveryOnly:pages.filter(p=>p.retrieval==='search'),
   unread:[...new Set(pages.flatMap(p=>p.links))].filter(url=>!pages.some(p=>p.url===url)),
   truncated:pages.filter(p=>p.textTruncated),
-  unresolved:checkpoint.unknowns};};
+  unresolved:[...checkpoint.unknowns,...(checkpoint.coverageGaps??[])]};};
  const finish=(reason:string,state:'completed'|'partial'):ProviderResult=>{
   checkpoint.phase='done';checkpoint.stopReason=reason;
   if(!options.signal.aborted){checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);}
@@ -136,7 +137,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   const observations=claims.map(c=>({statement:c.statement,kind:c.kind,sourceKeys:[c.sourceKey],limitations:['来源原文摘录；身份归属与独立事实核实另行判断。']}));
   const budget=store.research.budget(run.id,limits);
   return {state,identity:checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates},sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl)),observations,
-   answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
+   answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
  };
  const verify=async():Promise<ProviderResult>=>{
   const claims=checkpoint.pendingClaims??[];
@@ -261,7 +262,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      if(typeof item.sourceKey!=='string'||typeof item.offset!=='number'||!Number.isSafeInteger(item.offset)||item.offset<0)throw new ResearchStop('invalid_decision');
      return {kind:'inspect',sourceKey:item.sourceKey,offset:item.offset};
     }
-    if(item.action==='search'&&typeof item.query==='string')return {kind:'tool',action:{type:'search',query:item.query}};
+    if(item.action==='search'&&typeof item.query==='string')return {kind:'tool',action:{type:'search',query:item.query.trim()}};
     if(['read','social','social_posts','firecrawl'].includes(String(item.action))&&typeof item.url==='string'){
      const url=normalizeResearchUrl(item.url);if(!url)throw new ResearchStop('url_not_discovered');
      return {kind:'tool',action:{type:item.action==='social'?'social_profile':item.action as 'read'|'social_posts'|'firecrawl',url}};
@@ -275,11 +276,15 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     else {const url=normalizeResearchUrl(action.url);if(!url||!allowedUrls().has(url))throw new ResearchStop('url_not_discovered');}
    }
    let madeProgress=false;
+   const localWindows=new Set(checkpoint.localWindows??[]);
    for(const step of planned){
     active();
     if(step.kind==='catalog'){
-     const selected={offset:step.offset,linkOffset:step.linkOffset,unknownOffset:step.unknownOffset};
-     if(JSON.stringify(checkpoint.catalog)!==JSON.stringify(selected)){checkpoint.catalog=selected;madeProgress=true;save();}
+     const activePages=stillActivePages();const offset=Math.min(step.offset,Math.max(0,activePages.length-1));
+     const maxLinks=Math.max(0,...activePages.slice(offset,offset+12).map(p=>p.links.length-1));
+     const selected={offset,linkOffset:Math.min(step.linkOffset,maxLinks),unknownOffset:Math.min(step.unknownOffset,Math.max(0,checkpoint.unknowns.length-1))};
+     const signature='catalog:'+digest({selected,pages:stillActivePages().slice(selected.offset,selected.offset+12).map(p=>({key:p.sourceKey,text:p.text.slice(0,600),links:p.links.slice(selected.linkOffset,selected.linkOffset+20)})),unknowns:checkpoint.unknowns.slice(selected.unknownOffset,selected.unknownOffset+30)});
+     if(!localWindows.has(signature)){localWindows.add(signature);checkpoint.catalog=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];save();}
      continue;
     }
     if(step.kind==='inspect'){
@@ -289,8 +294,8 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      if(!page)throw new ResearchStop('invalid_decision');
      if(!stillActivePages().some(p=>p.sourceKey===step.sourceKey))throw new ResearchStop('source_revoked');
      const selected={sourceKey:page.sourceKey,offset:Math.min(step.offset,page.text.length)};
-     if(checkpoint.inspect?.sourceKey!==selected.sourceKey||checkpoint.inspect.offset!==selected.offset)madeProgress=true;
-     checkpoint.inspect=selected;
+     const signature='inspect:'+digest({...selected,text:page.text.slice(selected.offset,selected.offset+4000)});
+     if(!localWindows.has(signature)){localWindows.add(signature);checkpoint.inspect=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];}
      save();continue;
     }
     const action=step.action;

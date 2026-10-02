@@ -127,7 +127,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
       pages.push({ url, title: text(item.title, 200) || url, text: content, kind: profileKind(url), publishedAt: asString(item.publishedDate), author: author || null, retrieval: searching ? 'search' : 'read', textTruncated: truncated, links: linksFrom(rawContent, asArray(asRecord(item.extras).links), url), limitations: [...limitations, '自链仅作发现线索；供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整，不自动确认身份或历史完整。'] });
     }
     if (requested && pages.length !== 1) fail('请求网页没有返回对应正文。');
-    return result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。']);
+    return {...result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。']),...(!searching?{coverageGaps:['供应商未证明整页正文与出站链接提取完整。']}: {})};
   }
   async function firecrawl(urlInput: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const url = ordinaryUrl(urlInput);
@@ -179,8 +179,8 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     }
     const nextCursor = asString(data.next_cursor);
     const limitations = ['仅保留已核对账号 ID 的本人帖子；转发与引用原文未混入。', '账号读取费用按目录价估算，并非最终账单。'];
-    if (nextCursor || data.timeline.length > pages.length) limitations.push('仅读取一页，最多保留 10 条本人帖子，资料不完整。');
-    return result(pages, bytes, .001, null, limitations, nextCursor);
+    limitations.push('仅读取当前一页，保留全部已核对的本人帖子，历史/线程/评论与媒体未验证完整。');
+    return {...result(pages, bytes, .001, null, limitations, nextCursor),coverageGaps:['X 历史只读取当前一页；评论、线程与媒体尚未完整读取。']};
   }
   async function github(raw: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const url = publicUrl(raw); const handle = extractGitHubHandle(url); if (!handle) fail('需要有效的 GitHub 个人主页链接。');

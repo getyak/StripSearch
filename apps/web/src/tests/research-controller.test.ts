@@ -253,3 +253,36 @@ test('historical checkpoint without limits keeps finite policy after fresh zero 
  const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){throw new Error('must not fetch');}},planner:{async decide(){throw new Error('must not plan');}}});
  assert.equal(store.research.checkpoint(run.id)?.limits?.modelCalls,8);assert.notEqual(result.stopReason,'research_complete');db.close();
 });
+
+
+test('revisiting a local window cycle stops unlimited paid planning',async()=>{
+ const {db,store,run}=setup();let rounds=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[{...profile,text:'a'.repeat(10000)}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<6);return {action:'inspect',sourceKey:'S1',offset:rounds%2?0:4000};}}});
+ assert.equal(rounds,3);assert.equal(result.stopReason,'no_new_evidence');db.close();
+});
+
+
+test('out-of-range catalog offsets normalize to a real window and cannot loop forever',async()=>{
+ const {db,store,run}=setup();let rounds=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[profile],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<5);return {action:'catalog',offset:1000+rounds,linkOffset:1000+rounds,unknownOffset:1000+rounds};}}});
+ assert.equal(rounds,2);assert.equal(result.stopReason,'no_new_evidence');db.close();
+});
+for(const nextCursor of [null,'pending-next-page'])test(`provider coverage gaps keep all-five-facet synthesis partial (${nextCursor})`,async()=>{
+ const {db,store,run}=setup();let rounds=0;
+ const own={...profile,links:[interview.url]};const original={...interview,text:'Ada Fixture started in 2020. Ada Fixture wrote a compiler. Ada Fixture published an essay. Ada Fixture answered a reviewer. Ada Fixture corrected a mistake.',links:[]};
+ const facets=['background','work','expression','interaction','counterevidence'] as const;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(action){return {pages:[action.type==='github_profile'?own:original],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:['Costs are estimates.'],...(action.type!=='github_profile'?{nextCursor,coverageGaps:['Comments have not been read.']}: {})};}},planner:{async decide(input){if(input.mode==='verify')return {supported:[0,1,2,3,4],rejected:[]};return ++rounds===1?{action:'read',url:interview.url}:{action:'finish',claims:facets.map(facet=>({sourceKey:'S2',quote:original.text,facet}))};}}});
+ assert.equal(result.state,'partial');assert.equal(result.observations.length,5);assert.ok(result.limitations.includes('Comments have not been read.'));assert.deepEqual(store.research.checkpoint(run.id)?.unknowns,[]);db.close();
+});
+
+
+test('whitespace variants of a failed search cannot create another charged request',async()=>{
+ const {db,store,run}=setup();let rounds=0,calls=0;const {ProviderError}=await import('../server/adapters/types.js');
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(action){calls++;if(action.type==='search')throw new ProviderError('provider_timeout','unknown outcome');return {pages:[profile],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){return {action:'search',query:++rounds===1?'Ada works':' Ada works '};}}});
+ assert.equal(calls,2);assert.equal(result.stopReason,'no_new_evidence');assert.equal(store.research.receipts(run.id).filter(r=>r.request&&r.kind==='tool').length,2);db.close();
+});
+test('revocation during model preparation prevents sending its stale prompt',async()=>{
+ const {db,store,run}=setup();let rounds=0,modelCalls=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,deepseekApiKey:'synthetic',transport:{async fetch(){modelCalls++;throw new Error('must never send');}},tools:{async execute(action){return {pages:[action.type==='github_profile'?profile:interview],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(_input,signal,invoke){if(++rounds===1)return {action:'read',url:interview.url};store.setSourceExcluded(run.id,'S2',true);await invoke({path:'/v1/messages',body:{max_tokens:2500},signal} as Parameters<typeof invoke>[0]);return {action:'finish',claims:[]};}}});
+ assert.equal(modelCalls,0);assert.equal(result.stopReason,'source_revoked');db.close();
+});
