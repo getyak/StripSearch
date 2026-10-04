@@ -1,6 +1,6 @@
 # 从人工标注到可复核执行：Harness v2
 
-状态：设计与实施验收中。评测实现位于 [stripsearch-evals](https://github.com/getyak/stripsearch-evals)；本文定义与 StripSearch 研究控制器的边界。新候选 Agent 的真实运行不等于当前 Web alpha 已切换，也不代表 Search / Fetch 长研究或全平台 benchmark 完成。
+状态：标注保存与 prepare / run / grade 生命周期已实现，通过本机代码及合成回放验收；完整人物质量验收仍依赖有效人工参考、来源与语义审查。评测实现位于 [stripsearch-evals](https://github.com/getyak/stripsearch-evals)；本文定义与 StripSearch 研究控制器的边界。新候选 Agent 的真实运行不等于当前 Web alpha 已切换，也不代表 Search / Fetch 长研究或全平台 benchmark 完成。
 
 ## 标注暴露的问题
 
