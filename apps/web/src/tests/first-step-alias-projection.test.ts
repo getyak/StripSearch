@@ -361,14 +361,10 @@ test('an unverified search outlink inherits no name relevance from its referring
     const view = await discoverFirstStep(h.ctx);
     // A direct result page title may count name relevance; an unverified
     // outbound link must not jump the read queue through its referring title.
-    assert.deepEqual(h.reads, [home, outlink], 'the profile outlink keeps its platform priority; unrelated generic sites remain material');
+    assert.deepEqual(h.reads, [home], 'an index outlink never inherits the source title or consumes an identity read');
     assert.ok(view.relatedLeads.some(lead => lead.url === other));
-    const linked = view.accounts.find((account) => account.profileUrl === outlink)!;
-    assert.ok(linked, 'the actual outlink stays a candidate');
-    assert.equal(linked.identity.basis, 'search_index', 'the unverified outlink stays an indexed candidate (unknown_role only)');
-    assert.equal(linked.identity.evidence.length, 0);
-    assert.equal(linked.identity.state, 'proposed');
-    assert.equal(linked.defaultSuggestion.suggested, false);
+    assert.equal(view.accounts.some(account => account.profileUrl === outlink),false);
+    assert.ok(view.relatedLeads.some(lead => lead.url === outlink),'the actual indexed profile link stays available as material');
   } finally {
     h.db.close();
   }
@@ -434,5 +430,22 @@ for(const heading of ["My colleague's account",'Not my account; impersonator'])t
     assert.equal(view.accounts.filter(account => account.platform === 'github' && account.profileUrl !== other).length,1);
     assert.equal(view.accounts.find(account => account.profileUrl === canonical)!.identity.state,'proposed');
     assert.ok(view.accounts.some(account => account.profileUrl === other),'unread unrelated direct account stays an uncertain candidate');
+  } finally {h.db.close();}
+});
+
+ test('the frozen read budget reserves capacity for a native variant first observed in the later alias search', async () => {
+  const canonical='https://github.com/FixtureAuthor', variant='https://github.com/fixtureauthor';
+  const noise=['https://github.com/other-fixture-a','https://github.com/other-fixture-b','https://github.com/other-fixture-c'];
+  const policy={maxSearchQueries:11,maxSearchResults:12,maxProfileReads:4,maxModelCalls:2,policyVersion:'first-step/v5'};
+  const h=harness({kind:'name_query',value:'Fixture Author',question:null},{
+    search: query=>query.endsWith('public profile')?[page(variant,'Later indexed profile.')]:[page(canonical,'Indexed author.'),...noise.map(url=>page(url,'Indexed other.'))],
+    read: url=>url===canonical||url===variant?[page(canonical,'Original native account.',{aliasProof:{kind:'native_profile',platform:'github',nativeId:'123456',requestedUrl:url,returnedUrl:canonical}})]:[page(url,'Original other account.')],
+    budget:policy
+  });h.ctx.budget=policy;
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.equal(h.reads.length,4);assert.equal(h.reads[0],canonical);assert.equal(h.reads[2],variant,'the late observed variant gets an actual reserved read');
+    assert.equal(view.accounts.filter(account=>account.profileUrl===canonical||account.profileUrl===variant).length,1);
+    assert.equal(view.accounts.find(account=>account.profileUrl===canonical)!.identity.state,'proposed');
   } finally {h.db.close();}
 });

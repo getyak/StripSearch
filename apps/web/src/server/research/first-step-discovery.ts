@@ -715,6 +715,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const observationIds = new Set<string>();
   const gaps: string[] = [];
   const failures: Array<{ kind: 'search' | 'read'; target: string; platform: string | null; state: FirstStepRouteState; detail: string }> = [];
+  const emptyConstrainedQueries = new Set<string>();
   let budgetExhausted = false;
   let requestIndex = 0;
   const requestKey = (kind: string): string => `firststep:${attemptId}:${kind}:${String(++requestIndex)}`;
@@ -857,6 +858,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     try {
       const result = await ctx.search.search(requestKey('search'), query, budget.maxSearchResults, ctx.signal, includeDomains, provider);
       active();
+      if (includeDomains?.length && result.pages.length === 0) emptyConstrainedQueries.add(query);
       for (const page of result.pages) {
         const classifiedResult = classifyFirstStepUrl(page.url);
         if (!classifiedResult.ok) continue;
@@ -873,8 +875,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         const names=ctx.input.value.split(/\s*[\/／]\s*/).map(name=>name.trim().toLowerCase()).filter(Boolean);
         if(names.some(name=>page.title.toLowerCase().includes(name))){
          for(const link of page.links){
-          const linkRef=classifyFirstStepUrl(link);
-          const linked=register(link, {candidate: !linkRef.ok || !['personal_site','web_page'].includes(linkRef.ref.platform)});if(!linked)continue;
+          const classifiedLink=classifyFirstStepUrl(link);
+          const linked=register(link, {candidate: classifiedLink.ok && classifiedLink.ref.entry === 'page' && classifiedLink.ref.attributable});if(!linked)continue;
           // An index's link list is observed discovery metadata, never an
           // authorial claim, identity support or fetch authorization. An
           // unverified outbound link inherits NO name relevance from its
@@ -1085,6 +1087,16 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    never counted as anchor evidence.
   stage('expanding_accounts', '读取公开身份资料与实际外链');
   const priorityOf = (ref: FirstStepAccountRef): number => {
+    if (!readKeys.has(resolveKey(ref.accountKey))) {
+      const namespace = nativeNamespace(ref);
+      const nativeVariant = namespace !== null && nativeIds.has(namespace);
+      const a = new URL(ref.profileUrl);
+      const hostVariant = observed.some(entry => {
+        const b = new URL(entry.page.url);
+        return entry.ref.entry === 'profile' && (a.hostname === `www.${b.hostname}` || b.hostname === `www.${a.hostname}`) && a.pathname === b.pathname && a.search === b.search;
+      });
+      if (nativeVariant || hostVariant) return -200;
+    }
     const relevance = (indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? -100 : 0;
     if (ref.platform === 'personal_site' || ref.platform === 'linktree') return relevance;
     if (ref.platform === 'github' || ref.platform === 'x') return relevance + 1;
@@ -1103,8 +1115,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     if (ref.entry !== 'profile' || readKeys.has(key) || readQueue.some((other) => resolveKey(other.accountKey) === key)) return;
     readQueue.unshift(ref);
   };
-  const drainReads = async (): Promise<void> => {
-  while (readQueue.length > 0 && readKeys.size < Math.max(0, budget.maxProfileReads)) {
+  const drainReads = async (limit = budget.maxProfileReads): Promise<void> => {
+  while (readQueue.length > 0 && readKeys.size < Math.max(0, limit)) {
     const next = readQueue.shift()!;
     const nextKey = resolveKey(next.accountKey);
     if (readKeys.has(nextKey)) continue;
@@ -1141,7 +1153,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   }
 
   };
-  await drainReads();
+  await drainReads(budget.maxProfileReads > 2 ? budget.maxProfileReads - 2 : budget.maxProfileReads);
 
   // 4. Actual observed alias/coverage expansion with the reserved remaining
   //    query slots: aliases come from read pages only (titles/handles actually
@@ -1153,7 +1165,11 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     .concat(relevantObserved.map((entry) => entry.ref.handle ?? ''))
     .filter((alias): alias is string => typeof alias === 'string' && alias.trim().length >= 2 && !isUntrustedInstructionText(alias));
   const expanded = firstStepQueryPlan(ctx.input, budget, [...new Set(observedAliases)]);
-  for (const item of expanded.slice(queryPlan.length)) {
+  const remainingQueries = Math.max(0, budget.maxSearchQueries - queryPlan.length);
+  const fallbacks: typeof expanded = [...emptyConstrainedQueries].slice(0, remainingQueries).map(query => ({query,family:'empty_route_fallback'}));
+  if (fallbacks.length) gaps.push('定向检索未返回线索，使用剩余额度执行相同姓名查询的无域名限制版本；空结果不证明账号不存在。');
+  const followupQueries = [...fallbacks, ...expanded.slice(queryPlan.length)].slice(0, remainingQueries);
+  for (const item of followupQueries) {
     if ((await searchOnce(item.query, item.includeDomains, item.provider)) === 'budget') break;
   }
 

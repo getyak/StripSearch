@@ -34,13 +34,14 @@ import type { DiscoveredAccountIdentity } from './discovery-plan.js';
 export const FIRST_STEP_SCHEMA_VERSION = 'stripsearch/first-step-discovery/v1';
 export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
 /**
- * Policy v4 (2026-10-05 live coverage repair): generic default of at most 11 search
+ * Policy v5 (2026-10-06 coverage repair): generic default of at most 11 search
  * queries, 12 results per query, 16 identity-profile reads and 2 restricted
  * model calls per discovery attempt. Operator limits always dominate these
  * defaults; the eight initial query families stay frozen and the remaining
- * query slots are reserved for ACTUAL observed alias/coverage expansion.
+ * query slots cover actual empty-route fallback or observed alias expansion.
+ * Up to two identity reads are reserved for leads found by that later wave.
  */
-export const FIRST_STEP_POLICY_VERSION = 'first-step/v4';
+export const FIRST_STEP_POLICY_VERSION = 'first-step/v5';
 
 /* ------------------------------------------------------------------ */
 /* Input                                                               */
@@ -1623,7 +1624,7 @@ export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: string; build: (
 /**
  * Frozen query plan: deliberate coverage per family first, then ACTUAL
  * observed alias/coverage expansion with the reserved remaining budget (the
- * generic v3 default reserves its last two queries for this). No guessed
+ * default reserves its last two queries for this). No guessed
  * usernames, no fabricated aliases, no human-gold seeding.
  */
 export function firstStepQueryPlan(

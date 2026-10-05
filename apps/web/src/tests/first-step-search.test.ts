@@ -14,7 +14,7 @@ import {
   type FirstStepDiscoverContext
 } from '../server/research/first-step-discovery.js';
 import type { ResearchPage, ResearchToolResult } from '../server/research/tool-contracts.js';
-import type { FirstStepInput } from '../shared/first-step-discovery.js';
+import { FIRST_STEP_DEFAULT_BUDGET, type FirstStepInput } from '../shared/first-step-discovery.js';
 
 const homepage = 'https://fixture-linzhou.org/';
 const page = (url: string, text: string, links: string[] = [], title = 'Lin Zhou'): ResearchPage => ({
@@ -609,4 +609,26 @@ for (const heading of ["My colleague's account",'Not my account; impersonator'])
   assert.ok(original.linkContexts[0]!.quote.includes(heading));assert.ok(html.includes(original.linkContexts[0]!.quote));
   if(heading.startsWith('Not'))assert.ok(account.identity.counterevidence.some(e=>e.quote?.includes(heading)));
  }finally{h.db.close();}
+});
+
+ test('an actually empty domain-constrained route uses remaining query capacity for the same unconstrained name query', async () => {
+  const target='https://x.com/linzhou_public';let socialCalls=0;
+  const h=harness({kind:'name_query',value:'Lin Zhou / 林舟',question:null},async query=>{
+    if(query==='Lin Zhou Twitter X profile')return result(socialCalls++===0?[]:[page(target,'Original index title.',[],'Lin Zhou')]);
+    return result([page(homepage,'Lin Zhou')]);
+  },async url=>result([page(url,'Original profile.')]));
+  const raw=h.ctx.search;
+  h.ctx.search=createFirstStepCheckedSearch({store:h.store,runId:h.runId,attemptId:'empty-route-test',budget:FIRST_STEP_DEFAULT_BUDGET,
+    tools:{execute:async action=>action.type==='search'?raw.search('synthetic',action.query,12,new AbortController().signal):raw.readIdentity('synthetic',action,new AbortController().signal)}});
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.equal(socialCalls,2);assert.ok(h.searches.length<=11);
+    const calls=h.store.research.receipts(h.runId).filter(r=>(r.request as {query?:string}).query==='Lin Zhou Twitter X profile');
+    assert.equal(calls.length,2);
+    assert.deepEqual((calls[0]!.request as {includeDomains?:string[]}).includeDomains,['x.com','twitter.com']);
+    assert.equal((calls[1]!.request as {includeDomains?:string[]}).includeDomains,undefined);
+    assert.deepEqual((calls[0]!.result as ResearchToolResult).pages,[],'the actual empty receipt is preserved');
+    assert.equal(view.accounts.find(a=>a.profileUrl===target)!.identity.state,'proposed');
+    assert.ok(view.gaps.some(gap=>gap.includes('空结果不证明账号不存在')));
+  } finally {h.db.close();}
 });
