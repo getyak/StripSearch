@@ -1,4 +1,5 @@
 import { parseFragment, type DefaultTreeAdapterTypes as Tree } from 'parse5';
+import { classifyLinkContext, isExplicitDenialQuote } from '../../shared/first-step-discovery.js';
 import type { ResearchLinkContext } from './tool-contracts.js';
 
 function resolveLink(raw: string, base: string): string | null {
@@ -25,16 +26,25 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
     const href = node.attrs.find(attr => attr.name === 'href')?.value;
     const url = href ? resolveLink(href, base) : null;
     if (!url || !node.sourceCodeLocation) continue;
+    const relMe=(node.attrs.find(attr=>attr.name==='rel')?.value??'').toLowerCase().split(/\s+/).includes('me');
     let block: Tree.Element = node;
+    let semanticVeto: Tree.Element | null = null;
     let ancestor: Tree.Node | null = node.parentNode;
     let thirdParty = false;
     while (ancestor && 'tagName' in ancestor) {
       const attrs = ancestor.attrs.map(attr => `${attr.name}=${attr.value}`).join(' ');
       if (ancestor.tagName === 'blockquote' || THIRD_PARTY.test(attrs)) thirdParty = true;
       if (block === node && BLOCKS.has(ancestor.tagName) && ancestor.sourceCodeLocation) block = ancestor;
+      // A nested paragraph cannot erase the heading or description of an
+      // enclosing semantic container. Inspect actual ancestor text for a
+      // conservative veto; retain its exact span rather than invent context.
+      if (relMe && semanticVeto === null && ancestor.sourceCodeLocation) {
+        const span=original.slice(ancestor.sourceCodeLocation.startOffset,ancestor.sourceCodeLocation.endOffset);
+        if (isExplicitDenialQuote(span)||classifyLinkContext(span)==='third_party') semanticVeto=ancestor;
+      }
       ancestor = ancestor.parentNode;
     }
-    const relMe=(node.attrs.find(attr=>attr.name==='rel')?.value??'').toLowerCase().split(/\s+/).includes('me');
+    if (semanticVeto) block=semanticVeto;
     // Preserve the surrounding original semantics: rel=me cannot discard a
     // nearby denial or attribution to someone else.
     const location = block.sourceCodeLocation!;

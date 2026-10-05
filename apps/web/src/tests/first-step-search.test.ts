@@ -597,3 +597,16 @@ for (const scenario of [
   assert.equal(original.text,html);
  }finally{h.db.close();}
 });
+
+for (const heading of ["My colleague's account",'Not my account; impersonator']) test(`nested rel-me retains the enclosing ${heading} heading`,async()=>{
+ const target='https://github.com/fixture-colleague';
+ const html=`<h1>Lin Zhou</h1><section><h2>${heading}</h2><div><p><a rel="me" href="${target}">GitHub</a></p></div></section>`;
+ const original={...page(homepage,html,[target]),linkContexts:extractOriginalLinkContexts(html,homepage)};
+ const h=harness({kind:'name_query',value:'Lin Zhou',question:null},async()=>result([page(homepage,'Lin Zhou')]),async url=>url===homepage?result([original]):Promise.reject(new ProviderError('provider_unavailable','Unavailable synthetic original')));
+ try{
+  const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===target)!;
+  assert.notEqual(account.identity.state,'supported');assert.equal(account.defaultSuggestion.suggested,false);
+  assert.ok(original.linkContexts[0]!.quote.includes(heading));assert.ok(html.includes(original.linkContexts[0]!.quote));
+  if(heading.startsWith('Not'))assert.ok(account.identity.counterevidence.some(e=>e.quote?.includes(heading)));
+ }finally{h.db.close();}
+});
