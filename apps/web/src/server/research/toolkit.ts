@@ -118,9 +118,14 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const { body, bytes } = await request(`https://api.exa.ai/${searching ? 'search' : 'contents'}`, { method: 'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(payload) }, signal);
     if (!Array.isArray(body.results)) fail('网页供应商返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
+    let excludedSearchResults = 0;
     for (const raw of asArray(body.results).slice(0, searching ? searchCount : 1)) {
       const item = asRecord(raw);
-      const url = publicUrl(item.url);
+      let url: string;
+      try { url = publicUrl(item.url); } catch (error) {
+        if (!searching) throw error;
+        excludedSearchResults++; continue;
+      }
       if (requested && comparable(url) !== comparable(requested)) fail('返回网页与请求地址不匹配。');
       if (requested) {
         const status = asArray(body.statuses).map(asRecord).find(s => typeof s.id === 'string' && (s.id === item.id || s.id === item.url || s.id === requested));
@@ -130,9 +135,10 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
       // Discovery snippets stay bounded; original contents retain all supplied
       // text. Bounded truncation is an explicit gap, never completed content.
       const content = searching ? text(rawContent, TEXT_LIMIT) : retainText(rawContent);
-      if (!content) { if (requested) fail('请求网页没有可用正文。'); else continue; }
+      if (!content && requested) fail('请求网页没有可用正文。');
       const author = text(item.author, 160);
       const limitations = ['网页内容仍需核对人物归属；同名不代表同一人。'];
+      if (searching && !content) limitations.push('仅返回公开搜索入口；供应商未提供摘要正文，不作原文证据。');
       if (author) limitations.push(`页面返回的作者署名：${author}；尚未独立核实。`);
       const truncated = searching && rawContent.length > TEXT_LIMIT;
       if (truncated) limitations.push(`供应商正文为有界读取，最多保留 ${TEXT_LIMIT} 个字符；后续正文是缺口，不能当作完整原文。`);
@@ -142,7 +148,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
       pages.push({ url, title: text(item.title, 200) || url, text: content, kind: profileKind(url), publishedAt: asString(item.publishedDate), author: author || null, retrieval: searching ? 'search' : 'read', textTruncated: truncated, links: linksFrom(rawContent, extraLinks, url), linkContexts: extractOriginalLinkContexts(content, url), limitations: [...limitations, '自链仅作发现线索；供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整，不自动确认身份或历史完整。'] });
     }
     if (requested && pages.length !== 1) fail('请求网页没有返回对应正文。');
-    return {...result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。']),...(!searching?{coverageGaps:['供应商未证明整页正文与出站链接提取完整。']}: {})};
+    return {...result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。', ...(excludedSearchResults > 0 ? [`${String(excludedSearchResults)} 条不安全或非 HTTPS 搜索地址已排除；其余实际安全结果保留，未发起被排除地址的读取。`] : [])]),...(!searching?{coverageGaps:['供应商未证明整页正文与出站链接提取完整。']}: {})};
   }
   async function firecrawl(urlInput: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const url = ordinaryUrl(urlInput);

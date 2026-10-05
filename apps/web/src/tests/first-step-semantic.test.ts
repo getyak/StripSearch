@@ -148,7 +148,7 @@ test('HTML href contexts bind exact spans: relative hrefs bind via the extractor
   const about = 'https://mira-kepler.dev/about';
   const homeText = [
     '<p>Mira Kepler builds compilers.</p>',
-    '<p>check out my code <a href="https://github.com/mira-k">on GitHub</a></p>',
+    '<p>my GitHub profile <a href="https://github.com/mira-k">on GitHub</a></p>',
     '<p>关于我：<a href="/about">资料</a></p>'
   ].join('\n');
   const homePage = page(home, homeText, {
@@ -156,7 +156,7 @@ test('HTML href contexts bind exact spans: relative hrefs bind via the extractor
     linkContexts: [
       {
         url: github,
-        quote: '<p>check out my code <a href="https://github.com/mira-k">on GitHub</a></p>',
+        quote: '<p>my GitHub profile <a href="https://github.com/mira-k">on GitHub</a></p>',
         locator: 'HTML 原文第 37–110 字符',
         binding: 'html_anchor',
         surface: 'authorial'
@@ -183,7 +183,7 @@ test('HTML href contexts bind exact spans: relative hrefs bind via the extractor
     assert.ok(githubAccount, 'the self-linked account home is a card');
     assert.equal(githubAccount!.identity.state, 'supported');
     const evidence = githubAccount!.identity.evidence[0]!;
-    assert.equal(evidence.quote, '<p>check out my code <a href="https://github.com/mira-k">on GitHub</a></p>', 'the exact extractor span is retained');
+    assert.equal(evidence.quote, '<p>my GitHub profile <a href="https://github.com/mira-k">on GitHub</a></p>', 'the exact extractor span is retained');
     // No quote is synthesized and no fake absolute URL is appended: the
     // relative href binds only through the extractor record.
     for (const account of view.accounts) {
@@ -199,7 +199,7 @@ test('HTML href contexts bind exact spans: relative hrefs bind via the extractor
 });
 
 test('model proposals with URL-less subspans bind through the extractor record; the same semantic guard rejects laundered surfaces', () => {
-  const homeText = '<p>check out my code <a href="https://github.com/mira-k">on GitHub</a></p>';
+  const homeText = '<p>my GitHub profile <a href="https://github.com/mira-k">on GitHub</a></p>';
   const contexts: FirstStepObservedLinkContext[] = [
     { url: github, quote: homeText, binding: 'html_anchor', surface: 'authorial' }
   ];
@@ -208,7 +208,7 @@ test('model proposals with URL-less subspans bind through the extractor record; 
   const readContexts = new Map([[home, contexts]]);
   // The subspan shows no URL at all: binding goes through the extractor record.
   const bound = verifyFirstStepModelProposals(
-    [{ targetUrl: github, fromUrl: home, linkRole: 'self_account_section', quote: 'check out my code', requestKey: 'r-home' }],
+    [{ targetUrl: github, fromUrl: home, linkRole: 'self_account_section', quote: 'my GitHub profile', requestKey: 'r-home' }],
     { receipts, readTexts, readContexts }
   );
   assert.equal(bound.accepted.length, 1, 'an exact subspan of the binding context verifies');
@@ -218,7 +218,7 @@ test('model proposals with URL-less subspans bind through the extractor record; 
   // the quote says "my" — a model cannot launder them past the same guard.
   for (const surface of ['third_party', 'unknown'] as const) {
     const laundered = verifyFirstStepModelProposals(
-      [{ targetUrl: github, fromUrl: home, linkRole: 'self_account_section', quote: 'check out my code', requestKey: 'r-home' }],
+      [{ targetUrl: github, fromUrl: home, linkRole: 'self_account_section', quote: 'my GitHub profile', requestKey: 'r-home' }],
       {
         receipts,
         readTexts,
@@ -320,9 +320,9 @@ test('model laundering of the same feed false positive is rejected by the identi
   assert.match(laundered.rejected[0]!.reason, /受限|归属上下文/);
 
   // Positive control: the SAME shape on the person's own home verifies.
-  const homeText = 'My project: <a href="https://github.com/jordan-lee">repo</a>';
+  const homeText = 'My GitHub profile: <a href="https://github.com/jordan-lee">account</a>';
   const valid = verifyFirstStepModelProposals(
-    [{ targetUrl: jordan, fromUrl: home, linkRole: 'self_account_section', quote: 'My project', requestKey: 'r-home' }],
+    [{ targetUrl: jordan, fromUrl: home, linkRole: 'self_account_section', quote: 'My GitHub profile', requestKey: 'r-home' }],
     {
       receipts: new Map([['r-home', { state: 'completed', request: { type: 'read', url: home } }]]),
       readTexts: new Map([[home, homeText]]),
@@ -697,15 +697,16 @@ test('platform first person and website keywords do not establish profile author
   assert.equal(linkRoleFromContext({...flags, sourceIsSocialPlatform: false, targetUrl: workUrl, quote: `My project: ${workUrl}`}).role, 'unknown_role');
 });
 
-test('a generic blog section and its posts share a scope; unrelated website sections stay distinct', () => {
+test('a selected generic personal site includes its own blog sections while other hosts remain distinct', () => {
   const classify = (url: string) => { const result = classifyFirstStepUrl(url); assert.ok(result.ok); return result.ref; };
   const root = classify('https://river-fixture.org/blog');
   const article = classify('https://river-fixture.org/blog/compiler-notes');
   assert.equal(root.entry, 'profile');
   assert.equal(article.entry, 'page');
   assert.equal(root.accountKey, article.accountKey);
-  assert.equal(root.accountUrl, 'https://river-fixture.org/blog/');
-  assert.notEqual(root.accountKey, classify('https://river-fixture.org/news/other-author').accountKey);
+  assert.equal(root.accountUrl, 'https://river-fixture.org/');
+  assert.equal(root.accountKey, classify('https://river-fixture.org/').accountKey);
+  assert.notEqual(root.accountKey, classify('https://another-fixture.org/blog/').accountKey);
 });
 
 
@@ -745,4 +746,24 @@ test('a configured HTML identity reader uses the same frozen receipt and origina
     assert.ok(account.identity.evidence.some(evidence => evidence.quote === html && evidence.sourceUrl === home));
     assert.ok(view.receipts.some(receipt => receipt.kind === 'profile_read' && receipt.target === home && receipt.state === 'completed'));
   } finally {h.db.close();}
+});
+
+
+test('first-person context about a reference website or advisor never assigns that account to the author', () => {
+  const targetUrl = 'https://river-fixture.org/';
+  const flags = {targetUrl, binding: 'html_anchor' as const, surface: 'authorial' as const, sourceIsOwnProfilePage: true, sourceIsDirectory: false, sourceIsSocialPlatform: false};
+  for (const quote of [`<li>I am becoming allergic to <a href="${targetUrl}">500-pound websites</a>.</li>`, `<p>My PhD advisor has a <a href="${targetUrl}">homepage</a>.</p>`]) {
+    assert.equal(linkRoleFromContext({...flags,quote}).role === 'self_account_section', false);
+  }
+  assert.equal(linkRoleFromContext({...flags,quote:`<p>Not my account: <a href="${targetUrl}">website</a>.</p>`}).role, 'explicit_denial');
+  assert.equal(linkRoleFromContext({...flags,quote:`<p>My personal <a href="${targetUrl}">website</a>.</p>`}).role, 'self_account_section');
+});
+
+
+test('a later exact self-account span wins over an earlier uninformative href span without inventing text', async () => {
+  const target = 'https://www.youtube.com/@mira-kepler';
+  const plain = `<div>Watch <a href="${target}">videos</a>.</div>`;
+  const owned = `<p>My YouTube channel: <a href="${target}">lectures</a>.</p>`;
+  const h = harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[page(home,'Mira Kepler')],read:url=>[page(url,plain+owned,{links:[target],linkContexts:[{url:target,quote:plain,locator:'first actual div',binding:'html_anchor',surface:'authorial'},{url:target,quote:owned,locator:'second actual p',binding:'html_anchor',surface:'authorial'}]})]});
+  try {const view=await discoverFirstStep(h.ctx);const account=view.accounts.find(account=>account.platform==='youtube')!;assert.equal(account.identity.state,'supported');assert.ok(account.identity.evidence.some(evidence=>evidence.quote===owned));assert.ok(!account.identity.evidence.some(evidence=>evidence.quote===plain));} finally {h.db.close();}
 });

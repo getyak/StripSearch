@@ -178,3 +178,31 @@ function cluster(clusterId: string, displayName: string, anchorAccountId: string
     accountIds
   };
 }
+
+test('one grounded target is suggested while alternatives stay available; no authority persists until explicit submit', async () => {
+  const fixture = seedFirstStep({accounts:[
+    {url:'https://github.com/linzhou',identityState:'supported',supportedBy:{sourceUrl:'https://lantern.dev/about',quote:'My GitHub profile is Lin Zhou.'}},
+    {url:'https://github.com/morganchen',identityState:'proposed'}
+  ]});
+  try {
+    fixture.republish(view=>({...view,clusters:[
+      {...view.clusters[0]!,clusterId:'linked-person',linkage:'linked',anchorAccountId:view.accounts[0]!.accountId,accountIds:[view.accounts[0]!.accountId],conflicts:[]},
+      {...view.clusters[0]!,clusterId:'other-person',displayName:'Morgan Chen',linkage:'unconfirmed',anchorAccountId:view.accounts[1]!.accountId,anchorUrl:view.accounts[1]!.profileUrl,accountIds:[view.accounts[1]!.accountId],leads:[],conflicts:[]}
+    ]}));
+    const container=env.document.createElement('div');env.document.body.appendChild(container);
+    const posted: FirstStepSelectionPayload[]=[];
+    const panel=createFirstStepPanel({api:panelApi(fixture,posted),container,runId:fixture.run.id});
+    await panel.refresh();
+    const alternatives=container.querySelector<HTMLDetailsElement>('details.first-step-other-people')!;
+    assert.ok(alternatives);assert.equal(alternatives.open,false);
+    assert.equal(container.querySelector('.first-step-cluster.chosen')?.getAttribute('aria-pressed'),'true');
+    assert.equal(container.querySelector<HTMLInputElement>('.first-step-groups input[type="checkbox"]')!.checked,true);
+    assert.equal(fixture.firstStep.selectionBinding(fixture.run.id),null);
+    const actual=fixture.firstStep.getFirstStepView(fixture.run.ownerId,fixture.run.id);
+    assert.ok(actual?.mode==='first_step');
+    assert.equal(actual.view.selection.submitted,false);
+    assert.ok(actual.view.accounts.every(account=>account.userSelection.state==='unanswered'));
+    assert.equal(posted.length,0);
+    panel.destroy();container.remove();
+  } finally {fixture.close();}
+});

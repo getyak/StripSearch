@@ -919,7 +919,10 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
   const blogSection = ['blog', 'weblog', 'journal', 'essays', 'notes', 'writing', 'posts'].includes(segments[0]?.toLowerCase() ?? '') ? segments[0]! : null;
   const blogLike = blogSection !== null || publicationShapedHost;
   const materialUse: FirstStepMaterialUse = isHomeEntry ? (blogLike ? 'writing' : 'identity_anchor') : 'related_material';
-  const siteUrl = `https://${host}/${blogSection === null ? '' : `${blogSection}/`}`;
+  // A selected standalone personal site covers its own writing sections.
+  // Eligibility/material grouping does not split that site's account key.
+  // Shared-host author namespaces above remain distinct.
+  const siteUrl = `https://${host}/`;
   return {
     ok: true,
     ref: refOf('personal_site', href, {
@@ -927,7 +930,7 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
       handle: host,
       instance: host,
       materialUse,
-      accountKind: blogLike ? 'publication' : 'unknown',
+      accountKind: 'unknown',
       entry: isHomeEntry ? 'profile' : 'page',
       attributable: isHomeEntry || publicationShapedHost || blogSection !== null
     })
@@ -1010,8 +1013,8 @@ export interface FirstStepLinkObservation {
 /** Classification of the OBSERVED extraction context around a link. */
 export type FirstStepLinkContextClass = 'ownership' | 'third_party' | 'unknown';
 
-const THIRD_PARTY_MARKERS = /recommend|colleague|friend|朋友|推荐|同事|他们|她们|团队成员|staff|粉丝|fan\b|转载|转发|interview|采访|嘉宾|guest|mentions|cited|inspired by|\bhe\b|\bshe\b|\bhis\b|\bher\b|\btheir\b|他|她/i;
-const OWNERSHIP_MARKERS = /\bmy\b|\bmine\b|\bi am\b|\bi'm\b|\bme\b|follow me|contact me|find me|\baccounts?\b|\bprofiles?\b|我的|我是|我在|关注我|联系我|账号|主页/i;
+const THIRD_PARTY_MARKERS = /recommend|colleague|friend|advis[eo]r|supervisor|employer|mentor|导师|雇主|朋友|推荐|同事|他们|她们|团队成员|staff|粉丝|fan\b|转载|转发|interview|采访|嘉宾|guest|mentions|cited|inspired by|\bhe\b|\bshe\b|\bhis\b|\bher\b|\btheir\b|他|她/i;
+const OWNERSHIP_MARKERS = /\bmy\s+(?:(?:personal|public|official|main|current|first|second|new|old|own|other|original|professional)\s+){0,3}(?:websites?|webpages?|homepages?|sites?|blogs?|channels?|newsletters?|accounts?|profiles?|github|twitter|x|youtube|linkedin|medium|substack|instagram|bluesky|mastodon|rss|notes)\b|\b(?:find|follow|contact|connect with) me\b|\b(?:accounts?|profiles?)\s*:|我的(?:个人|公开|官方|主要|新|旧)?(?:网站|主页|博客|频道|通讯|账号|账户|GitHub|Twitter|YouTube|微博|公众号|小红书)|关注我|联系我|账号[:：]|主页[:：]/i;
 /** Prompt-injection / instruction-shaped text never becomes a person
  * descriptor or an action; source text is untrusted data. */
 const INSTRUCTION_TEXT_MARKERS = /ignore (?:all |previous |above )*(?:instructions?|prompts?|rules?)|you are (?:now )?(?:a|an)\b|as an ai\b|system prompt|system message|<script|javascript:|忽略(?:此前|以上|先前)?(?:的)?(?:指令|指示|提示)|你现在是|系统提示|请(?:把|将).{0,24}(?:标记|确认|选择|提交)|please (?:mark|confirm|select|submit|treat)/i;
@@ -1030,7 +1033,8 @@ export function isUntrustedInstructionText(text: string | null): boolean {
 export function classifyLinkContext(quote: string | null): FirstStepLinkContextClass {
   if (typeof quote !== 'string' || quote.trim().length < 2) return 'unknown';
   if (THIRD_PARTY_MARKERS.test(quote)) return 'third_party';
-  if (OWNERSHIP_MARKERS.test(quote)) return 'ownership';
+  const readable = quote.replace(/<[^>]*>/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ');
+  if (OWNERSHIP_MARKERS.test(readable)) return 'ownership';
   return 'unknown';
 }
 
@@ -1089,6 +1093,10 @@ export function linkRoleFromContext(input: {
     if (target.length === 0 || !quote.includes(target) && !quote.includes(input.targetUrl ?? '')) {
       return { role: 'unknown_role', retrieval: 'link_only' };
     }
+  }
+  if (input.sourceIsOwnProfilePage && !input.sourceIsRestrictedSurface &&
+      (!input.sourceIsSocialPlatform || input.surface === 'profile_field') && isExplicitDenialQuote(quote, input.targetUrl ?? null)) {
+    return { role: 'explicit_denial', retrieval: 'read' };
   }
   const context = classifyLinkContext(quote);
   if (context === 'third_party') return { role: 'prose_mention', retrieval: 'read' };

@@ -781,7 +781,15 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
             gaps.push(`链接上下文摘录不在已读原文中，已忽略：${page.url}`);
             continue;
           }
-          if (!byTarget.has(context.url)) byTarget.set(context.url, context);
+          const rank = (candidate: (typeof contexts)[number]): number => {
+            const role = linkRoleFromContext({quote: candidate.quote, targetUrl: candidate.url, binding: candidate.binding, surface: candidate.surface,
+              sourceIsOwnProfilePage: source.entry === 'profile', sourceIsDirectory: source.platform === 'linktree',
+              sourceIsNativeAccount: candidate.binding === 'native_profile_field' && (page.retrieval === 'profile' || page.account !== undefined),
+              sourceIsRestrictedSurface: flags.sourceIsRestrictedSurface, sourceIsSocialPlatform: flags.sourceIsSocialPlatform}).role;
+            return role === 'explicit_denial' ? 4 : ['self_account_section', 'explicit_directory', 'explicit_claim'].includes(role) ? 3 : role === 'prose_mention' ? 1 : 0;
+          };
+          const previous = byTarget.get(context.url);
+          if (!previous || rank(context) > rank(previous)) byTarget.set(context.url, context);
         }
         // Provider extras without a context stay link_only leads: never exact
         // original evidence.
@@ -1145,7 +1153,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     accountViews,
     observations: linkObservations,
     observed,
-    modelLeads
+    modelLeads,
+    preferredName: ctx.input.value
   });
 
   // 8. Route receipts: real states only. Failures stay failures; routes with
@@ -1294,6 +1303,7 @@ function buildClusters(input: {
   observations: FirstStepLinkObservation[];
   observed: ObservedPage[];
   modelLeads?: Array<{ anchorKey: string | null; statement: string; quote: string; sourceUrl: string }>;
+  preferredName?: string;
 }): FirstStepPersonClusterView[] {
   const supporting = input.observations.filter(
     (observation) =>
@@ -1339,7 +1349,12 @@ function buildClusters(input: {
 
   const clusters: FirstStepPersonClusterView[] = [];
   const sharedConflicts = new Map<string, string[]>();
-  for (const anchor of input.anchors) {
+  const names = (input.preferredName ?? '').toLowerCase().split(/[\/／]/).map(name => name.trim()).filter(Boolean);
+  const scoreAnchor = (anchor: FirstStepAccountRef): number => {
+    const title = input.observed.find(entry => entry.ref.accountKey === anchor.accountKey)?.page.title.trim().toLowerCase() ?? '';
+    return (names.includes(title) ? 100 : 0) + (anchor.platform === 'personal_site' ? 20 : 0) + (new URL(anchor.profileUrl).pathname === '/' ? 5 : 0);
+  };
+  for (const anchor of [...input.anchors].sort((a,b) => scoreAnchor(b) - scoreAnchor(a))) {
     const root = find(anchor.accountKey);
     const clusterId = personClusterId(root);
     if (clusters.some((cluster) => cluster.clusterId === clusterId)) continue;

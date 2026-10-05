@@ -177,3 +177,17 @@ test('Firecrawl preserves actual HTML links and exact spans instead of rebuildin
   assert.equal(read.pages[0]!.linkContexts![0]!.quote, html);
   assert.equal(read.pages[0]!.linkContexts![0]!.url, 'https://github.com/synthetic-author');
 });
+
+
+test('one ineligible search address never discards other safe results; URL-only index entries remain honest leads', async () => {
+  const safe = 'https://x.com/fixture_author';
+  const h = harness({results:[{url:'http://synthetic-author.dev/',text:'unencrypted'},{url:'https://127.0.0.1/',text:'private'},{url:safe,title:'Synthetic Author',text:''},{url:'https://synthetic-author.dev/',title:'Synthetic Author',text:'Public search summary'}],costDollars:{total:.005}});
+  const read=await h.execute({type:'search',query:'Synthetic Author',numResults:12});
+  assert.equal(h.calls.length,1);
+  assert.deepEqual(read.pages.map(page=>page.url),[safe,'https://synthetic-author.dev/']);
+  assert.equal(read.pages[0]!.text,'');
+  assert.equal(read.pages[0]!.retrieval,'search');
+  assert.match(read.pages[0]!.limitations.join(' '),/未提供摘要/);
+  assert.match(read.limitations.join(' '),/2 条/);
+  assert.equal(read.estimatedUsd,.005);
+});

@@ -169,7 +169,16 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     // Person cluster choice.
     const clusterBox = make('section', { className: 'first-step-clusters', attrs: { 'aria-label': '人物候选', 'data-single':view.clusters.length === 1 ? 'true' : 'false' } });
     clusterBox.appendChild(make('h3', { text: '确认目标人物' }));
+    const linkedChoices = view.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0);
+    const recommendedOnly = linkedChoices.length === 1 && clusterId === linkedChoices[0]!.clusterId;
+    const prominentIds = new Set(recommendedOnly ? [clusterId] : [clusterId, ...view.clusters.slice(0, clusterId ? 2 : 3).map(cluster => cluster.clusterId)]);
+    const otherCount = view.clusters.filter(cluster => !prominentIds.has(cluster.clusterId)).length;
+    const others = make('details', {className:'first-step-other-people', attrs:{'data-detail-key':'other-people'}});
+    others.appendChild(make('summary', {text:`其它候选人物（${String(otherCount)}）`}));
+    clusterBox.dataset.single = recommendedOnly || view.clusters.length === 1 ? 'true' : 'false';
+    if (recommendedOnly) clusterBox.appendChild(make('p',{className:'muted',text:'建议目标 · 可展开其它候选更换；点击继续才会提交。'}));
     for (const cluster of view.clusters) {
+      const destination = prominentIds.has(cluster.clusterId) ? clusterBox : others;
       const chosen = clusterId === cluster.clusterId;
       const button = make('button', {
         className: `first-step-cluster${chosen ? ' chosen' : ''}`,
@@ -205,7 +214,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       if (cluster.conflicts.length > 0) {
         button.appendChild(make('small', { className: 'first-step-conflict', text: cluster.conflicts.join('；') }));
       }
-      clusterBox.appendChild(button);
+      destination.appendChild(button);
       // Inspectable linkage basis and descriptor sources: exact spans of the
       // retained originals, rendered as escaped plain text (source HTML never
       // executes) while the original stays inspectable.
@@ -228,8 +237,9 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         basisList.appendChild(make('p', { className: 'muted', text: '暂无可展示的原文依据；这只是候选线索。' }));
       }
       basis.appendChild(basisList);
-      clusterBox.appendChild(basis);
+      destination.appendChild(basis);
     }
+    if (otherCount > 0) clusterBox.appendChild(others);
     if (view.clusters.length === 0) {
       clusterBox.appendChild(make('p', { className: 'muted', text: '暂未辨识出可确认的人物；可以补充一个公开主页或区分线索。' }));
     }
@@ -628,6 +638,10 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     view = next;
     if (typeof nextRunRevision === 'number') runRevision = nextRunRevision;
     if (clusterId === null && next.clusters.length === 1) clusterId = next.clusters[0]!.clusterId;
+    if (clusterId === null && initialSnapshot) {
+      const linked = next.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0);
+      if (linked.length === 1) clusterId = linked[0]!.clusterId;
+    }
     // The draft survives every server push: existing decisions are never
     // overwritten and NEW accounts start unchecked regardless of suggestions.
     for (const account of next.accounts) {
