@@ -34,13 +34,13 @@ import type { DiscoveredAccountIdentity } from './discovery-plan.js';
 export const FIRST_STEP_SCHEMA_VERSION = 'stripsearch/first-step-discovery/v1';
 export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
 /**
- * Policy v3 (2026-10-05 live coverage repair): generic default of at most 10 search
+ * Policy v4 (2026-10-05 live coverage repair): generic default of at most 11 search
  * queries, 12 results per query, 16 identity-profile reads and 2 restricted
  * model calls per discovery attempt. Operator limits always dominate these
  * defaults; the eight initial query families stay frozen and the remaining
  * query slots are reserved for ACTUAL observed alias/coverage expansion.
  */
-export const FIRST_STEP_POLICY_VERSION = 'first-step/v3';
+export const FIRST_STEP_POLICY_VERSION = 'first-step/v4';
 
 /* ------------------------------------------------------------------ */
 /* Input                                                               */
@@ -1554,7 +1554,7 @@ export interface FirstStepBudgetPolicy {
 }
 
 export const FIRST_STEP_DEFAULT_BUDGET: FirstStepBudgetPolicy = {
-  maxSearchQueries: 10,
+  maxSearchQueries: 11,
   maxSearchResults: 12,
   maxProfileReads: 16,
   maxModelCalls: 2,
@@ -1562,7 +1562,7 @@ export const FIRST_STEP_DEFAULT_BUDGET: FirstStepBudgetPolicy = {
 };
 
 /** Deliberate query families covering home/work/writing/social/academic/video. */
-export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: string; build: (value: string) => string; includeDomains?: readonly string[] }> = [
+export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: string; build: (value: string) => string; includeDomains?: readonly string[]; provider?: 'bluesky' }> = [
   { family: 'home', build: (value) => `${value}` },
   { family: 'work', build: (value) => `${value} works projects` },
   { family: 'writing', build: (value) => `${value} blog newsletter` },
@@ -1570,7 +1570,8 @@ export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: string; build: (
   { family: 'visual_social', build: (value) => `${value} Instagram Threads profile`, includeDomains: ['instagram.com', 'threads.net', 'threads.com'] },
   { family: 'federated_social', build: (value) => `${value} Bluesky Mastodon profile`, includeDomains: ['bsky.app', 'mastodon.social'] },
   { family: 'academic', build: (value) => `${value} scholar publications` },
-  { family: 'video', build: (value) => `${value} video channel` }
+  { family: 'video', build: (value) => `${value} video channel` },
+  { family: 'native_bluesky', build: (value) => value, provider: 'bluesky' }
 ];
 
 /**
@@ -1583,10 +1584,10 @@ export function firstStepQueryPlan(
   input: FirstStepInput,
   budget: FirstStepBudgetPolicy,
   observedAliases: readonly string[] = []
-): Array<{ query: string; family: string; includeDomains?: readonly string[] }> {
+): Array<{ query: string; family: string; includeDomains?: readonly string[]; provider?: 'bluesky' }> {
   const value = input.value.trim();
   if (value.length === 0) return [];
-  const plan: Array<{ query: string; family: string; includeDomains?: readonly string[] }> = [];
+  const plan: Array<{ query: string; family: string; includeDomains?: readonly string[]; provider?: 'bluesky' }> = [];
   const max = budget.maxSearchQueries > 0 ? budget.maxSearchQueries : 0;
   if (max === 0) return plan;
   const families = input.kind === 'name_query' ? FIRST_STEP_QUERY_FAMILIES : FIRST_STEP_QUERY_FAMILIES.slice(0, 1);
@@ -1598,8 +1599,8 @@ export function firstStepQueryPlan(
 
   for (const entry of families) {
     if (plan.length >= max) break;
-    const query = entry.build(entry.includeDomains && latinName ? latinName : firstName);
-    if (!plan.some((item) => item.query === query && JSON.stringify(item.includeDomains) === JSON.stringify(entry.includeDomains))) plan.push({ query, family: entry.family, ...(entry.includeDomains ? { includeDomains: entry.includeDomains } : {}) });
+    const query = entry.build((entry.includeDomains || entry.provider) && latinName ? latinName : firstName);
+    if (!plan.some((item) => item.query === query && JSON.stringify(item.includeDomains) === JSON.stringify(entry.includeDomains) && item.provider === entry.provider)) plan.push({ query, family: entry.family, ...(entry.includeDomains ? { includeDomains: entry.includeDomains } : {}),...(entry.provider?{provider:entry.provider}:{}) });
   }
   let aliasSlots = 0;
   const providedAliases = input.kind === 'name_query' ? value.split(/\s*[\/／]\s*/).slice(1) : [];

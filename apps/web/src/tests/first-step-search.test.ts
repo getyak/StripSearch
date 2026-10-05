@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ProviderError } from '../server/adapters/types.js';
 import { applyCoreSchema, openDatabase, type DB } from '../server/db/index.js';
 import { Store } from '../server/store.js';
 import { FirstStepStore } from '../server/research/first-step-store.js';
@@ -549,4 +550,17 @@ test('operator tool-call ceilings bind first-step discovery and fetch budgets', 
   runner.stopAll();
   await new Promise((resolve) => setTimeout(resolve, 20));
   db.close();
+});
+
+
+test('actual index-returned account links become candidates without becoming ownership evidence',async()=>{
+ const url='https://x.com/fixture_writer/status/123456';
+ const h=harness({kind:'name_query',value:'Lin Zhou',question:null},async()=>result([page('https://news-fixture.org/story','Lin Zhou compiler interview',[url])]),async()=>{throw new ProviderError('provider_unavailable','Synthetic inaccessible original');});
+ try {
+  const view=await discoverFirstStep(h.ctx);
+  const account=view.accounts.find(a=>a.profileUrl==='https://x.com/fixture_writer');
+  assert.ok(account,'the actual observed content URL yields its documented account home');
+  assert.equal(account.defaultSuggestion.suggested,false);assert.notEqual(account.identity.state,'supported');
+  assert.equal(account.identity.evidence.length,0);
+ }finally{h.db.close();}
 });

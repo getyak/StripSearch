@@ -153,6 +153,20 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (requested && pages.length !== 1) fail('请求网页没有返回对应正文。');
     return {...result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。', ...(excludedSearchResults > 0 ? [`${String(excludedSearchResults)} 条不安全或非 HTTPS 搜索地址已排除；其余实际安全结果保留，未发起被排除地址的读取。`] : [])]),...(!searching?{coverageGaps:['供应商未证明整页正文与出站链接提取完整。']}: {})};
   }
+  async function blueskySearch(action:Extract<ResearchToolAction,{type:'search'}>,signal:AbortSignal):Promise<ResearchToolResult> {
+    const query=action.query.trim();if(!query||query.length>600)fail('公开账号检索内容为空或过长。');
+    const limit=Math.min(25,Math.max(1,Math.trunc(action.numResults??12)));
+    const {body,bytes}=await request(`https://public.api.bsky.app/xrpc/app.bsky.actor.searchActors?q=${encodeURIComponent(query)}&limit=${limit}`,{},signal);
+    if(!Array.isArray(body.actors))fail('Bluesky 搜索返回了不支持的数据结构。');
+    const pages:ResearchPage[]=[];
+    for(const raw of body.actors.slice(0,limit)){
+      const actor=asRecord(raw),handle=asString(actor.handle),did=asString(actor.did);
+      if(!handle||!/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z][a-zA-Z0-9-]{1,62}$/.test(handle)||!did?.startsWith('did:'))continue;
+      const url=`https://bsky.app/profile/${handle}`;
+      pages.push({url,title:text(actor.displayName,200)||handle,text:[asString(actor.displayName),asString(actor.description)].filter(Boolean).join('\n'),kind:'profile',retrieval:'search',publishedAt:null,links:[],limitations:['Bluesky 公共账号搜索入口；尚未回读，姓名和搜索排序不能证明跨平台归属。']});
+    }
+    return result(pages,bytes,0,null,['Bluesky 公共 AppView，无额外 API 付费；仅读取当前候选页，不声明索引完整。'],asString(body.cursor));
+  }
   async function firecrawl(urlInput: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const url = ordinaryUrl(urlInput);
     const apiKey = key(options.firecrawlApiKey, '网页');
@@ -227,7 +241,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
   return { async execute(action, signal) {
     signal.throwIfAborted();
     switch (action.type) {
-      case 'search': return exa(action, signal);
+      case 'search': return action.provider==='bluesky'?blueskySearch(action,signal):exa(action, signal);
       case 'read': return exa({ type: 'read', url: action.url }, signal);
       case 'firecrawl': return firecrawl(action.url, signal);
       case 'social_profile': case 'social_posts': return social(action.type, action.url, signal);

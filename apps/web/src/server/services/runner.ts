@@ -474,6 +474,7 @@ export class Runner {
         try {
           // Predispatch refusal stops BEFORE any reservation: never billed.
           guardedTools.predispatch?.(action);
+          this.deps.store.addEvent(runId,'stage',{index:binding.accounts.indexOf(account)+1,total:binding.accounts.length,key:`selected-${account.accountId}`,label:`读取已选账号 ${binding.accounts.indexOf(account)+1}/${binding.accounts.length}：${account.profileUrl}`,status:'active'});
           const old = this.deps.store.research.reserve(runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, fetchLimits, true);
           if (old) {
             if (old.state !== 'completed') {

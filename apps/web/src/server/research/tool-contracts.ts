@@ -1,6 +1,6 @@
 import type { HttpTransport } from '../adapters/types.js';
 export type ResearchToolAction =
- | { type: 'search'; query: string; numResults?: number; includeDomains?: readonly string[] }
+ | { type: 'search'; query: string; numResults?: number; provider?: 'bluesky'; includeDomains?: readonly string[] }
  | { type: 'read' | 'firecrawl' | 'social_profile' | 'social_posts' | 'github_profile'; url: string };
 export interface ResearchAccount { platform: 'github' | 'x'; handle: string; id: string; profileUrl: string }
 /** A link bound to an exact span of the retained original, never an index label. */

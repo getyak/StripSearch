@@ -315,3 +315,47 @@ test('an undiscovered URL in a batch never dispatches or aborts the permitted br
   assert.equal(f.store.research.budget(f.run.id).toolCalls, 3);
 });
 
+test('malformed nested batch gets counted feedback without dispatching any part of the rejected proposal', async (t) => {
+  const f = fixture();
+  t.after(() => f.close());
+  select(f);
+  const { calls, tools } = recordingTools();
+  let planCalls = 0;
+  let verifyCalls = 0;
+  const planner: ResearchPlanner = {
+    async decide(input) {
+      if (input.mode === 'verify') { verifyCalls++; return { supported: [0], rejected: [] }; }
+      planCalls++;
+      // The planner first follows the inert third-party link found on the seed…
+      if (planCalls === 1) return { action: 'batch', actions: [{action:'read',url:CONTENT_URL},{action:'batch',actions:[{action:'read',url:INERT_URL}]}] };
+      assert.match(input.checkpoint.planFeedback??'',/禁止嵌套/);
+      // …then keeps planning: a cited claim from the seed material and finish.
+      return { action: 'finish', claims: [{ sourceKey: sourceKeyFor(input, HOME_URL), quote: HOME_TEXT, statement: CLAIM, kind: 'page_statement' }] };
+    }
+  };
+  const runner = runnerFor(f, tools, planner);
+  t.after(() => runner.stopAll());
+  const run = await runToTerminal(f, runner);
+
+  assert.equal(run.state, 'partial');
+  assert.equal(run.stopReason, 'limited_evidence');
+  assert.equal(run.errorCode, null);
+  // Refused target never fetched and never retried: only selected-account seed reads ran.
+  assert.equal(calls.length, 2);
+  assert.ok(!calls.some((call) => 'url' in call && call.url === INERT_URL), 'the refused target is never fetched');
+  // Useful continuation: the refusal did not end the run; planning and the independent verify both ran.
+  assert.ok(planCalls >= 2, 'planning continues after the refusal');
+  assert.equal(verifyCalls, 1);
+  assert.equal(f.store.listObservations(f.run.id)[0]?.statement, CLAIM);
+  // Explicit, visible gap naming the refused target.
+  assert.ok(run.limitations.some((line) => line.includes('模型方案未通过校验')), 'the gap names the never-fetched target');
+  // Original permitted material retained.
+  const view = f.store.buildCanonicalView(run);
+  assert.ok(view.sources.some((source) => source.excerpt === HOME_TEXT));
+  // The rejected predispatch action is unbilled and leaves no orphan inflight.
+  const receipts = f.store.research.receipts(f.run.id);
+  assert.ok(receipts.every((receipt) => receipt.state !== 'inflight'));
+  assert.ok(!receipts.some((receipt) => JSON.stringify(receipt.request).includes(INERT_URL)), 'no receipt exists for the refused proposal');
+  assert.equal(f.store.research.budget(f.run.id).toolCalls, 2);
+});
+

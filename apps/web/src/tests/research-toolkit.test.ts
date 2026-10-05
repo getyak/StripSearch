@@ -219,3 +219,13 @@ test('platform recall forwards explicit search domains in one request and reject
   await assert.rejects(invalid.execute({ type: 'search', query: 'Synthetic Author', includeDomains: ['127.0.0.1'] }));
   assert.equal(invalid.calls.length, 0);
 });
+
+
+test('Bluesky name discovery uses one unauthenticated native search and remains indexed', async()=>{
+ const h=harness({actors:[{handle:'mira-compiler.bsky.social',did:'did:plc:syntheticfixture',displayName:'Mira Chen',description:'Public compiler notes.'},{handle:'127.0.0.1/path',did:'did:plc:invalid',displayName:'Invalid'}],cursor:'opaque'},200,{exaApiKey:null,tikhubApiKey:null,firecrawlApiKey:null});
+ const r=await h.execute({type:'search',provider:'bluesky',query:'Mira Chen',numResults:12});
+ assert.equal(r.pages.length,1);assert.equal(r.pages[0]?.retrieval,'search');assert.equal(r.pages[0]?.url,'https://bsky.app/profile/mira-compiler.bsky.social');
+ assert.equal(r.pages[0]?.text,'Mira Chen\nPublic compiler notes.');assert.equal(r.estimatedUsd,0);assert.equal(h.calls.length,1);
+ assert.match(h.calls[0]!.url,/^https:\/\/public\.api\.bsky\.app\/xrpc\/app\.bsky\.actor\.searchActors\?q=Mira%20Chen&limit=12$/);
+ assert.equal(h.calls[0]!.init?.headers?.authorization,undefined);assert.equal(r.nextCursor,'opaque');
+});

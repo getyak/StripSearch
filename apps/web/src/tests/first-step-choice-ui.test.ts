@@ -112,8 +112,9 @@ test('chosen cluster accounts are the main choices; unconfirmed leads are a coll
     assert.equal(colleagueCard.checked, false, 'unconfirmed leads are never default-checked');
     // Sourcequote HTML is escaped plain text; the original stays inspectable
     // and no source HTML ever executes.
-    const quotes = container.querySelectorAll('blockquote');
+    const quotes = container.querySelectorAll('.first-step-original pre');
     assert.ok(quotes.length >= 2, 'exact source quotes remain inspectable');
+    assert.match(container.querySelector('blockquote')?.textContent??'',/本人声明摘录/, 'the readable excerpt contains text without executing markup');
     for (const quote of quotes) {
       assert.match(quote.textContent ?? '', /<img src=x onerror=/, 'the original quote is shown as text');
     }

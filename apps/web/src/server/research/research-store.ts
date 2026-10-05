@@ -41,6 +41,8 @@ export interface FirstStepBinding {
 }
 export interface StoredPage extends ResearchPage { sourceKey: string; discoveredFrom?: string[]; inheritedFrom?: {runId: string; sourceKey: string} }
 export interface ResearchCheckpoint {
+ /** Last bounded model validation feedback; never source evidence. */
+ planFeedback?: string;
  phase: string; steps: number; startedAt: number; elapsedMs: number;
  limits?: ResearchBudgetLimits;
  /** Latest locally inspected source window (an excerpt scope window, not full text). */

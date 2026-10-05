@@ -160,3 +160,7 @@
 来源：[Exa Search domain filters](https://exa.ai/docs/reference/search)、[Firecrawl rate limits](https://docs.firecrawl.dev/rate-limits)、[GitHub user fields](https://docs.github.com/en/rest/users/users)、[Stanford Profiles directory](https://profiles.stanford.edu/)。以上接口验证不代替真实召回、语义归属、界面或下游报告验收。
 
 运行补充：Medium 官方明确 `username.medium.com` 与 `medium.com/@username` 是同一用户名的个人主页 URL 方案（https://help.medium.com/hc/en-us/articles/115004746707-Your-profile-page-URL）。仅此平台的已记录方案共享账号键；任意自定义域名不按名字猜测归并。混合文字输入中的完整 Latin 姓名可作为用户已提供的查询变体；保留原始输入，不生成用户名。
+
+Harness 补充：第一步 Fetch 的模型方案若结构或引用校验失败，整批不执行并记录明确反馈，消耗已发生的模型调用，在原预算内继续规划；撤回/失效仍立即停止。合法范围不会因反馈扩大。搜索结果实际返回的外链可作为 indexed 候选入口，不能升为原文证据或默认选择。
+
+检索 v4：保留八类 Web 查询，并增加一条按用户提供姓名调用 Bluesky 公共 AppView `app.bsky.actor.searchActors` 的候选检索（https://endpoints.bsky.app/）。默认最多 11 个检索、12 条/次、16 次身份读取、2 次受限模型，仍服从操作员上限；两个余量用于实际别名。原生搜索结果仍是 indexed，只能发现，不能证明同人或产生默认勾选。TikHub People 检索实测返回 tweet，未作为已验证的用户搜索能力上线。

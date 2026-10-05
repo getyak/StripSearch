@@ -289,6 +289,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    const activePages=stillActivePages();
    const decision=await ask('plan');
    active();
+   try {
    if(!object(decision)||typeof decision.action!=='string')throw new ResearchStop('invalid_decision');
    if(decision.action==='finish'){
     if(!Array.isArray(decision.claims))throw new ResearchStop('invalid_evidence');
@@ -395,6 +396,14 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    }
    checkpoint.steps++;save();
    if(!madeProgress&&limits.modelCalls===0)return finish(limits.toolCalls>0&&store.research.budget(run.id,limits).toolCalls>=limits.toolCalls?'budget_exhausted':'no_new_evidence','partial');
+   } catch(error) {
+    if(!options.firstStepScope||!(error instanceof ResearchStop)||!['invalid_decision','invalid_evidence','url_not_discovered'].includes(error.code))throw error;
+    // Validate the whole proposal before dispatch. Corrective planning is a
+    // new, metered model call under the original cap, never a hidden retry.
+    checkpoint.planFeedback=`上个方案未被接受（${error.code}）。只允许一个平铺的 batch，actions 为 1–4 个 read/search/social/social_posts/firecrawl/inspect/catalog，禁止嵌套 batch；inspect 仅使用已存 sourceKey 与非负整数 offset。finish 的 quote 必须是已读 sourceKey 原文中精确、连续的 3–600 字符片段，不能把 HTML 改写后的展示文本当原文。请改正方案；仅使用所选范围，不猜测地址。`;
+    checkpoint.unknowns.push(`模型方案未通过校验（${error.code}）；该方案未成为结论，保留缺口并在原预算内重新规划。`);
+    checkpoint.steps++;save();
+   }
   }
   return finish('budget_exhausted','partial');
  }catch(error){

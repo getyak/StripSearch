@@ -241,7 +241,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       const excerpt = previewLead?.quote ?? cluster.anchorBasis?.quote;
       const excerptSource = previewLead?.sourceUrl ?? cluster.anchorBasis?.sourceUrl;
       if (excerpt) {
-        button.appendChild(make('small', { className: 'first-step-lead', text: `原文摘录：“${excerptText(excerpt)}”` }));
+        button.appendChild(make('small', { className: 'first-step-lead', text: `原文摘录：“${excerptText(excerpt).slice(0,180)}${excerptText(excerpt).length>180?'…':''}”` }));
         if (excerptSource) button.appendChild(make('small', { className: 'first-step-lead-source', text: `来源：${shortUrl(excerptSource)}` }));
       }
       if (cluster.conflicts.length > 0) {

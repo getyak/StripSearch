@@ -137,7 +137,7 @@ export function renderReport(
       make('p', { className: 'review-flag', text: '服务重启，这份报告被标记为中断，可以手动重试。' })
     );
   }
-  if (view.identity.status !== 'resolved' && view.identity.note) {
+  if (view.identity.status !== 'resolved' && view.identity.note && !['queued','researching'].includes(view.state)) {
     header.appendChild(make('p', { className: 'identity-note', text: view.identity.note }));
   } else if (view.identity.profileUrl) {
     header.appendChild(make('p', { className: 'identity-note', text: '基于该账号及本次读取的公开资料。' }));

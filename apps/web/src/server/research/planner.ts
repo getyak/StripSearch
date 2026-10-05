@@ -17,16 +17,13 @@ function originalPreviewOffset(page:ResearchCheckpoint['pages'][number]):number 
  let offset=0;
  if(/<(?:html|body|p|div)\b/i.test(page.text)){
   const root=parseFragment(page.text,{sourceCodeLocationInfo:true});
-  const visit=(node:Tree.Node,hidden:boolean):number|null=>{
-   const excluded=hidden||('tagName' in node&&['script','style','nav','footer','header','noscript','template'].includes(node.tagName));
-   if(excluded)return null;
-   if(node.nodeName==='#text'&&'value' in node&&node.value.trim().length>=70&&node.sourceCodeLocation){
-    return node.sourceCodeLocation.startOffset+Math.max(0,node.value.search(/\S/u));
-   }
-   if('childNodes' in node)for(const child of node.childNodes){const found=visit(child,false);if(found!==null)return found;}
-   return null;
-  };
-  offset=visit(root,false)??0;
+  const pending:Tree.Node[]=[root];
+  while(pending.length){
+   const node=pending.pop()!;
+   if('tagName' in node&&['script','style','nav','footer','header','noscript','template'].includes(node.tagName))continue;
+   if(node.nodeName==='#text'&&'value' in node&&node.value.trim().length>=70&&node.sourceCodeLocation){offset=node.sourceCodeLocation.startOffset+Math.max(0,node.value.search(/\S/u));break;}
+   if('childNodes' in node)for(let index=node.childNodes.length-1;index>=0;index--)pending.push(node.childNodes[index]!);
+  }
  }
  originalPreviewOffsets.set(page,offset);return offset;
 }
@@ -87,7 +84,7 @@ export function buildResearchPrompt(input:PlannerInput):string {
    // and honest per-account coverage. Checkpoints without a binding (frozen
    // replay and legacy runs) keep the historical prompt verbatim.
    ...(input.checkpoint.firstStep?{firstStepScope:{
-     clusterId:input.checkpoint.firstStep.clusterId,displayName:input.checkpoint.firstStep.displayName,anchorUrl:input.checkpoint.firstStep.anchorUrl,
+     lastValidationFeedback:input.checkpoint.planFeedback??null,clusterId:input.checkpoint.firstStep.clusterId,displayName:input.checkpoint.firstStep.displayName,anchorUrl:input.checkpoint.firstStep.anchorUrl,
      accounts:input.checkpoint.firstStep.accounts.map(a=>({accountId:a.accountId,profileUrl:a.profileUrl,allowedScope:a.allowedScope,independent:a.independent,accessCoverage:a.accessCoverage})),
      note:'研究只限这些已选账号；独立账号材料只作该账号自身记录，不并入同一人物结论；未选/排除/后来发现的账号不能读取。只请求 sources.links 中实际观察到的地址，不得根据名称拼接或猜测网址。链接目录已按冻结范围筛选，最终仍由实时权限守卫判断。优先 inspect 已存原文以提炼有依据的结论；范围外线索记录为缺口，继续整理已选资料。' 
    }}:{}),

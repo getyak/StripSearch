@@ -77,7 +77,7 @@ import type { IdentitySupportState, ScopeVersion } from '../../shared/research-c
 
 export interface FirstStepCheckedSearch {
   /** Ordinary web search with a bounded result count; one metered request. */
-  search(requestKey: string, query: string, numResults: number, signal: AbortSignal, includeDomains?: readonly string[]): Promise<ResearchToolResult>;
+  search(requestKey: string, query: string, numResults: number, signal: AbortSignal, includeDomains?: readonly string[], provider?: 'bluesky'): Promise<ResearchToolResult>;
   /** Minimal identity read of one already-classified public page. */
   readIdentity(requestKey: string, action: ResearchToolAction, signal: AbortSignal): Promise<ResearchToolResult>;
   /** Real request receipts for the discovery projection (original timestamps). */
@@ -168,9 +168,9 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
     }
   };
   return {
-    async search(requestKey, query, numResults, signal, includeDomains) {
+    async search(requestKey, query, numResults, signal, includeDomains, provider) {
       if (query.trim().length === 0 || query.length > 600) throw new ResearchStop('invalid_decision');
-      return run(requestKey, 'search', query, 'indexed', { type: 'search', query, numResults, ...(includeDomains ? { includeDomains } : {}) }, signal);
+      return run(requestKey, 'search', query, 'indexed', { type: 'search', query, numResults, ...(includeDomains ? { includeDomains } : {}),...(provider?{provider}:{}) }, signal);
     },
     async readIdentity(requestKey, action, signal) {
       // The first step may only read identity-level material: no posts, no
@@ -706,15 +706,26 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     linkObservations.push(observation);
   };
 
-  const searchOnce = async (query: string, includeDomains?: readonly string[]): Promise<'ok' | 'failed' | 'budget'> => {
+  const searchOnce = async (query: string, includeDomains?: readonly string[], provider?: 'bluesky'): Promise<'ok' | 'failed' | 'budget'> => {
     active();
     try {
-      const result = await ctx.search.search(requestKey('search'), query, budget.maxSearchResults, ctx.signal, includeDomains);
+      const result = await ctx.search.search(requestKey('search'), query, budget.maxSearchResults, ctx.signal, includeDomains, provider);
       active();
       for (const page of result.pages) {
         const ref = register(page.url);
         if (!ref) continue;
         indexedTitles.set(ref.accountKey, [...(indexedTitles.get(ref.accountKey) ?? []), page.title]);
+        const names=ctx.input.value.split(/\s*[\/／]\s*/).map(name=>name.trim().toLowerCase()).filter(Boolean);
+        if(names.some(name=>page.title.toLowerCase().includes(name))){
+         for(const link of page.links){
+          const linked=register(link);if(!linked)continue;
+          // An index's link list is observed discovery metadata, never an
+          // authorial claim, identity support or fetch authorization.
+          indexedTitles.set(linked.accountKey,[...(indexedTitles.get(linked.accountKey)??[]),`${page.title} 的出链（未核对归属）`]);
+          pushObservation({observationId:`obs_index_link_${digest([page.url,link])}`,sourceId:`search:${digest(query)}`,sourceRevision:1,sourceUrl:page.url,sourceContentHash:null,sourceRetrievedAt:null,fromAccountKey:null,targetAccountKey:linked.accountKey,targetUrl:link,linkRole:'unknown_role',direction:'outbound',retrieval:'indexed',quote:null,locator:'搜索结果返回的实际外链；未回读原文，不作归属依据。',observedAt:now()});
+         }
+        }
+
         const classified = classifyFirstStepUrl(page.url);
         if (!classified.ok) continue;
         pushObservation({
@@ -883,7 +894,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    stop the wave and one failure never hides the other routes.
   const queryPlan = firstStepQueryPlan(ctx.input, budget);
   for (const item of queryPlan) {
-    if ((await searchOnce(item.query, item.includeDomains)) === 'budget') break;
+    if ((await searchOnce(item.query, item.includeDomains, item.provider)) === 'budget') break;
   }
 
   // 3. Minimal identity reads BEFORE the explicit selection, prioritizing
@@ -946,7 +957,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     .filter((alias): alias is string => typeof alias === 'string' && alias.trim().length >= 2 && !isUntrustedInstructionText(alias));
   const expanded = firstStepQueryPlan(ctx.input, budget, [...new Set(observedAliases)]);
   for (const item of expanded.slice(queryPlan.length)) {
-    if ((await searchOnce(item.query, item.includeDomains)) === 'budget') break;
+    if ((await searchOnce(item.query, item.includeDomains, item.provider)) === 'budget') break;
   }
 
   for (const ref of [...candidateRefs.values()].sort((a, b) => priorityOf(a) - priorityOf(b)).reverse()) enqueueRead(ref);
