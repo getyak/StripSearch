@@ -195,10 +195,12 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     clusterBox.appendChild(make('h3', { text: '确认目标人物' }));
     const linkedChoices = view.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0 && clusterFitsInput(cluster, view!));
     const recommendedOnly = linkedChoices.length === 1 && clusterId === linkedChoices[0]!.clusterId;
-    const prominentIds = new Set(recommendedOnly ? [clusterId] : [clusterId, ...view.clusters.slice(0, clusterId ? 2 : 3).map(cluster => cluster.clusterId)]);
+    const matchingClusters = view.clusters.filter(cluster => clusterFitsInput(cluster, view!));
+    const prominentCandidates = matchingClusters.length > 0 ? matchingClusters : view.clusters;
+    const prominentIds = new Set(recommendedOnly ? [clusterId] : [clusterId, ...prominentCandidates.filter(cluster => cluster.clusterId !== clusterId).slice(0, clusterId ? 2 : 3).map(cluster => cluster.clusterId)]);
     const otherCount = view.clusters.filter(cluster => !prominentIds.has(cluster.clusterId)).length;
     const others = make('details', {className:'first-step-other-people', attrs:{'data-detail-key':'other-people'}});
-    others.appendChild(make('summary', {text:`其它候选人物（${String(otherCount)}）`}));
+    others.appendChild(make('summary', {text:`其它人物或主页线索（${String(otherCount)}）`}));
     clusterBox.dataset.single = recommendedOnly || view.clusters.length === 1 ? 'true' : 'false';
     if (recommendedOnly) clusterBox.appendChild(make('p',{className:'muted',text:'建议目标 · 可展开其它候选更换；点击继续才会提交。'}));
     for (const cluster of view.clusters) {

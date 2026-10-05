@@ -225,3 +225,29 @@ test('a linked cluster for an unrelated name never becomes the recommended targe
     assert.deepEqual(posted, []);
   } finally { panel.destroy(); fixture.db.close(); }
 });
+
+test('literal name matches lead the visible choices while unrelated page titles remain accessible without authority', async () => {
+  const fixture = seedFirstStep({ accounts: [{url:'https://github.com/linzhou'}, {url:'https://github.com/morganchen'}] });
+  fixture.republish(view => ({...view, input:{...view.input,kind:'name_query',value:'Lin Zhou'}, clusters:[
+    cluster('organization', 'Lantern Compiler Data Services', view.accounts[1]!.accountId, [view.accounts[1]!.accountId]),
+    cluster('matching', 'Lin Zhou | Synthetic University', view.accounts[0]!.accountId, [view.accounts[0]!.accountId])
+  ]}));
+  const container = env.document.createElement('div');env.document.body.appendChild(container);
+  const posted:FirstStepSelectionPayload[]=[];
+  const panel=createFirstStepPanel({api:panelApi(fixture,posted),container,runId:fixture.run.id});
+  try {
+    await panel.refresh();
+    const main=container.querySelector('.first-step-clusters')!;
+    const other=main.querySelector<HTMLDetailsElement>('.first-step-other-people')!;
+    assert.equal(other.open,false);
+    assert.match(other.querySelector('.first-step-cluster')!.textContent??'',/Lantern Compiler Data Services/);
+    assert.equal([...main.children].filter(child=>child.matches('button.first-step-cluster')).length,1);
+    assert.match(main.querySelector(':scope > button.first-step-cluster')!.textContent??'',/Lin Zhou/);
+    assert.equal(panel.selectedCount(),0);
+    assert.deepEqual(posted,[]);
+    other.open=true;
+    other.querySelector<HTMLButtonElement>('.first-step-cluster')!.click();
+    assert.match(container.querySelector('.first-step-clusters > button.first-step-cluster.chosen')!.textContent??'',/Lantern Compiler Data Services/);
+    assert.equal(fixture.firstStep.selectionBinding(fixture.run.id),null);
+  } finally {panel.destroy();fixture.db.close();container.remove();}
+});

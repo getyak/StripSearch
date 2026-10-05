@@ -176,3 +176,5 @@ Fetch 规划补充：所选账号的已发现原文足以开始形成结论后�
 默认 Fetch 模型上下文保留每个已选账号的一份实际原文，再填充最近取得的材料（合计仍至多12预览）；避免一页社交时间线挤掉主页、作品、文章和视频的已读线索。显式 catalog 窗口仍按原始目录连续分页，所有原文保持完整且可 inspect；所展示 sourceKeys 与模式显式记录，不谎称连续窗口。
 
 检索 v4 契约补充（输入契约与冻结预算，2026-10-06）：合法 URL 输入（≤2048 字符）按原样读取、分类与展示；只有其发现检索词是显式有界的「主机名 + 实际有界路径」构造（≤600 字符检索契约），绝不改写来源读取 URL、不猜测 handle、不生成别名；姓名查询保留实际输入文本。冻结模型预算耗尽与工具预算耗尽同等待遇：保留全部已发现结果，追加 ready_for_choice 投影与诚实的 skipped_budget 路线状态/缺口，不额外派发或预留模型调用、不伪造成功；只有 run_inactive 与真实 abort（取消/时限）才是 liveness 停止，输入决策错误与预算耗尽一律如实记为失败/缺口，不落成 internal_error。
+
+Candidate presentation prioritizes literal input-name/URL matches without upgrading identity: if matching candidates exist, unrelated read-page titles stay in a collapsed “other person or homepage leads” disclosure. Explicitly chosen alternatives remain visible. This visual order grants no default selection, identity support, merge or Fetch permission.
