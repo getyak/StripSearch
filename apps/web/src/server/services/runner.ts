@@ -388,6 +388,7 @@ export class Runner {
         .map(([accountKey]) => accountKey)
     );
     const firstStepScope = {
+      assertCurrent: () => guard.assertCurrent(),
       selectedAccountKeys: new Set(Object.keys(binding.accountKeys)),
       independentAccountKeys,
       accountKeyOf: (url: string): string | null => {

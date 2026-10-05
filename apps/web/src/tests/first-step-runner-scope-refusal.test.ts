@@ -424,3 +424,34 @@ test('a later unknown inspect reference refuses the entire proposal before a per
   assert.equal(f.store.buildCanonicalView(run).sources.some(source => source.url === CONTENT_URL), false);
   assert.equal(f.store.buildCanonicalView(run).observations.length, 1);
 });
+
+for (const phase of ['plan_return','plan_transport','verify_transport'] as const) {
+ test(`scope withdrawal during ${phase} refuses late claims and further model dispatch`,async(t)=>{
+  const f=fixture();t.after(()=>f.close());select(f);
+  const {calls,tools}=recordingTools();const modes:string[]=[];let modelCalls=0;
+  const planner:ResearchPlanner={async decide(input,signal,invoke){
+   modes.push(input.mode ?? 'plan');
+   await invoke({path:'/v1/messages',body:{model:'deepseek-flash',max_tokens:2500},signal});
+   if(input.mode==='verify')return {supported:[0],rejected:[]};
+   if(phase==='plan_return')withdraw(f);
+   return {action:'finish',claims:[{sourceKey:sourceKeyFor(input,HOME_URL),quote:HOME_TEXT,statement:CLAIM,kind:'page_statement'}]};
+  }};
+  const runner=new Runner({store:f.store,firstStep:f.firstStep,researchTools:tools,researchPlanner:planner,
+   config:{researchLimits:LIMITS,deepseekApiKey:'synthetic-mock-only',exaApiKey:null,firecrawlApiKey:null,tikhubApiKey:null,githubToken:null} as AppConfig,
+   providerFactory:()=>{throw new Error('unexpected legacy provider');},
+   transport:{async fetch(){modelCalls++;if(phase==='plan_transport'&&modelCalls===1||phase==='verify_transport'&&modelCalls===2)withdraw(f);
+    return new Response(JSON.stringify({usage:{input_tokens:30,output_tokens:5}}),{status:200});}}
+  });t.after(()=>runner.stopAll());
+  const run=await runToTerminal(f,runner);
+  assert.equal(run.state,'partial');assert.equal(run.stopReason,'scope_changed');assert.equal(run.errorCode,null);
+  assert.equal(f.firstStep.link(f.run.id)!.phase,'blocked');assert.equal(modelCalls,phase==='verify_transport'?2:1);
+  assert.deepEqual(modes,phase==='verify_transport'?['plan','verify']:['plan']);
+  assert.equal(calls.length,2);assert.equal(f.store.listObservations(f.run.id).length,0);
+  const checkpoint=f.store.research.checkpoint(f.run.id)!;assert.equal(checkpoint.claims.length,0);
+  assert.ok(checkpoint.pages.some(p=>p.text===HOME_TEXT));
+  assert.ok(f.store.research.receipts(f.run.id).every(r=>r.state!=='inflight'));
+  const modelReceipts=f.store.research.receipts(f.run.id).filter(r=>r.kind==='model');
+  assert.equal(modelReceipts.length,modelCalls,'actual dispatched usage is retained');
+  assert.ok(run.limitations.some(line=>line.includes('冻结范围')));
+ });
+}

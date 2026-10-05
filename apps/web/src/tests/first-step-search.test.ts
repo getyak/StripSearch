@@ -573,8 +573,27 @@ test('only actual authorial rel-me declarations support identity; nearby ordinar
  const h=harness({kind:'name_query',value:'Lin Zhou',question:null},async()=>result([page(homepage,'Lin Zhou')]),async(url)=>url===homepage?result([original]):Promise.reject(new ProviderError('provider_unavailable','Unavailable fixture original')));
  try{
   const view=await discoverFirstStep(h.ctx),a=view.accounts.find(a=>a.profileUrl===own);
-  assert.equal(a?.identity.state,'supported');assert.ok(a?.identity.evidence.some(e=>e.quote===`<a href="${own}" rel="noopener me noreferrer">GitHub</a>`));
+  assert.equal(a?.identity.state,'supported');assert.ok(a?.identity.evidence.some(e=>e.quote===`<footer><a href="${own}" rel="noopener me noreferrer">GitHub</a><a href="${ordinary}">GitHub</a></footer>`));
   for(const url of [ordinary,comment]){const other=view.accounts.find(a=>a.profileUrl===url);assert.ok(other);assert.notEqual(other.identity.state,'supported');assert.equal(other.defaultSuggestion.suggested,false);}
   assert.equal(original.text,html);assert.ok(original.linkContexts.every(c=>html.includes(c.quote)));
+ }finally{h.db.close();}
+});
+
+for (const scenario of [
+ {label:'colleague attribution outside anchor', prefix:"My colleague's account: ", anchor:'GitHub', role:'prose_mention'},
+ {label:'denial outside anchor', prefix:'Not my account; impersonator: ', anchor:'GitHub', role:'explicit_denial'},
+ {label:'denial inside anchor', prefix:'', anchor:'Not my account; impersonator', role:'explicit_denial'},
+ {label:'oversized wrapper', prefix:'x'.repeat(8100), anchor:'GitHub', role:'unknown_role'}
+]) test(`rel-me never overrides ${scenario.label} in the actual discovery chain`,async()=>{
+ const target='https://github.com/fixture-other-person';
+ const html=`<h1>Lin Zhou</h1><p>${scenario.prefix}<a rel="me" href="${target}">${scenario.anchor}</a></p>`;
+ const original={...page(homepage,html,[target]),linkContexts:extractOriginalLinkContexts(html,homepage)};
+ const h=harness({kind:'name_query',value:'Lin Zhou',question:null},async()=>result([page(homepage,'Lin Zhou')]),async url=>url===homepage?result([original]):Promise.reject(new ProviderError('provider_unavailable','Synthetic inaccessible original')));
+ try {
+  const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===target);
+  assert.ok(account);assert.notEqual(account.identity.state,'supported');assert.equal(account.defaultSuggestion.suggested,false);
+  assert.ok(account.identity.evidence.every(e=>e.quote===null||html.includes(e.quote)),'all excerpts are literal original spans');
+  if(scenario.role==='explicit_denial') assert.ok(account.identity.counterevidence.some(e=>e.role==='identity_counterevidence'&&e.quote!==null&&html.includes(e.quote)),'denial is retained as counterevidence');
+  assert.equal(original.text,html);
  }finally{h.db.close();}
 });

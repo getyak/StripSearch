@@ -63,3 +63,13 @@ test('Exa original requests preserve HTML binding and cannot turn extras labels 
   assert.ok(result.pages[0]!.linkContexts!.some(link => link.url === 'https://github.com/fixture-author' && original.includes(link.quote)));
   assert.ok(!result.pages[0]!.linkContexts!.some(link => link.url.includes('unread-other')));
 });
+
+ test('rel-me retains surrounding colleague and denial text instead of an isolated anchor',()=>{
+  for(const prefix of ["My colleague's account: ",'Not my account; impersonator: ']){
+   const source=`<p>${prefix}<a rel="me" href="https://github.com/fixture-other">GitHub</a></p>`;
+   const [context]=extractOriginalLinkContexts(source,'https://fixture-author.dev/');
+   assert.equal(context!.binding,'html_rel_me');assert.equal(context!.quote,source);
+  }
+  const source=`<section>${'x'.repeat(8100)}<a rel="me" href="https://github.com/fixture-other">GitHub</a></section>`;
+  assert.equal(extractOriginalLinkContexts(source,'https://fixture-author.dev/')[0]!.surface,'unknown');
+ });

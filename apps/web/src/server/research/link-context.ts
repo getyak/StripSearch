@@ -35,15 +35,15 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
       ancestor = ancestor.parentNode;
     }
     const relMe=(node.attrs.find(attr=>attr.name==='rel')?.value??'').toLowerCase().split(/\s+/).includes('me');
-    // The exact structured declaration is local to this anchor. Ancestor
-    // third-party markers still veto it, even when its readable label is 'my'.
-    const location = relMe ? node.sourceCodeLocation : block.sourceCodeLocation!;
+    // Preserve the surrounding original semantics: rel=me cannot discard a
+    // nearby denial or attribution to someone else.
+    const location = block.sourceCodeLocation!;
     const quote = original.slice(location.startOffset, location.endOffset);
     // A huge wrapper is not a target-specific attribution context.
     const tooBroad = quote.length > 8000;
     contexts.push({ url, quote: tooBroad ? original.slice(node.sourceCodeLocation.startOffset, node.sourceCodeLocation.endOffset) : quote,
       locator: `HTML 原文第 ${String((tooBroad ? node.sourceCodeLocation : location).startOffset + 1)}–${String((tooBroad ? node.sourceCodeLocation : location).endOffset)} 字符`,
-      binding: relMe ? 'html_rel_me' : 'html_anchor', surface: thirdParty ? 'third_party' : relMe ? 'authorial' : tooBroad || block === node ? 'unknown' : 'authorial' });
+      binding: relMe ? 'html_rel_me' : 'html_anchor', surface: thirdParty ? 'third_party' : tooBroad ? 'unknown' : relMe ? 'authorial' : block === node ? 'unknown' : 'authorial' });
   }
   // Markdown retains the literal href next to its anchor text. Paragraph
   // boundaries preserve authorship context without borrowing a different link.

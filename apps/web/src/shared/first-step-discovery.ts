@@ -1041,8 +1041,8 @@ export function isUntrustedInstructionText(text: string | null): boolean {
  */
 export function classifyLinkContext(quote: string | null): FirstStepLinkContextClass {
   if (typeof quote !== 'string' || quote.trim().length < 2) return 'unknown';
-  if (THIRD_PARTY_MARKERS.test(quote)) return 'third_party';
   const readable = quote.replace(/<[^>]*>/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ');
+  if (THIRD_PARTY_MARKERS.test(readable)) return 'third_party';
   if (OWNERSHIP_MARKERS.test(readable)) return 'ownership';
   return 'unknown';
 }
@@ -1094,9 +1094,6 @@ export function linkRoleFromContext(input: {
   if (input.binding === 'native_profile_field' && input.surface === 'profile_field' && input.sourceIsNativeAccount === true) {
     return { role: 'self_account_section', retrieval: 'read' };
   }
-  if(input.binding==='html_rel_me'&&input.surface==='authorial'&&input.sourceIsOwnProfilePage&&!input.sourceIsRestrictedSurface&&!input.sourceIsSocialPlatform){
-    return {role:'self_account_section',retrieval:'read'};
-  }
   if (input.surface === 'unknown') return { role: 'unknown_role', retrieval: 'link_only' };
   // Conservative fixture fallback (no extraction context): only an exact
   // target-bound, role-correct quote is ever considered.
@@ -1107,11 +1104,14 @@ export function linkRoleFromContext(input: {
     }
   }
   if (input.sourceIsOwnProfilePage && !input.sourceIsRestrictedSurface &&
-      (!input.sourceIsSocialPlatform || input.surface === 'profile_field') && isExplicitDenialQuote(quote, input.targetUrl ?? null)) {
+      (!input.sourceIsSocialPlatform || input.surface === 'profile_field') && isExplicitDenialQuote(quote, input.binding === 'html_rel_me' ? null : input.targetUrl ?? null)) {
     return { role: 'explicit_denial', retrieval: 'read' };
   }
   const context = classifyLinkContext(quote);
   if (context === 'third_party') return { role: 'prose_mention', retrieval: 'read' };
+  if(input.binding==='html_rel_me'&&input.surface==='authorial'&&input.sourceIsOwnProfilePage&&!input.sourceIsRestrictedSurface&&!input.sourceIsSocialPlatform){
+    return isUntrustedInstructionText(quote) ? {role:'unknown_role',retrieval:'link_only'} : {role:'self_account_section',retrieval:'read'};
+  }
   if (context === 'unknown') return { role: 'unknown_role', retrieval: 'link_only' };
   // Restricted surfaces (feeds, timelines, platform content pages) never
   // grant ownership from prose, even first person.

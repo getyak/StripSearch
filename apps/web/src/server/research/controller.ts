@@ -16,7 +16,7 @@ export interface ResearchOptions {
  transport?:HttpTransport;deepseekApiKey?:string|null;socialAvailable?:boolean;firecrawlAvailable?:boolean;
  limits?:ResearchBudgetLimits;
  /** First-step fetch scope: independent-account material never joins person claims. */
- firstStepScope?:{selectedAccountKeys?:ReadonlySet<string>;independentAccountKeys:ReadonlySet<string>;accountKeyOf:(url:string)=>string|null};
+ firstStepScope?:{assertCurrent?:()=>void;selectedAccountKeys?:ReadonlySet<string>;independentAccountKeys:ReadonlySet<string>;accountKeyOf:(url:string)=>string|null};
 }
 function object(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value);}
 interface RefusalRecord { dispatched:boolean; usage?:ActionUsage }
@@ -111,7 +111,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const scheduleDeadline=()=>{const remaining=limits.elapsedMs-priorElapsed-(Date.now()-launched);timer=setTimeout(()=>{if(priorElapsed+Date.now()-launched>=limits.elapsedMs)deadline.abort(new ResearchStop('budget_exhausted'));else scheduleDeadline();},Math.min(2_147_483_647,Math.max(1,remaining)));};
  if(limits.elapsedMs>0)scheduleDeadline();
  const signal=AbortSignal.any([options.signal,deadline.signal]);
- const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
+ const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);options.firstStepScope?.assertCurrent?.();if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
  const save=()=>{active();checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);};
  const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':'读取相关资料',status:'active'});};
  const stillActivePages=()=>stillActivePagesOf(store,run,checkpoint);
@@ -171,7 +171,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const ask=async(mode:'plan'|'verify',claims?:ResearchClaim[]):Promise<unknown>=>{
   active();const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
   if(checkpoint.inspect&&!activePages.some(p=>p.sourceKey===checkpoint.inspect!.sourceKey))delete checkpoint.inspect;
-  return await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
+  const decision=await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
     active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const key=`model:${step}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
@@ -183,11 +183,13 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      active();return result;
     }catch(error){if(!options.signal.aborted){try{store.research.settle(run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');}catch{}}throw error;}
    });
+  active();return decision;
  };
  // Completeness blockers are counted, never hidden: discovery-only sources,
  // unread discovered links, truncated originals and explicit unresolved items.
  const scopeGaps=()=>scopeGapsOf(store,run,checkpoint);
  const finish=(reason:string,state:'completed'|'partial'):ProviderResult=>{
+  if(!options.signal.aborted&&reason!=='scope_changed'&&reason!=='source_revoked')options.firstStepScope?.assertCurrent?.();
   if(!options.signal.aborted){checkpoint.elapsedMs=priorElapsed+Date.now()-launched;}
   const result=buildResearchReport({store,run,checkpoint,limits,firstStepScope:options.firstStepScope},reason,state);
   if(!options.signal.aborted){store.research.save(run.id,checkpoint);}
@@ -196,7 +198,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const verify=async():Promise<ProviderResult>=>{
   const claims=checkpoint.pendingClaims??[];
   const quoteFallback=(reason:'verification_budget'|'verification_unavailable'):ProviderResult=>{
-   options.signal.throwIfAborted();store.research.assertActive(run.id);
+   active();
    const pages=stillActivePages();
    checkpoint.claims=claims.filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))).map(c=>({...c,statement:c.quote,kind:'page_statement',verified:false}));delete checkpoint.pendingClaims;
    checkpoint.unknowns.push('综合结论未通过独立语义核验，仅保留来源逐字摘录；摘录不代表结论已核实。');

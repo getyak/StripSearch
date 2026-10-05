@@ -1106,6 +1106,11 @@ export class FirstStepScopeGuard {
     }
   }
 
+  /** Check the frozen scope even when an operation has no target URL. */
+  assertCurrent(): void {
+    this.assertScopeCurrent(this.binding());
+  }
+
   /**
    * Resolve one URL to an in-scope account by ACCOUNT ATTRIBUTION ONLY.
    * Observed links never grant authority: an account reachable only through a
