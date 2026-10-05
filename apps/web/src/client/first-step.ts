@@ -479,7 +479,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const top = make('div', { className: 'first-step-card-top' });
     const label = make('label', { className: 'first-step-select' });
     const checkbox = make('input', {
-      attrs: { type: 'checkbox', 'data-focus-key': `account-${account.accountId}`, 'aria-label': `选择 ${account.platformLabel} ${account.handle ?? ''}`, ...(checked ? { checked: true } : {}) }
+      attrs: { type: 'checkbox', 'data-focus-key': `account-${account.accountId}`, 'aria-label': `选择 ${account.platformLabel} ${account.handle ?? ''} · ${shortUrl(account.profileUrl)}`, ...(checked ? { checked: true } : {}) }
     }) as HTMLInputElement;
     checkbox.checked = checked;
     checkbox.disabled = decision.excluded || view?.selection.submitted === true;

@@ -22,6 +22,7 @@ import {
 import type { ResearchPage, ResearchToolResult, ResearchToolAction, ResearchAliasProof } from '../server/research/tool-contracts.js';
 import type { FirstStepBudgetPolicy, FirstStepInput, FirstStepSelectionInput } from '../shared/first-step-discovery.js';
 import { seedFirstStep } from './first-step-fixtures.js';
+import {FirstStepSelectionError} from '../server/research/first-step-store.js';
 import {extractOriginalLinkContexts} from '../server/research/link-context.js';
 
 const page = (url: string, text: string, over: Partial<ResearchPage> = {}): ResearchPage => ({
@@ -392,6 +393,13 @@ for(const rollback of [false,true])test(`actual contradictory native IDs never c
   assert.ok(view.accounts.every(a=>a.identity.conflicts.some(c=>c.includes('原生 ID 冲突'))&&a.requiresIndependentScope&&!a.defaultSuggestion.suggested));
   assert.ok(view.gaps.some(g=>g.includes('111 / 222')));assert.ok(!view.gaps.some(g=>g.includes('已按实际响应合并')));
   assert.ok(view.clusters.every(c=>c.linkage!=='linked'));
+  h.store.updateRun(h.runId,{state:'needs_input'});
+  const anchor=view.clusters[0]!.anchorAccountId!;
+  const selection={expectedRunRevision:h.store.getRun(h.runId)!.revision,expectedScopeVersion:view.selection.scopeVersion,discoveryRevision:view.discoveryRevision,clusterId:view.clusters[0]!.clusterId,accounts:view.accounts.map(a=>({accountId:a.accountId,selection:a.accountId===anchor?'selected' as const:'not_selected' as const,excluded:false}))};
+  assert.throws(()=>h.firstStep.applyFirstStepSelection(h.ownerId,h.runId,selection,'conflict-person-scope'),error=>error instanceof FirstStepSelectionError&&error.code==='invalid_decision');
+  assert.equal(h.firstStep.selectionBinding(h.runId),null,'refused person scope never persists');
+  const result=h.firstStep.applyFirstStepSelection(h.ownerId,h.runId,{...selection,accounts:selection.accounts.map(a=>({...a,selection:a.accountId===anchor?'only_this_account':'not_selected'}))},'conflict-independent-scope');
+  assert.deepEqual(result.independentAccountIds,[anchor]);assert.deepEqual(result.selectedAccountIds,[anchor]);assert.equal(h.store.cases.listAccounts(h.ownerId,view.caseId).find(a=>a.accountId===anchor)!.userSelection.state,'only_this_account');
   const results=h.store.research.receipts(h.runId).filter(r=>r.kind==='tool').flatMap(r=>(r.result as ResearchToolResult).pages);
   assert.ok(results.some(p=>p.account?.id==='111')&&results.some(p=>p.account?.id==='222'),'both original native responses remain in the real ledger');
  }finally{h.db.close();}

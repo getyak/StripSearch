@@ -594,3 +594,10 @@ test('mixed-script input uses its supplied Latin name in constrained searches wi
  assert.ok(queries.some(q=>q.includeDomains?.includes('x.com')&&q.query==='Ming Zhang Twitter X profile'));
  assert.ok(queries.every(q=>!q.query.includes('@')));
 });
+
+test('unknown at-sign profile URLs never imply Mastodon software or a verified platform route',()=>{
+ const profile=classify('https://synthetic-academic.org/@fixture-author');
+ assert.equal(profile.platform,'web_page');assert.equal(profile.entry,'profile');assert.equal(profile.handle,'fixture-author');assert.equal(profile.platformLabel,'公开网页');
+ const post=classify('https://synthetic-academic.org/@fixture-author/posts/123');assert.equal(post.entry,'page');assert.equal(post.accountKey,profile.accountKey);
+ assert.equal(classify('https://mastodon.social/@fixture-author').platform,'mastodon');
+});

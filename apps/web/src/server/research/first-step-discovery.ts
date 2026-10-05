@@ -1330,6 +1330,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       accountKind: ref.accountKind,
       identity: {
         state: identityState,
+        nativeIdConflict:Boolean(conflict),
         basis: assessment.basis,
         basisLabel: FIRST_STEP_BASIS_LABELS[assessment.basis],
         evidence: evidence.filter((item) => item.role === 'identity_support'),

@@ -157,6 +157,8 @@ export type FirstStepUrlClassification =
 
 const KNOWN_HOSTS = new Map<string, FirstStepPlatform>([
   ['github.com', 'github'],
+  // Verified instance examples in https://blog.joinmastodon.org/2026/03/a-new-share-button/
+  ['mastodon.social','mastodon'], ['hachyderm.io','mastodon'], ['social.coop','mastodon'],
   ['gitlab.com', 'gitlab'],
   ['huggingface.co', 'huggingface'],
   ['stackoverflow.com', 'stackoverflow'],
@@ -459,16 +461,16 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
     };
   }
 
-  // Fediverse instance profiles: only the /@user convention on a non-catalog
-  // host is instance-scoped. Arbitrary /users or /u paths are never guessed
-  // into Mastodon accounts.
-  if (!known && canonical.pathname.startsWith('/@')) {
+  // /@user is shared by many public platforms: it does not identify the
+  // server software. Known instances keep Mastodon; others remain generic
+  // public-profile candidates until an actual platform proof exists.
+  if ((!known || known==='mastodon') && canonical.pathname.startsWith('/@')) {
     const handle = canonical.pathname.slice(2).split('/')[0] ?? '';
     if (/^[A-Za-z0-9_.-]{1,64}$/.test(handle)) {
       const accountUrl = `https://${host}/@${handle}`;
       return {
         ok: true,
-        ref: refOf('mastodon', segments.length > 1 ? href : accountUrl, {
+        ref: refOf(known==='mastodon'?'mastodon':'web_page', segments.length > 1 ? href : accountUrl, {
           accountUrl,
           handle,
           instance: host,
@@ -1366,6 +1368,8 @@ export interface FirstStepAccountView {
   accountKind: FirstStepAccountKind;
   identity: {
     state: IdentitySupportState;
+    /** Contradictory actual native IDs: independent scope only, including anchors. */
+    nativeIdConflict?: boolean;
     /** Current dependency validity, separate from the immutable stored facet. */
     validity?: 'valid' | 'review';
     reviewReason?: string | null;
@@ -1912,6 +1916,9 @@ export function validateSelectionDecision(
     // Independent account scope: researched alone, never merged into the
     // person conclusions with the other selected accounts.
     return { ok: true, allowedScope: 'public_history' };
+  }
+  if (account.identity.nativeIdConflict === true) {
+    return {ok:false,error:'实际原生 ID 冲突，只能作为独立账号研究，不能并入人物结论。'};
   }
   if (account.identity.validity === 'review') {
     return { ok: false, error: '该账号的归属依据已失效，只能作为独立账号研究，不能并入人物结论。' };
