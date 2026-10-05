@@ -89,6 +89,7 @@ const state: AppState = {
   activeRunId: null,
   signOutBusy: false
 };
+let sessionBootPending = true;
 
 const api = new ApiClient();
 const auth = createAuthController(api);
@@ -353,6 +354,7 @@ function route(): void {
   const wantsApp = Boolean(appMatch);
   const reviewMatch = hash.match(/^#\/review(?:\/([^/?#]+))?/);
   const wantsReview = Boolean(reviewMatch);
+  if (sessionBootPending && (wantsApp || wantsReview)) return;
   if ((wantsApp || wantsReview) && !state.user) {
     window.location.hash = '#/';
     auth.open('signin', (user) => {
@@ -1631,20 +1633,34 @@ function onHashChange(): void {
 async function boot(): Promise<void> {
   wire();
   renderUserNav(null);
+  const protectedEntry = /^#\/(?:app|review)(?:\/|$)/.test(window.location.hash);
+  const opening = protectedEntry ? make('section', { className: 'app-opening', attrs: { role: 'status', 'aria-label': '恢复研究' }, children: [make('p', { text: '正在打开已保存研究…' })] }) : null;
+  if (opening) {
+    els.home.hidden = true;
+    els.footer.hidden = true;
+    document.getElementById('main')?.appendChild(opening);
+  }
   try {
-    const health = await api.health();
-    state.capabilities = health.capabilities;
+    try {
+      const health = await api.health();
+      state.capabilities = health.capabilities;
+    } catch {
+      // Entry stays usable; the actual request returns a recoverable service error.
+    }
+    const session = await api.session();
+    if (session) {
+      state.user = session.user;
+      renderUserNav(session.user);
+      await loadRuns();
+    }
   } catch {
-    // Entry stays usable; the actual request returns a recoverable service error.
+    showToast('暂时无法恢复登录，请刷新页面后重试。', 'error');
+  } finally {
+    sessionBootPending = false;
+    opening?.remove();
+    route();
+    renderAll();
   }
-  const session = await api.session();
-  if (session) {
-    state.user = session.user;
-    renderUserNav(session.user);
-    await loadRuns();
-  }
-  route();
-  renderAll();
 }
 
 void boot();
