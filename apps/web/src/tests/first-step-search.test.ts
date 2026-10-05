@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ProviderError } from '../server/adapters/types.js';
+import { extractOriginalLinkContexts } from '../server/research/link-context.js';
 import { applyCoreSchema, openDatabase, type DB } from '../server/db/index.js';
 import { Store } from '../server/store.js';
 import { FirstStepStore } from '../server/research/first-step-store.js';
@@ -562,5 +563,18 @@ test('actual index-returned account links become candidates without becoming own
   assert.ok(account,'the actual observed content URL yields its documented account home');
   assert.equal(account.defaultSuggestion.suggested,false);assert.notEqual(account.identity.state,'supported');
   assert.equal(account.identity.evidence.length,0);
+ }finally{h.db.close();}
+});
+
+test('only actual authorial rel-me declarations support identity; nearby ordinary and comment links do not',async()=>{
+ const own='https://github.com/fixture-rel-owner',ordinary='https://github.com/fixture-rel-friend',comment='https://github.com/fixture-rel-comment';
+ const html=`<h1>Lin Zhou</h1><p>I build compilers.</p><footer><a href="${own}" rel="noopener me noreferrer">GitHub</a><a href="${ordinary}">GitHub</a></footer><section class="comments"><a href="${comment}" rel="me">My profile</a></section>`;
+ const original={...page(homepage,html,[own,ordinary,comment]),linkContexts:extractOriginalLinkContexts(html,homepage)};
+ const h=harness({kind:'name_query',value:'Lin Zhou',question:null},async()=>result([page(homepage,'Lin Zhou')]),async(url)=>url===homepage?result([original]):Promise.reject(new ProviderError('provider_unavailable','Unavailable fixture original')));
+ try{
+  const view=await discoverFirstStep(h.ctx),a=view.accounts.find(a=>a.profileUrl===own);
+  assert.equal(a?.identity.state,'supported');assert.ok(a?.identity.evidence.some(e=>e.quote===`<a href="${own}" rel="noopener me noreferrer">GitHub</a>`));
+  for(const url of [ordinary,comment]){const other=view.accounts.find(a=>a.profileUrl===url);assert.ok(other);assert.notEqual(other.identity.state,'supported');assert.equal(other.defaultSuggestion.suggested,false);}
+  assert.equal(original.text,html);assert.ok(original.linkContexts.every(c=>html.includes(c.quote)));
  }finally{h.db.close();}
 });

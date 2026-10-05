@@ -1072,7 +1072,7 @@ export function linkRoleFromContext(input: {
   /** Target URL this context binds; required for the quote fallback path. */
   targetUrl?: string | null;
   /** Extraction binding/surface of the retained original, when observed. */
-  binding?: 'html_anchor' | 'markdown_link' | 'native_profile_field' | null;
+  binding?: 'html_anchor' | 'html_rel_me' | 'markdown_link' | 'native_profile_field' | null;
   surface?: 'authorial' | 'profile_field' | 'third_party' | 'unknown' | null;
   sourceIsOwnProfilePage: boolean;
   sourceIsDirectory: boolean;
@@ -1093,6 +1093,9 @@ export function linkRoleFromContext(input: {
   if (input.surface === 'third_party') return { role: 'prose_mention', retrieval: 'read' };
   if (input.binding === 'native_profile_field' && input.surface === 'profile_field' && input.sourceIsNativeAccount === true) {
     return { role: 'self_account_section', retrieval: 'read' };
+  }
+  if(input.binding==='html_rel_me'&&input.surface==='authorial'&&input.sourceIsOwnProfilePage&&!input.sourceIsRestrictedSurface&&!input.sourceIsSocialPlatform){
+    return {role:'self_account_section',retrieval:'read'};
   }
   if (input.surface === 'unknown') return { role: 'unknown_role', retrieval: 'link_only' };
   // Conservative fixture fallback (no extraction context): only an exact

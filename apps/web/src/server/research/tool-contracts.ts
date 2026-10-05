@@ -6,7 +6,7 @@ export interface ResearchAccount { platform: 'github' | 'x'; handle: string; id:
 /** A link bound to an exact span of the retained original, never an index label. */
 export interface ResearchLinkContext {
  url: string; quote: string; locator: string;
- binding: 'html_anchor' | 'markdown_link' | 'native_profile_field';
+ binding: 'html_anchor' | 'html_rel_me' | 'markdown_link' | 'native_profile_field';
  surface: 'authorial' | 'profile_field' | 'third_party' | 'unknown';
 }
 export interface ResearchPage {
