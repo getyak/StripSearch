@@ -473,8 +473,19 @@ export class FirstStepStore {
       view.stopReason = run.stopReason;
       return { mode: 'first_step', view, link };
     }
-    const accounts = this.projectCurrentAccounts(ownerId, link.caseId, current.view.accounts);
+    let accounts = this.projectCurrentAccounts(ownerId, link.caseId, current.view.accounts);
     const activeEvidence = new Set(accounts.flatMap(account => [...account.identity.evidence, ...account.identity.counterevidence].map(item => item.evidenceId)));
+    const original = new Map(current.view.accounts.map(account => [account.accountId, account]));
+    const invalidClusters = new Set(current.view.clusters.filter(cluster => cluster.accountIds.some(id => {
+      const account = accounts.find(item => item.accountId === id);
+      return account?.identity.validity === 'review' || original.get(id)?.identity.state === 'supported' && account?.identity.state !== 'supported';
+    })).map(cluster => cluster.clusterId));
+    const invalidMembership = new Set(current.view.clusters.filter(cluster => invalidClusters.has(cluster.clusterId)).flatMap(cluster => cluster.accountIds));
+    const dependencyReason = '人物关联路径中的归属依据已失效；账号自身材料仍可独立研究，请重新确认人物关联。';
+    accounts = accounts.map(account => invalidMembership.has(account.accountId) ? { ...account,
+      identity: { ...account.identity, validity: 'review' as const, reviewReason: account.identity.reviewReason ?? dependencyReason,
+        conflicts: [...new Set([...account.identity.conflicts, dependencyReason])] },
+      defaultSuggestion: { suggested: false, reason: dependencyReason }, requiresIndependentScope: true } : account);
     const exclusions = this.activeExclusions(runId);
     const view: FirstStepDiscoveryView = {
       ...current.view,
@@ -485,7 +496,8 @@ export class FirstStepStore {
       readyForChoice: link.phase === 'ready_for_choice',
       accounts,
       clusters: current.view.clusters.map(cluster => ({ ...cluster,
-        leads: cluster.leads.filter(lead => lead.evidenceIds.every(id => activeEvidence.has(id))) })),
+        ...(invalidClusters.has(cluster.clusterId) ? { conflicts: [...new Set([...cluster.conflicts, dependencyReason])], leads: [] } : {
+          leads: cluster.leads.filter(lead => lead.evidenceIds.every(id => activeEvidence.has(id))) }) })),
       selection: this.selectionState(link, liveScopeVersion)
     };
     void exclusions;
@@ -783,6 +795,8 @@ export class FirstStepStore {
           null,
         selectedAccountIds,
         independentAccountIds,
+        identityDependencyAccountIds: (clusterChoice.cluster?.accountIds ?? selectedAccountIds)
+          .filter(id => !independentAccountIds.includes(id) && (known.get(id)?.identity.state === 'supported' || known.get(id)?.profileUrl === clusterChoice.cluster?.anchorUrl)),
         accountKeys: Object.fromEntries(
           selectedAccountIds.map((id) => [known.get(id)!.accountKey, id])
         ),
@@ -1082,10 +1096,8 @@ export class FirstStepScopeGuard {
     if (caseRow.scope_version !== binding.scopeVersion) {
       throw new FirstStepSelectionError('scope_changed', '研究范围已变更，冻结范围失效。');
     }
-    const current = this.store.cases.reportView(this.ownerId, binding.caseId).accounts;
-    const merged = new Set(binding.selectedAccountIds.filter(id => !binding.independentAccountIds.includes(id)));
-    if (current.some(account => merged.has(account.accountId) && account.identityValidity !== 'valid')) {
-      throw new FirstStepSelectionError('scope_changed', '已选账号的归属依据已失效，人物研究暂停；原记录保留。');
+    if (!this.store.isFirstStepIdentityActive(this.ownerId, binding)) {
+      throw new FirstStepSelectionError('scope_changed', '人物关联路径的归属依据已失效，人物研究暂停；原记录保留。');
     }
   }
 

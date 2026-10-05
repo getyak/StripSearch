@@ -32,6 +32,8 @@ export interface FirstStepBinding {
  /** Anchor of the bound scope, ALWAYS one of the selected accounts. */
  anchorUrl: string | null;
  selectedAccountIds: string[]; independentAccountIds: string[];
+ /** Frozen identity-path dependencies can include unselected intermediate anchors. */
+ identityDependencyAccountIds?: string[];
  /** accountKey -> accountId for the accounts frozen into this scope. */
  accountKeys: Record<string,string>;
  /** Per-account frozen scope for the Fetch planner; honest and explicit. */

@@ -1683,7 +1683,7 @@ export function validateSelectionDecision(
   if (account.identity.validity === 'review') {
     return { ok: false, error: '该账号的归属依据已失效，只能作为独立账号研究，不能并入人物结论。' };
   }
-  if (state === 'supported' || options?.anchorAccountIds?.has(account.accountId) === true) {
+  if (state === 'supported' || state === 'proposed' && options?.anchorAccountIds?.has(account.accountId) === true) {
     return { ok: true, allowedScope: 'public_history' };
   }
   return {

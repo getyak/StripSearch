@@ -1,6 +1,6 @@
 import { researchDepthCoverage } from '../shared/research-depth.js';
 import { randomUUID, createHash } from 'node:crypto';
-import { ResearchStore } from './research/research-store.js';
+import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
 import { CompletionStore } from './research/completion-store.js';
 import type {
@@ -611,11 +611,25 @@ export class Store {
     return !page?.inheritedFrom || this.isResearchSourceActive(page.inheritedFrom.runId, page.inheritedFrom.sourceKey, ownerId, seen);
   }
 
+  /** Person attribution can depend on an unselected intermediate identity anchor. */
+  isFirstStepIdentityActive(ownerId: string, binding: FirstStepBinding): boolean {
+    const merged = new Set(binding.selectedAccountIds.filter(id => !binding.independentAccountIds.includes(id)));
+    if (merged.size === 0) return true;
+    if (!this.cases.getCase(ownerId, binding.caseId)) return false;
+    const current = new Map(this.cases.reportView(ownerId, binding.caseId).accounts.map(account => [account.accountId, account]));
+    return [...new Set(binding.identityDependencyAccountIds ?? merged)].every(id => {
+      const account = current.get(id);
+      return account && account.identityValidity === 'valid' && !['disputed', 'rejected', 'revoked'].includes(account.identitySupport.state);
+    });
+  }
+
   buildCanonicalView(run: RunRecord): CanonicalView {
     const checkpoint = run.provider === 'research' ? this.research.checkpoint(run.id) : null;
+    const identityChanged = Boolean(checkpoint?.firstStep && !this.isFirstStepIdentityActive(run.ownerId, checkpoint.firstStep));
+    const identityReason = '人物关联的归属依据已失效；原资料保留，人物结论需要重新核对。';
     const sources = this.listSources(run.id).map(source => checkpoint && !this.isResearchSourceActive(run.id, source.sourceKey, run.ownerId)
       ? { ...source, excluded: true, fetchStatus: 'excluded' as const }
-      : source);
+      : identityChanged ? { ...source, identityConfirmed: false, identityLabel: '人物归属待复核；账号自身原资料保留。' } : source);
     const excluded = excludedSourceKeys(sources);
     const anchorRevoked = Boolean(checkpoint?.anchorUrl && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
     // Legacy Person Object IDs are checkpoint ordinals. Assign them before
@@ -626,7 +640,8 @@ export class Store {
         source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote)));
     if (anchorRevoked) sources.forEach(source => excluded.add(source.sourceKey));
     const observations = this.listObservations(run.id).map(observation => ({ ...observation,
-      validity: validityFor(observation.sourceKeys, excluded), reviewReason: reviewReason(observation.sourceKeys, excluded)
+      validity: identityChanged ? 'review' as const : validityFor(observation.sourceKeys, excluded),
+      reviewReason: identityChanged ? identityReason : reviewReason(observation.sourceKeys, excluded)
     }));
     const answer: CanonicalAnswerSection[] = run.answer.map((section) => ({
       id: section.id,
@@ -636,8 +651,8 @@ export class Store {
         text: bullet.text,
         sourceKeys: bullet.sourceKeys,
         kind: bullet.kind,
-        validity: validityFor(bullet.sourceKeys, excluded),
-        reviewReason: reviewReason(bullet.sourceKeys, excluded)
+        validity: identityChanged ? 'review' as const : validityFor(bullet.sourceKeys, excluded),
+        reviewReason: identityChanged ? identityReason : reviewReason(bullet.sourceKeys, excluded)
       }))
     }));
     const identity: CanonicalIdentity = {
@@ -649,6 +664,7 @@ export class Store {
       candidates: run.identity.candidates
     };
     if (anchorRevoked) { identity.status = 'ambiguous'; identity.note = '人物主页证据已撤回，需要重新确认身份。'; }
+    if (identityChanged) { identity.status = 'ambiguous'; identity.note = identityReason; }
     return {
       schemaVersion: SCHEMA_VERSION,
       runId: run.id,
