@@ -313,7 +313,7 @@ export function createLocalSearch(options: LocalSearchOptions): LocalSearchContr
   });
 
   function handleKeyDown(event: KeyboardEvent): boolean {
-    if (event.isComposing || event.repeat) return false;
+    if (event.isComposing || event.repeat || typeof event.key !== 'string') return false;
     const key = event.key.toLowerCase();
     if (key !== 'k') return false;
     const primary = (event.metaKey ? 1 : 0) + (event.ctrlKey ? 1 : 0);
