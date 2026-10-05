@@ -627,7 +627,7 @@ test('prompt-injection text never becomes a person descriptor, display name or a
   }
 });
 
-test('the frozen generic v3 budget bounds queries and reserves alias expansion for observed aliases only', async () => {
+test('the frozen generic v4 budget bounds queries and reserves alias expansion for observed aliases only', async () => {
   const h = harness(
     { kind: 'name_query', value: 'Mira Kepler', question: null },
     {
@@ -637,8 +637,10 @@ test('the frozen generic v3 budget bounds queries and reserves alias expansion f
   );
   try {
     const view = await discoverFirstStep(h.ctx);
-    assert.ok(h.queries.length <= 10, 'at most 10 search queries per attempt');
-    assert.ok(view.budget.toolCalls <= 26, 'tool calls stay inside the frozen budget shape');
+    // Frozen v4 shape: 9 deliberate families (8 web + native Bluesky) plus at
+    // most the 2 reserved alias slots = 11 queries / 12 results / 16 reads.
+    assert.ok(h.queries.length >= 9 && h.queries.length <= 11, 'at most 11 search queries per attempt (9 families + 2 alias slots)');
+    assert.ok(view.budget.toolCalls <= 27, 'tool calls stay inside the frozen budget shape (11 queries + 16 reads)');
     const aliasQueries = h.queries.filter((query) => query.endsWith('public profile'));
     assert.ok(aliasQueries.length <= 2, 'only the two reserved slots expand observed aliases');
     for (const query of aliasQueries) {

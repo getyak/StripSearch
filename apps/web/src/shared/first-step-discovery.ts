@@ -1564,6 +1564,45 @@ export const FIRST_STEP_DEFAULT_BUDGET: FirstStepBudgetPolicy = {
   policyVersion: FIRST_STEP_POLICY_VERSION
 };
 
+/**
+ * Frozen SEARCH query contract: every planned query fits this bound because
+ * the checked Search surface refuses longer queries as an input decision
+ * error. The seed URL itself is never cut — it is read exactly as supplied;
+ * only its derived discovery query is bounded.
+ */
+export const FIRST_STEP_SEARCH_QUERY_MAX = 600;
+
+/**
+ * Explicit bounded SEARCH query for a validated public URL input. The URL is
+ * read, classified and displayed exactly as supplied; only the discovery
+ * query is derived from its hostname plus the real bounded path/query text.
+ * Never a guessed handle or alias: the query contains only actual URL text
+ * taken from the input (hostname + a real path prefix).
+ */
+export function firstStepUrlSearchQuery(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return '';
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    parsed = null;
+  }
+  const host = parsed?.hostname ?? '';
+  if (host.length === 0) return trimmed.slice(0, FIRST_STEP_SEARCH_QUERY_MAX);
+  const path = parsed!.pathname === '/' ? '' : parsed!.pathname;
+  const search = parsed!.search && parsed!.search !== '?' ? parsed!.search : '';
+  let tail = `${path}${search}`;
+  const bound = Math.max(0, FIRST_STEP_SEARCH_QUERY_MAX - host.length);
+  if (tail.length > bound) {
+    const cut = tail.slice(0, bound);
+    // Keep whole path segments when one fits; otherwise a real input prefix.
+    const lastSlash = cut.lastIndexOf('/');
+    tail = lastSlash > 0 ? cut.slice(0, lastSlash) : cut;
+  }
+  return `${host}${tail}`.slice(0, FIRST_STEP_SEARCH_QUERY_MAX);
+}
+
 /** Deliberate query families covering home/work/writing/social/academic/video. */
 export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: string; build: (value: string) => string; includeDomains?: readonly string[]; provider?: 'bluesky' }> = [
   { family: 'home', build: (value) => `${value}` },
@@ -1596,13 +1635,21 @@ export function firstStepQueryPlan(
   const families = input.kind === 'name_query' ? FIRST_STEP_QUERY_FAMILIES : FIRST_STEP_QUERY_FAMILIES.slice(0, 1);
   const suppliedNames = input.kind === 'name_query' ? value.split(/\s*[\/／]\s*/).map(name => name.trim()).filter(Boolean) : [value];
   const firstName=suppliedNames[0]??value;
+  // A homepage URL is READ exactly as supplied; only its SEARCH query is the
+  // explicit bounded hostname + real path form — never the raw up-to-2048-char
+  // URL and never a manufactured handle. Names keep the actual input text.
+  const seedValue = input.kind === 'homepage_url' ? firstStepUrlSearchQuery(value) : firstName;
   // A mixed-script input already contains this name; use its complete Latin
   // spelling for domain-constrained retrieval, without inventing an alias.
   const latinName=/[\u3400-\u9fff]/u.test(firstName)?firstName.match(/[A-Za-z][A-Za-z .’'\-]*[A-Za-z]/u)?.[0]?.trim():undefined;
 
   for (const entry of families) {
     if (plan.length >= max) break;
-    const query = entry.build((entry.includeDomains || entry.provider) && latinName ? latinName : firstName);
+    const query = entry.build(input.kind === 'homepage_url' ? seedValue : ((entry.includeDomains || entry.provider) && latinName ? latinName : firstName));
+    // Every planned query must satisfy the frozen SEARCH contract; validated
+    // name inputs are structurally bounded, this guard keeps the plan honest
+    // for any caller (an over-long query would only become an input error).
+    if (query.length > FIRST_STEP_SEARCH_QUERY_MAX) continue;
     if (!plan.some((item) => item.query === query && JSON.stringify(item.includeDomains) === JSON.stringify(entry.includeDomains) && item.provider === entry.provider)) plan.push({ query, family: entry.family, ...(entry.includeDomains ? { includeDomains: entry.includeDomains } : {}),...(entry.provider?{provider:entry.provider}:{}) });
   }
   let aliasSlots = 0;
@@ -1612,6 +1659,7 @@ export function firstStepQueryPlan(
     const trimmed = alias.trim();
     if (trimmed.length < 2 || trimmed.length > 120) continue;
     const query = `${trimmed} public profile`;
+    if (query.length > FIRST_STEP_SEARCH_QUERY_MAX) continue;
     if (!plan.some((item) => item.query === query && item.includeDomains === undefined)) {
       plan.push({ query, family: 'alias' });
       aliasSlots++;

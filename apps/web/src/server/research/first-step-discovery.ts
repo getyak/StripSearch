@@ -40,6 +40,7 @@ import type { PlatformCatalogSnapshot } from '../../shared/platform-catalog.js';
 import { toCompletionRegistry } from '../platforms/catalog.js';
 import {
   FIRST_STEP_DEFAULT_BUDGET,
+  FIRST_STEP_SEARCH_QUERY_MAX,
   FIRST_STEP_BASIS_LABELS,
   FIRST_STEP_SCHEMA_VERSION,
   assessIdentityLink,
@@ -169,7 +170,7 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
   };
   return {
     async search(requestKey, query, numResults, signal, includeDomains, provider) {
-      if (query.trim().length === 0 || query.length > 600) throw new ResearchStop('invalid_decision');
+      if (query.trim().length === 0 || query.length > FIRST_STEP_SEARCH_QUERY_MAX) throw new ResearchStop('invalid_decision');
       return run(requestKey, 'search', query, 'indexed', { type: 'search', query, numResults, ...(includeDomains ? { includeDomains } : {}),...(provider?{provider}:{}) }, signal);
     },
     async readIdentity(requestKey, action, signal) {
@@ -754,6 +755,14 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         return 'budget';
       }
       if (isLivenessFailure(error, ctx.signal)) throw error;
+      if (error instanceof ResearchStop && error.code === 'invalid_decision') {
+        // An input decision error is an honest failure/gap, never internal_error:
+        // the checked surface rejects it before any dispatch — no request, no
+        // receipt, no cost — and discovery keeps its other routes.
+        failures.push({ kind: 'search', target: query, platform: null, state: 'unknown', detail: '输入决策错误（invalid_decision）：查询不符合冻结查询契约；未派发请求、无计费回执。' });
+        gaps.push(`检索查询未通过冻结查询契约（invalid_decision），未派发请求、未计费：${query}；如实保留缺口，不作内部错误。`);
+        return 'failed';
+      }
       const failure = mapProviderFailure(error);
       failures.push({ kind: 'search', target: query, platform: null, state: failure.state, detail: failure.message });
       gaps.push(`检索路线未成功（${failure.state}）：${query}；不代表无资料。`);
@@ -871,6 +880,12 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         return 'budget';
       }
       if (isLivenessFailure(error, ctx.signal)) throw error;
+      if (error instanceof ResearchStop && error.code === 'invalid_decision') {
+        // Honest failure/gap for an input decision error: never internal_error.
+        failures.push({ kind: 'read', target: ref.profileUrl, platform: ref.platform, state: 'unknown', detail: '输入决策错误（invalid_decision）：读取请求不符合冻结读取契约；未派发请求、无计费回执。' });
+        gaps.push(`身份读取请求未通过冻结读取契约（invalid_decision），未派发请求、未计费：${ref.profileUrl}；如实保留缺口，不作内部错误。`);
+        return 'failed';
+      }
       const failure = mapProviderFailure(error);
       failures.push({ kind: 'read', target: ref.profileUrl, platform: ref.platform, state: failure.state, detail: failure.message });
       gaps.push(`身份读取路线未成功（${failure.state}）：${ref.profileUrl}；不代表无此账号。`);
@@ -1002,7 +1017,19 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       }
     } catch (error) {
       if (isLivenessFailure(error, ctx.signal)) throw error;
-      gaps.push('受限模型提议不可用；归属只依据实际读取的来源。');
+      if (error instanceof ResearchStop && error.code === 'budget_exhausted') {
+        // The frozen MODEL budget stops only the optional proposal step, and
+        // gets exactly the tool budget's treatment: every discovered result is
+        // preserved and the projection below still appends ready_for_choice
+        // with honest skipped_budget coverage/gap. No extra model dispatch or
+        // reservation happens here and no model success is fabricated.
+        budgetExhausted = true;
+        gaps.push('受限模型提议因冻结模型预算上限未执行（budget_exhausted）；未派发模型请求、未新增预留，已有发现结果全部保留，归属只依据实际读取的来源，缺口如实计为 skipped_budget 覆盖。');
+        proposals = [];
+        leads = [];
+      } else {
+        gaps.push('受限模型提议不可用；归属只依据实际读取的来源。');
+      }
     }
     active();
     // Source-grounded person descriptors: each keeps its exact quote and real
@@ -1226,6 +1253,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
               ? 'skipped_budget'
               : 'no_clue'
             : obligation.initialState;
+    const receiptKeys = obligation.routeId === 'web-search' ? searchReceiptKeys : [...(
+      obligation.source === 'catalog' ? platformReceiptKeys.get(obligation.platform) : materialReceiptKeys.get(obligation.materialUse)
+    ) ?? []];
     return {
       routeId: obligation.routeId,
       platform: obligation.platform,
@@ -1238,17 +1268,17 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           : matching.length > 0
             ? `本次检索得到 ${String(matching.length)} 个候选；覆盖完整性未验证。`
             : state === 'skipped_budget'
-              ? '本次预算/次数上限已到，该路线未请求；保持 skipped_budget，不代表已完成或无账号。'
+              ? receiptKeys.length > 0
+                ? '本次预算/次数上限已到，该路线已有真实回执但覆盖未完成；保持 skipped_budget，不代表已完成或无账号。'
+                : '本次预算/次数上限已到，该路线未请求；保持 skipped_budget，不代表已完成或无账号。'
               : obligation.source === 'catalog'
                 ? `目录义务（${ctx.catalog?.registryVersion ?? plan.registryVersion}）：本次未观察到真实线索，保持 ${obligation.initialState === 'planned' ? 'no_clue' : obligation.initialState}。`
                 : '本次输入未观察到该路线的真实线索；不代表没有此类账号。',
-      receiptKeys: obligation.routeId === 'web-search' ? searchReceiptKeys : [...(
-        obligation.source === 'catalog' ? platformReceiptKeys.get(obligation.platform) : materialReceiptKeys.get(obligation.materialUse)
-      ) ?? []]
+      receiptKeys
     };
   });
   if (budgetExhausted) {
-    gaps.push('本次发现受冻结预算/次数限制，部分路线未请求（见 skipped_budget 路线状态）；不静默抬高总数。');
+    gaps.push('本次发现受冻结预算/次数限制，部分路线未完成请求或覆盖（见 skipped_budget 路线状态）；不静默抬高总数。');
   }
   if (accountViews.some((account) => account.accessLabel === '仅索引可见')) {
     gaps.push('部分候选只有搜索索引材料、未回读原文；只能当线索，不作身份依据。');
@@ -1313,8 +1343,12 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
 }
 
 function isLivenessFailure(error: unknown, signal: AbortSignal): boolean {
+  // Only REAL liveness aborts discovery: an actually aborted signal (cancel or
+  // the elapsed-deadline stop) or an inactive/cancelled run. An input decision
+  // error or budget exhaustion is an honest local failure/gap below — never an
+  // internal_error over already metered work.
   if (signal.aborted) return true;
-  return error instanceof ResearchStop && (error.code === 'run_inactive' || error.code === 'budget_exhausted' || error.code === 'invalid_decision');
+  return error instanceof ResearchStop && error.code === 'run_inactive';
 }
 
 /* ------------------------------------------------------------------ */
