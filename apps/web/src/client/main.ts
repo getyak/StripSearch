@@ -11,6 +11,7 @@ import { createAuthController, renderUserNav, showToast } from './auth.js';
 import { createCitationReturn } from './citation-return.js';
 import { byId, clear, make, setText, show } from './dom.js';
 import { createFirstStepPanel } from './first-step.js';
+import { clearFirstStepDrafts } from './first-step-draft-storage.js';
 import type { FirstStepPanel } from './first-step.js';
 import { createHomeMotion } from './home-motion.js';
 import { createLocalSearch } from './local-search.js';
@@ -285,6 +286,7 @@ const review = createReviewWorkbench({
  * one account's data to another.
  */
 function clearPrivateState(): void {
+  const draftOwnerId = state.user?.id;
   state.user = null;
   state.runs = [];
   state.run = null;
@@ -320,6 +322,7 @@ function clearPrivateState(): void {
   // Render the cleared DOM synchronously so an identity switch can never
   // flash the previous account's research while its run list is pending.
   renderAll();
+  if (draftOwnerId) clearFirstStepDrafts(draftOwnerId);
 }
 
 /** A review request returning 401 means the session ended; drop all private state. */
@@ -953,6 +956,7 @@ function syncFirstStep(runId: string): void {
       api,
       container: els.firstStepPanel,
       runId,
+      ownerId: state.user?.id,
       onAfterExpand: () => { void selectRun(runId); },
       onAfterSubmit: () => {
         void selectRun(runId);

@@ -11,6 +11,7 @@
  */
 
 import { clear, make } from './dom.js';
+import { firstStepDraftCache } from './first-step-draft-storage.js';
 import type {
   FirstStepDiscoveryResponse,
   FirstStepSelectionPayload,
@@ -42,6 +43,8 @@ export interface FirstStepPanelDeps {
   api: FirstStepPanelApi;
   container: HTMLElement;
   runId: string;
+  /** Owner isolates optional local input drafts; the server remains authority. */
+  ownerId?: string;
   /** Called after a successful submit so the host can refresh the run view. */
   onAfterSubmit?: (result: FirstStepSelectionResponse) => void;
   onAfterExpand?: () => void;
@@ -97,6 +100,8 @@ function shortUrl(url: string | null): string {
 
 export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   const draft = new Map<string, FirstStepDecisionDraft>();
+  const cache = firstStepDraftCache(deps.ownerId, deps.runId);
+  let destroyed = false;
   let view: FirstStepDiscoveryView | null = null;
   let runRevision = 0;
   let clusterId: string | null = null;
@@ -113,7 +118,18 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   let openEvidence: { close: () => void } | null = null;
 
   const selectedCount = (): number =>
-    [...draft.values()].filter((decision) => decision.selection === 'selected' || decision.selection === 'only_this_account').length;
+    (view?.accounts ?? []).filter(account => {
+      const decision = draft.get(account.accountId);
+      return decision && !decision.excluded && (decision.selection === 'selected' || decision.selection === 'only_this_account');
+    }).length;
+
+  const persistDraft = (): void => {
+    if (!view) return;
+    if (view.selection.submitted) { cache.remove(); return; }
+    cache.write({ caseId: view.caseId, scopeVersion: view.selection.scopeVersion, clusterId,
+      decisions: [...draft].filter(([id]) => view!.accounts.some(account => account.accountId === id)),
+      hint: hintDraft.slice(0, 500), submitKey, submitIntent, sequence: idempotencySeq });
+  };
 
   const decisionFor = (account: FirstStepAccountView): FirstStepDecisionDraft => {
     const existing = draft.get(account.accountId);
@@ -129,6 +145,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   };
 
   const render = (): void => {
+    if (destroyed) return;
     const root = deps.container;
     const active = root.ownerDocument.activeElement as HTMLElement | null;
     const focusKey = active && root.contains(active) ? active.dataset.focusKey : null;
@@ -137,6 +154,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const openKeys = new Set([...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map(el => el.dataset.detailKey));
     const previousHint = root.querySelector<HTMLInputElement>('[data-focus-key="hint"]');
     if (previousHint) hintDraft = previousHint.value;
+    persistDraft();
     clear(root);
     root.className = 'first-step';
     if (!view) {
@@ -223,7 +241,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       attrs: { type: 'text', placeholder: '例如：他是 Lantern 的作者', 'aria-label': '补线索', 'data-focus-key': 'hint' }
     }) as HTMLInputElement;
     hintInput.value = hintDraft;
-    hintInput.addEventListener('input', () => { hintDraft = hintInput.value; });
+    hintInput.addEventListener('input', () => { hintDraft = hintInput.value; persistDraft(); });
     const hintState = make('span', { className: 'muted', text: hintStatus, attrs:{role:'status'} });
     secondary.appendChild(hintInput);
     secondary.appendChild(
@@ -247,7 +265,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
                 await deps.api.expandFirstStep(deps.runId, { hint }, `expand-${String(now())}-${String(++idempotencySeq)}`);
                 hintStatus = '已排队，正在寻找更多公开线索。';
                 hintState.textContent = hintStatus;
-                deps.onAfterExpand?.();
+                if (!destroyed) deps.onAfterExpand?.();
               } catch (error) {
                 hintStatus = error instanceof Error ? error.message : '扩展失败。';
                 hintState.textContent = hintStatus;
@@ -465,7 +483,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   };
 
   const submit = async (): Promise<FirstStepSelectionResponse | null> => {
-    if (!view || saving) return null;
+    if (destroyed || !view || saving) return null;
     const count = selectedCount();
     if (count === 0) {
       errorText = '请至少选择一个账号后再提交。';
@@ -492,7 +510,9 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       submitKey = `select-${deps.runId}-${String(now())}-${String(++idempotencySeq)}`;
     }
     try {
+      persistDraft();
       const result = await deps.api.submitFirstStepSelection(deps.runId, payload, submitKey!);
+      if (destroyed) return null;
       saving = false;
       status = 'submitted';
       if (result.view) applyView(result.view, result.selection.runRevision);
@@ -508,7 +528,14 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   };
 
   const applyView = (next: FirstStepDiscoveryView, nextRunRevision?: number): void => {
-    const initialSnapshot = view === null;
+    if (destroyed) return;
+    const saved = view === null && !next.selection.submitted ? cache.read(next.caseId, next.selection.scopeVersion) : null;
+    if (saved) {
+      for (const [id, decision] of saved.decisions) if (next.accounts.some(account => account.accountId === id)) draft.set(id, decision);
+      clusterId = next.clusters.some(cluster => cluster.clusterId === saved.clusterId) ? saved.clusterId : null;
+      hintDraft = saved.hint; submitKey = saved.submitKey; submitIntent = saved.submitIntent; idempotencySeq = saved.sequence;
+    }
+    const initialSnapshot = view === null && saved === null;
     const sameView = view !== null && JSON.stringify(view) === JSON.stringify(next) && (nextRunRevision === undefined || nextRunRevision === runRevision);
     view = next;
     if (typeof nextRunRevision === 'number') runRevision = nextRunRevision;
@@ -528,6 +555,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   };
 
   const renderLegacy = (response: FirstStepDiscoveryResponse): void => {
+    if (destroyed) return;
     clear(deps.container);
     deps.container.className = 'first-step legacy';
     deps.container.appendChild(make('h3', { text: '先确认你想了解的人' }));
@@ -545,8 +573,9 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       if (expanding) return;
       expanding = true; action.disabled = true; action.textContent = '正在启动发现…';
       void deps.api.expandFirstStep(deps.runId, {}, `legacy-expand-${String(now())}-${String(++idempotencySeq)}`).then(()=>{
-        deps.onAfterExpand?.();
+        if (!destroyed) deps.onAfterExpand?.();
       }).catch(error=>{
+        if (destroyed) return;
         const message = make('p',{className:'error-text',text:error instanceof Error ? error.message : '启动失败，请重试。',attrs:{role:'alert'}});
         deps.container.appendChild(message);
       }).finally(()=>{expanding=false;action.disabled=false;action.textContent='继续发现这个人的公开账号';});
@@ -556,8 +585,10 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
 
   return {
     async refresh() {
+      if (destroyed) return;
       try {
         const response = await deps.api.getFirstStepDiscovery(deps.runId);
+        if (destroyed) return;
         if (response.mode === 'legacy') {
           renderLegacy(response);
           return;
@@ -576,11 +607,15 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     selectedCount,
     submit,
     async expand(hint: string) {
+      if (destroyed) return;
       await deps.api.expandFirstStep(deps.runId, { hint }, `expand-${String(now())}-${String(++idempotencySeq)}`);
     },
     destroy() {
+      persistDraft();
+      destroyed = true;
       openEvidence?.close();
       clear(deps.container);
+      draft.clear(); view = null; hintDraft = '';
     },
     statusText() {
       return status;
