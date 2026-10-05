@@ -301,12 +301,28 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         ? chosen.accountIds.includes(account.accountId)
         : account.identity.state === 'supported' || account.defaultSuggestion.suggested;
     const mainAccounts = view.accounts.filter(inMain);
-    const secondaryAccounts = view.accounts.filter((account) => !inMain(account));
+    const namedLabels = new Map<string,string>();
+    if (chosen && view.input.kind === 'name_query') {
+      for (const cluster of matchingClusters) {
+        if (cluster.clusterId === chosen.clusterId) continue;
+        for (const id of cluster.accountIds) namedLabels.set(id,cluster.displayName);
+      }
+    }
+    // Actual name-matching titles help people inspect other public profiles;
+    // they never prove that these profiles belong to the chosen person.
+    const namedAccounts=view.accounts.filter(account=>!inMain(account)&&namedLabels.has(account.accountId)&&account.requiresIndependentScope&&account.identity.state!=='rejected'&&account.identity.counterevidence.length===0);
+    const namedIds=new Set(namedAccounts.map(account=>account.accountId));
+    const secondaryAccounts = view.accounts.filter((account) => !inMain(account)&&!namedIds.has(account.accountId));
     const cardsBox = make('section', { className: 'first-step-accounts', attrs: { 'aria-label': '公开账号候选' } });
     if (mainAccounts.length === 0 && view.clusters.length > 0) {
       cardsBox.appendChild(make('p', { className: 'muted', text: '请先确认目标人物；这个人的公开账号会显示在这里。' }));
     }
     cardsBox.appendChild(renderGroups(mainAccounts));
+    if (namedAccounts.length>0) {
+      const named=make('section',{className:'first-step-name-matches',attrs:{'aria-label':'同名公开主页，分别核对'}});
+      named.append(make('h3',{text:`同名公开主页 · 分别核对（${String(namedAccounts.length)}）`}),make('p',{className:'muted',text:'这些主页的实际标题也匹配你输入的姓名，可能属于同名的人。默认不选；勾选后仅以独立账号范围研究，不并入此人的身份结论。'}),renderGroups(namedAccounts,namedLabels));
+      cardsBox.appendChild(named);
+    }
     if (secondaryAccounts.length > 0 || (view.relatedLeads ?? []).length > 0) {
       const secondary = make('details', { className: 'first-step-related', attrs: { 'data-detail-key': 'related-leads' } });
       secondary.appendChild(
@@ -421,7 +437,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   };
 
   /** Compact categorized card groups: a presentation window, never a 90-card wall. */
-  const renderGroups = (accounts: FirstStepAccountView[]): HTMLElement => {
+  const renderGroups = (accounts: FirstStepAccountView[], labels?:ReadonlyMap<string,string>): HTMLElement => {
     const wrap = make('div', { className: 'first-step-groups' });
     for (const category of CATEGORY_ORDER) {
       const groupAccounts = accounts.filter((account) => account.category === category);
@@ -429,13 +445,13 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       const group = make('div', { className: 'first-step-group' });
       group.appendChild(make('h3', { text: `${CATEGORY_LABELS[category]}（${String(groupAccounts.length)}）` }));
       const cards = make('div', { className: 'first-step-cards' });
-      for (const account of groupAccounts.slice(0, 6)) cards.appendChild(renderCard(account));
+      for (const account of groupAccounts.slice(0, 6)) cards.appendChild(renderCard(account,labels?.get(account.accountId)));
       group.appendChild(cards);
       if (groupAccounts.length > 6) {
         const more = make('details', { className: 'first-step-more', attrs: { 'data-detail-key': `more-${category}` } });
         more.appendChild(make('summary', { text: `展开其余 ${String(groupAccounts.length - 6)} 个` }));
         const extraCards = make('div', { className: 'first-step-cards' });
-        for (const account of groupAccounts.slice(6)) extraCards.appendChild(renderCard(account));
+        for (const account of groupAccounts.slice(6)) extraCards.appendChild(renderCard(account,labels?.get(account.accountId)));
         more.appendChild(extraCards);
         group.appendChild(more);
       }
@@ -444,7 +460,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     return wrap;
   };
 
-  const renderCard = (account: FirstStepAccountView): HTMLElement => {
+  const renderCard = (account: FirstStepAccountView, matchedTitle?:string): HTMLElement => {
     const decision = decisionFor(account);
     const checked = decision.selection === 'selected' || decision.selection === 'only_this_account';
     const card = make('div', {
@@ -494,6 +510,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       })
     );
     card.appendChild(top);
+    if(matchedTitle)card.appendChild(make('p',{className:'first-step-value',text:`匹配的主页标题：${matchedTitle}；归属未确认。`}));
     card.appendChild(make('p', { className: 'first-step-value', text: account.researchSummary }));
 
     card.appendChild(make('p', { className: 'first-step-boundary', text: `当前边界：${account.accessLabel}${account.requiresIndependentScope ? '；需要独立账号范围' : ''}` }));

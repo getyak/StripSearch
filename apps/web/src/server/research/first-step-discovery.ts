@@ -28,7 +28,7 @@ import type { HttpTransport } from '../adapters/types.js';
 import { ProviderError } from '../adapters/types.js';
 import { invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { runDshDecision } from './dsh-decision.js';
-import type { ResearchToolAction, ResearchToolResult, ResearchPage } from './tool-contracts.js';
+import type { ResearchToolAction, ResearchToolResult, ResearchPage, ResearchAliasProof } from './tool-contracts.js';
 import type { ResearchBudgetLimits } from '../../shared/types.js';
 import { RESEARCH_LIMITS, ResearchStop, type ActionReceipt, type ActionUsage } from './research-store.js';
 import {
@@ -587,6 +587,55 @@ function failureState(error: unknown): FirstStepRouteState {
 }
 void failureState;
 
+/* ------------------------------------------------------------------ */
+/* Source-backed alias projection (server-side re-verification)         */
+/* ------------------------------------------------------------------ */
+
+export type FirstStepAliasProjection =
+  | { ok: true; aliasKey: string; representativeKey: string; aliasRef: FirstStepAccountRef; representativeRef: FirstStepAccountRef }
+  | { ok: false; reason: string };
+
+/**
+ * Re-verify one adapter-generated alias proof before any projection rewrite.
+ * Trusted kinds only: (1) an actual native GitHub/X profile response with a
+ * stable nonempty native id — same platform, one profile, only a case alias;
+ * (2) an actual same-document redirect whose final URL differs only in the
+ * www/apex host prefix with EXACTLY the same pathname+query and BOTH sides
+ * classifier profile entries. Arbitrary paths, domains, subdomains, different
+ * handles/native ids and cross-platform lookalikes never collapse. The
+ * returned ref is the representative; this function creates no identity
+ * support and no scope permission.
+ */
+export function verifyAliasProjection(proof: ResearchAliasProof): FirstStepAliasProjection {
+  if(proof.kind!=='native_profile'&&proof.kind!=='same_document_redirect')return {ok:false,reason:'未支持的别名证明类型。'};
+  const requested = classifyFirstStepUrl(proof.requestedUrl);
+  const returned = classifyFirstStepUrl(proof.returnedUrl);
+  if (!requested.ok || !returned.ok) return { ok: false, reason: '别名证明的请求或返回地址不是可分类的公开链接。' };
+  const aliasRef = requested.ref;
+  const representativeRef = returned.ref;
+  if (proof.kind === 'native_profile') {
+    if (proof.platform !== 'github' && proof.platform !== 'x') return { ok: false, reason: '原生别名只支持 GitHub/X 平台。' };
+    if (typeof proof.nativeId !== 'string' || !/^[0-9]+$/.test(proof.nativeId)) return { ok: false, reason: '原生别名缺少稳定非空原生 ID。' };
+    if (aliasRef.platform !== proof.platform || representativeRef.platform !== proof.platform) return { ok: false, reason: '原生别名必须是同一平台的同一账号。' };
+    if (aliasRef.entry !== 'profile' || representativeRef.entry !== 'profile') return { ok: false, reason: '原生别名只在 profile 入口之间成立。' };
+    if (aliasRef.handle === null || representativeRef.handle === null || aliasRef.handle.toLowerCase() !== representativeRef.handle.toLowerCase()) {
+      return { ok: false, reason: '原生别名只允许同一账号的大小写别名；不同账号或不同原生 ID 永不合并。' };
+    }
+    return { ok: true, aliasKey: aliasRef.accountKey, representativeKey: representativeRef.accountKey, aliasRef, representativeRef };
+  }
+  const urlA = new URL(proof.requestedUrl);
+  const urlB = new URL(proof.returnedUrl);
+  const baseA = urlA.hostname.replace(/^www\./, '');
+  const baseB = urlB.hostname.replace(/^www\./, '');
+  if (baseA !== baseB || urlA.hostname === urlB.hostname) return { ok: false, reason: '文档别名只允许同一主机的 www/apex 变体。' };
+  if (urlA.hostname !== `www.${urlB.hostname}` && urlB.hostname !== `www.${urlA.hostname}`) return { ok: false, reason: '文档别名只允许 www/apex 主机前缀差异。' };
+  if (urlA.pathname !== urlB.pathname || urlA.search !== urlB.search) return { ok: false, reason: '文档别名要求完全相同的路径与查询；不同路径永不合并。' };
+  if (aliasRef.platform !== representativeRef.platform || aliasRef.entry !== 'profile' || representativeRef.entry !== 'profile') {
+    return { ok: false, reason: '文档别名要求两侧都是同一平台的 profile 入口。' };
+  }
+  return { ok: true, aliasKey: aliasRef.accountKey, representativeKey: representativeRef.accountKey, aliasRef, representativeRef };
+}
+
 class ProviderFailure extends Error {
   constructor(readonly state: FirstStepRouteState, detail: string) {
     super(detail);
@@ -636,6 +685,21 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
 
   const observed: ObservedPage[] = [];
   const candidateRefs = new Map<string, FirstStepAccountRef>();
+  // Source-backed canonical projection: an observed alias account key resolves
+  // to the observed canonical returned key. Only ACCOUNT KEYS move; every
+  // literal source URL/targetURL/quote/hash and receipt stays untouched.
+  const aliasToRepresentative = new Map<string, string>();
+  const aliasNotes = new Set<string>();
+  const readKeys = new Set<string>();
+  const resolveKey = (key: string): string => {
+    let current = key;
+    const seen = new Set<string>();
+    while (aliasToRepresentative.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = aliasToRepresentative.get(current)!;
+    }
+    return current;
+  };
   const indexedTitles = new Map<string, string[]>();
   const inputNames = ctx.input.kind === 'name_query' ? ctx.input.value.toLowerCase().split(/[\/／]/).map(value => value.trim()).filter(Boolean) : [];
   const matchesInput = (title: string): boolean => inputNames.some(name => title.toLowerCase().includes(name));
@@ -676,6 +740,12 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     const classified = classifyFirstStepUrl(url);
     if (!classified.ok) return null;
     const ref = classified.ref;
+    const projectedKey = resolveKey(ref.accountKey);
+    if (projectedKey !== ref.accountKey) {
+      // An observed alias of a canonical representative is never a second
+      // candidate; future registrations resolve through this observed map.
+      return candidateRefs.get(projectedKey) ?? ref;
+    }
     if (ref.entry === 'profile') {
       const existing = candidateRefs.get(ref.accountKey);
       // Prefer the actual account/home entry (profile URL == documented home):
@@ -704,7 +774,51 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const pushObservation = (observation: FirstStepLinkObservation): void => {
     if (observationIds.has(observation.observationId)) return;
     observationIds.add(observation.observationId);
-    linkObservations.push(observation);
+    // Canonical projection remaps ACCOUNT KEYS only; every literal source
+    // URL/targetURL/quote/hash stays exactly as observed.
+    linkObservations.push({
+      ...observation,
+      fromAccountKey: observation.fromAccountKey === null ? null : resolveKey(observation.fromAccountKey),
+      targetAccountKey: resolveKey(observation.targetAccountKey)
+    });
+  };
+
+  /**
+   * Apply one verified adapter alias proof. Only a FRESH discovery attempt
+   * with NO persisted case accounts may collapse aliases; an existing case
+   * keeps its original user choices/history/negative/exclusion untouched and
+   * gets one concise honest gap instead. The proof itself never becomes
+   * identity support, never a default suggestion and never a scope grant.
+   */
+  const applyAliasProof = (proof: ResearchAliasProof): void => {
+    const verified = verifyAliasProjection(proof);
+    if (!verified.ok) {
+      aliasNotes.add(`重复候选的别名证明未通过服务端核验（${verified.reason}）：${proof.requestedUrl}；不做合并，保留分离候选。`);
+      return;
+    }
+    if (verified.aliasKey === verified.representativeKey) return;
+    if (ctx.store.cases.listAccounts(ctx.ownerId, caseId).length > 0) {
+      aliasNotes.add(`重复候选（${proof.requestedUrl} 与 ${proof.returnedUrl}）已由实际响应证实为同一账号/文档，但该 case 已有持久账号或选择历史；不做合并投影，保留原始候选、选择与回执。`);
+      return;
+    }
+    aliasToRepresentative.set(verified.aliasKey, verified.representativeKey);
+    // The observed canonical returned ref is the representative.
+    const existingRepresentative = candidateRefs.get(verified.representativeKey);
+    if (!existingRepresentative || existingRepresentative.accountKey !== verified.representativeKey) candidateRefs.set(verified.representativeKey, verified.representativeRef);
+    candidateRefs.delete(verified.aliasKey);
+    // The representative profile was just read under its alias URL: one read.
+    readKeys.add(verified.representativeKey);
+    for (const observation of linkObservations) {
+      observation.fromAccountKey = observation.fromAccountKey === null ? null : resolveKey(observation.fromAccountKey);
+      observation.targetAccountKey = resolveKey(observation.targetAccountKey);
+    }
+    for (const [key, titles] of [...indexedTitles]) {
+      const projected = resolveKey(key);
+      if (projected === key) continue;
+      indexedTitles.set(projected, [...(indexedTitles.get(projected) ?? []), ...titles]);
+      indexedTitles.delete(key);
+    }
+    aliasNotes.add(`重复候选已按实际响应合并为同一账号投影（${proof.requestedUrl} → ${proof.returnedUrl}）；合并仅为投影去重，不构成身份依据，不改变用户输入、原始摘录或回执。`);
   };
 
   const searchOnce = async (query: string, includeDomains?: readonly string[], provider?: 'bluesky'): Promise<'ok' | 'failed' | 'budget'> => {
@@ -721,8 +835,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
          for(const link of page.links){
           const linked=register(link);if(!linked)continue;
           // An index's link list is observed discovery metadata, never an
-          // authorial claim, identity support or fetch authorization.
-          indexedTitles.set(linked.accountKey,[...(indexedTitles.get(linked.accountKey)??[]),`${page.title} 的出链（未核对归属）`]);
+          // authorial claim, identity support or fetch authorization. An
+          // unverified outbound link inherits NO name relevance from its
+          // referring page title.
           pushObservation({observationId:`obs_index_link_${digest([page.url,link])}`,sourceId:`search:${digest(query)}`,sourceRevision:1,sourceUrl:page.url,sourceContentHash:null,sourceRetrievedAt:null,fromAccountKey:null,targetAccountKey:linked.accountKey,targetUrl:link,linkRole:'unknown_role',direction:'outbound',retrieval:'indexed',quote:null,locator:'搜索结果返回的实际外链；未回读原文，不作归属依据。',observedAt:now()});
          }
         }
@@ -793,6 +908,15 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         // always retained); it gets no read permission by itself.
         register(page.url);
         observed.push({ page, ref: source, retrieval: 'read' });
+        // Adapter-attested alias proofs may project duplicate candidates onto
+        // the observed canonical returned ref (server re-verified below).
+        if (page.aliasProof) {
+          const proof=page.aliasProof;
+          const bound=proof.requestedUrl===action.url&&proof.returnedUrl===page.url&&
+            (proof.kind!=='native_profile'||page.account?.id===proof.nativeId&&page.account.platform===proof.platform&&page.account.profileUrl===page.url);
+          if(bound)applyAliasProof(proof);
+          else aliasNotes.add(`重复候选的别名证明未通过服务端核验（与实际请求或原生返回账号不绑定）：${proof.requestedUrl}；保持分离。`);
+        }
         const flags = sourceFlags(page.url);
         // Consume the ACTUAL extractor-record link contexts: exact spans of
         // the retained original with their href binding and surface. Quotes
@@ -823,7 +947,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           if (!targetClassified.ok) continue;
           const targetRef = targetClassified.ref;
           register(target);
-          if (targetRef.accountKey === source.accountKey) continue;
+          if (resolveKey(targetRef.accountKey) === resolveKey(source.accountKey)) continue;
           const context = byTarget.get(target) ?? null;
           const fallback = context === null ? quoteAround(page.text, target) : null;
           const quote = context !== null ? context.quote : fallback?.quote ?? null;
@@ -897,12 +1021,11 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    observed lead — it gets no read permission by itself.
   const explicitAnchor = ctx.input.kind === 'homepage_url' ? classifyFirstStepUrl(ctx.input.value) : null;
   const anchorsRead: FirstStepAccountRef[] = [];
-  const readKeys = new Set<string>();
   if (explicitAnchor && explicitAnchor.ok) {
     register(ctx.input.value, { explicit: true });
-    readKeys.add(explicitAnchor.ref.accountKey);
+    readKeys.add(resolveKey(explicitAnchor.ref.accountKey));
     await readOnce(explicitAnchor.ref);
-    anchorsRead.push(explicitAnchor.ref);
+    anchorsRead.push(candidateRefs.get(resolveKey(explicitAnchor.ref.accountKey)) ?? explicitAnchor.ref);
   }
 
   // 2. Wide recall: deliberate family coverage; every query runs before reads
@@ -934,18 +1057,20 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     )
     .sort((a, b) => priorityOf(a) - priorityOf(b));
   const enqueueRead = (ref: FirstStepAccountRef): void => {
-    if (ref.entry !== 'profile' || readKeys.has(ref.accountKey) || readQueue.some((other) => other.accountKey === ref.accountKey)) return;
+    const key = resolveKey(ref.accountKey);
+    if (ref.entry !== 'profile' || readKeys.has(key) || readQueue.some((other) => resolveKey(other.accountKey) === key)) return;
     readQueue.unshift(ref);
   };
   const drainReads = async (): Promise<void> => {
   while (readQueue.length > 0 && readKeys.size < Math.max(0, budget.maxProfileReads)) {
     const next = readQueue.shift()!;
-    if (readKeys.has(next.accountKey)) continue;
-    readKeys.add(next.accountKey);
+    const nextKey = resolveKey(next.accountKey);
+    if (readKeys.has(nextKey)) continue;
+    readKeys.add(nextKey);
     const before = linkObservations.length;
     const outcome = await readOnce(next);
     if (outcome === 'budget') break;
-    if (outcome === 'ok') anchorsRead.push(next);
+    if (outcome === 'ok') anchorsRead.push(candidateRefs.get(resolveKey(next.accountKey)) ?? next);
     if (outcome === 'missing') {
       // A failed/missing read is never counted as actual anchor evidence.
       gaps.push(`读取未返回可用页面内容：${next.profileUrl}；保持未回读状态，不作归属依据。`);
@@ -1287,6 +1412,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     `目录义务已绑定 ${ctx.catalog ? `${ctx.catalog.registryVersion} / ${ctx.catalog.contentHash}` : '无目录快照（仅通用路线）'}；逐条状态见路线回执，no_adapter/deferred/no_clue 均不代表已完成。`
   );
 
+  gaps.push(...aliasNotes);
   const receipts = ctx.search.receipts();
   const view: FirstStepDiscoveryView = {
     schemaVersion: FIRST_STEP_SCHEMA_VERSION,

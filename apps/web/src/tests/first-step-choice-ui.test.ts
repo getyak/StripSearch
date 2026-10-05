@@ -251,3 +251,22 @@ test('literal name matches lead the visible choices while unrelated page titles 
     assert.equal(fixture.firstStep.selectionBinding(fixture.run.id),null);
   } finally {panel.destroy();fixture.db.close();container.remove();}
 });
+
+ test('observed name-matching profiles stay visible as unchecked independent accounts, with unrelated leads collapsed',async()=>{
+  const fixture=seedFirstStep({accounts:[{url:'https://github.com/linzhou'},{url:'https://x.com/linzhou'},{url:'https://github.com/morganchen'}]});
+  fixture.republish(view=>({...view,input:{...view.input,kind:'name_query',value:'Lin Zhou'},clusters:[
+   cluster('primary','Lin Zhou',view.accounts[0]!.accountId,[view.accounts[0]!.accountId]),
+   cluster('name-match','Lin Zhou | Synthetic University',view.accounts[1]!.accountId,[view.accounts[1]!.accountId]),
+   cluster('unrelated','Morgan Chen',view.accounts[2]!.accountId,[view.accounts[2]!.accountId])]}));
+  const container=env.document.createElement('div');env.document.body.appendChild(container);const posted:FirstStepSelectionPayload[]=[];
+  const panel=createFirstStepPanel({api:panelApi(fixture,posted),container,runId:fixture.run.id});
+  try{
+   await panel.refresh();container.querySelector<HTMLButtonElement>('button.first-step-cluster')!.click();
+   const named=container.querySelector<HTMLElement>('.first-step-name-matches')!;assert.ok(named);assert.match(named.textContent??'',/不并入此人的身份结论/);assert.match(named.textContent??'',/Synthetic University/);
+   const checkbox=named.querySelector<HTMLInputElement>('input[type="checkbox"]')!;assert.equal(checkbox.checked,false);assert.equal(panel.selectedCount(),0);
+   checkbox.click();assert.equal(panel.selectedCount(),1);assert.equal(fixture.firstStep.selectionBinding(fixture.run.id),null);
+   const confirm=[...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.classList.contains('first-step-primary'))!;confirm.click();await new Promise(resolve=>setTimeout(resolve,0));
+   assert.equal(posted[0]!.clusterId,'primary');assert.equal(posted[0]!.accounts.find(a=>a.accountId===fixture.store.cases.listAccounts(fixture.run.ownerId,fixture.caseId)[1]!.accountId)!.selection,'only_this_account');
+   assert.ok(posted[0]!.accounts.filter(a=>a.selection==='selected').length===0);assert.ok(container.querySelector('details.first-step-related'));
+  }finally{panel.destroy();fixture.db.close();container.remove();}
+ });

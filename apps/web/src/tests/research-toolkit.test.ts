@@ -229,3 +229,61 @@ test('Bluesky name discovery uses one unauthenticated native search and remains 
  assert.match(h.calls[0]!.url,/^https:\/\/public\.api\.bsky\.app\/xrpc\/app\.bsky\.actor\.searchActors\?q=Mira%20Chen&limit=12$/);
  assert.equal(h.calls[0]!.init?.headers?.authorization,undefined);assert.equal(r.nextCursor,'opaque');
 });
+
+
+test('native profile adapters attest real case aliases with stable IDs and both URLs', async () => {
+  // GitHub: the verified response's canonical login is the returned URL; the
+  // proof carries the exact original requested URL and the stable native ID.
+  const gh = harness({ login: 'FixtureAuthor', id: 123456, html_url: 'https://github.com/FixtureAuthor', name: 'Synthetic Author', bio: 'Original synthetic bio.' });
+  const r = await gh.execute({ type: 'github_profile', url: 'https://github.com/fixtureauthor' });
+  const page = r.pages[0]!;
+  assert.equal(page.url, 'https://github.com/FixtureAuthor', 'the observed returned URL is the page URL');
+  assert.equal(page.text, 'Synthetic Author\nOriginal synthetic bio.', 'exact original content is preserved');
+  assert.deepEqual(page.aliasProof, { kind: 'native_profile', platform: 'github', nativeId: '123456', requestedUrl: 'https://github.com/fixtureauthor', returnedUrl: 'https://github.com/FixtureAuthor' });
+  // X: same-platform handle case alias from the verified native response.
+  const xh = harness({ code: 200, data: { ...profile, profile: 'Fixture_Author' } });
+  const xr = await xh.execute({ type: 'social_profile', url: 'https://x.com/fixture_author' });
+  assert.equal(xr.pages[0]!.url, 'https://x.com/Fixture_Author');
+  assert.deepEqual(xr.pages[0]!.aliasProof, { kind: 'native_profile', platform: 'x', nativeId: profile.rest_id, requestedUrl: 'https://x.com/fixture_author', returnedUrl: 'https://x.com/Fixture_Author' });
+});
+
+test('no alias proof exists without a real stable native ID', async () => {
+  for (const body of [{ login: 'FixtureAuthor', html_url: 'https://github.com/FixtureAuthor' }, { code: 200, data: { ...profile, rest_id: undefined, id: undefined } }]) {
+    const h = harness(body);
+    await assert.rejects(h.execute('code' in body ? { type: 'social_profile', url: 'https://x.com/fixture_author' } : { type: 'github_profile', url: 'https://github.com/fixtureauthor' }));
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test('Firecrawl attests only strict same-document www/apex redirects and never invents a final URL', async () => {
+  const html = '<p>Original synthetic content.</p>';
+  const body = (source: string, final: string) => ({ success: true, data: { html, markdown: '', metadata: { sourceURL: source, url: final, statusCode: 200, creditsUsed: 1 } } });
+  const requested = 'https://www.synthetic-author.dev/';
+  const finalUrl = 'https://synthetic-author.dev/';
+  const h = harness(body(requested, finalUrl));
+  const read = await h.execute({ type: 'firecrawl', url: requested });
+  const page = read.pages[0]!;
+  assert.equal(page.url, finalUrl, 'the observed actual final URL is the page URL');
+  assert.equal(page.text, html, 'the exact original content is preserved');
+  assert.deepEqual(page.aliasProof, { kind: 'same_document_redirect', requestedUrl: requested, returnedUrl: finalUrl });
+  // Different paths, different queries and non-profile pages stay unproven:
+  // the read succeeds but carries no alias proof and keeps the requested URL.
+  for (const [source, final] of [
+    ['https://www.synthetic-author.dev/about', 'https://synthetic-author.dev/'],
+    ['https://www.synthetic-author.dev/?ref=a', 'https://synthetic-author.dev/?ref=b'],
+    ['https://www.synthetic-author.dev/works/x', 'https://synthetic-author.dev/works/x']
+  ] as const) {
+    const b = harness(body(source, final));
+    const r = await b.execute({ type: 'firecrawl', url: source });
+    assert.equal(r.pages[0]!.aliasProof, undefined, `${source} -> ${final}`);
+    assert.equal(r.pages[0]!.url, source);
+    assert.equal(r.pages[0]!.text, html);
+  }
+  // Subdomain jumps stay refused outright, and a missing final URL is never
+  // invented as a fallback.
+  const sub = harness(body(requested, 'https://blog.synthetic-author.dev/'));
+  await assert.rejects(sub.execute({ type: 'firecrawl', url: requested }));
+  assert.equal(sub.calls.length, 1);
+  const noFinal = harness({ success: true, data: { html, markdown: '', metadata: { sourceURL: requested, statusCode: 200, creditsUsed: 1 } } });
+  await assert.rejects(noFinal.execute({ type: 'firecrawl', url: requested }));
+});

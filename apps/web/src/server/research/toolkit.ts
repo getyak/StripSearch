@@ -6,7 +6,7 @@ import { extractOriginalLinkContexts, nativeProfileLinkContext, nativeUsernameLi
 import { asArray, asNumber, asRecord, asString, safeFetchJson } from '../adapters/http.js';
 import { ProviderError } from '../adapters/types.js';
 import type { HttpRequestInit } from '../adapters/types.js';
-import type { ResearchAccount, ResearchPage, ResearchToolAction, ResearchToolResult, ResearchTools, ResearchToolsOptions } from './tool-contracts.js';
+import type { ResearchAccount, ResearchAliasProof, ResearchPage, ResearchToolAction, ResearchToolResult, ResearchTools, ResearchToolsOptions } from './tool-contracts.js';
 
 const TEXT_LIMIT = 6000;
 const LINK_LIMIT = 100;
@@ -84,6 +84,27 @@ function xHandle(raw: string): string {
   return handle;
 }
 function decimalId(raw: unknown): string | null { return typeof raw === 'string' && /^[0-9]+$/.test(raw) ? raw : null; }
+/**
+ * Strictly eligible same-document alias: the ACTUAL final URL differs from the
+ * requested one only in the www/apex host prefix with EXACTLY the same
+ * pathname+query, and BOTH sides classify as profile entries. Arbitrary paths,
+ * subdomains, domains and non-profile pages never attest an alias; a missing
+ * final URL is never invented.
+ */
+function sameDocumentAliasProof(requested: string, finalUrl: string): ResearchAliasProof | null {
+  if (requested === finalUrl) return null;
+  let a: URL; let b: URL;
+  try { a = new URL(requested); b = new URL(finalUrl); } catch { return null; }
+  const baseA = a.hostname.replace(/^www\./, '');
+  const baseB = b.hostname.replace(/^www\./, '');
+  if (baseA !== baseB || a.hostname === b.hostname) return null;
+  if (a.hostname !== `www.${b.hostname}` && b.hostname !== `www.${a.hostname}`) return null;
+  if (a.pathname !== b.pathname || a.search !== b.search) return null;
+  const source = classifyFirstStepUrl(requested);
+  const returned = classifyFirstStepUrl(finalUrl);
+  if (!source.ok || !returned.ok || source.ref.entry !== 'profile' || returned.ref.entry !== 'profile') return null;
+  return { kind: 'same_document_redirect', requestedUrl: requested, returnedUrl: finalUrl };
+}
 function xAccount(raw: unknown, requestedHandle: string): { data: Record<string, unknown>; account: ResearchAccount } {
   const data = asRecord(raw);
   const handle = asString(data.profile);
@@ -179,12 +200,16 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (comparable(sourceUrl) !== comparable(url)) fail('抓取来源与请求地址不匹配。');
     const canonicalHost = (value: string) => new URL(value).hostname.replace(/^www\./, '');
     if (canonicalHost(finalUrl) !== canonicalHost(url)) fail('网页跳转到了其他网站，未采用返回资料。');
+    // Only a strictly eligible same-document www/apex redirect may carry an
+    // alias proof and report the OBSERVED actual final URL as its page URL;
+    // the exact original text and the original requested URL stay preserved.
+    const aliasProof = sameDocumentAliasProof(url, finalUrl);
     // Preserve provider-supplied HTML hrefs and their real surrounding spans.
     // Markdown remains the fallback; never reconstruct anchors from a link index.
     const rawContent = asString(data.html) || asString(data.markdown) || '';
     const content = retainText(rawContent); if (!content) fail('目标网页没有可用正文。');
     const limitations = ['网页原文仍需核对人物归属。', `请求地址：${sourceUrl}`, `最终地址：${finalUrl}`, '本次读取未指定正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。'];
-    return result([{ url: sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], sourceUrl), linkContexts: extractOriginalLinkContexts(content, sourceUrl), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
+    return result([{ url: aliasProof ? finalUrl : sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], sourceUrl), linkContexts: extractOriginalLinkContexts(content, sourceUrl), ...(aliasProof ? { aliasProof } : {}), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
   }
   async function social(type: 'social_profile' | 'social_posts', url: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const handle = xHandle(url); const apiKey = key(options.tikhubApiKey, '公开账号');
@@ -201,7 +226,10 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
       const content = [text(target.data.name, 200), retainText(target.data.desc), asString(target.data.website)].filter(Boolean).join('\n');
       const website = asString(target.data.website);
       const context = website ? nativeProfileLinkContext(content, website) : null;
-      return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [target.data.website]), linkContexts: context ? [context] : [], limitations: ['账号资料是账号自述；不自动证明跨平台身份。'] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
+      // The requested-vs-returned handle and the stable native id are already
+      // verified above: this proof is the only attestation of a case alias.
+      const aliasProof: ResearchAliasProof = { kind: 'native_profile', platform: 'x', nativeId: target.account.id, requestedUrl: url, returnedUrl: target.account.profileUrl };
+      return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [target.data.website]), linkContexts: context ? [context] : [], aliasProof, limitations: ['账号资料是账号自述；不自动证明跨平台身份。'] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
     }
     if (!Array.isArray(data.timeline)) fail('公开帖子返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
@@ -234,9 +262,12 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const twitterUsername = twitter && /^[A-Za-z0-9_]{1,15}$/.test(twitter) ? twitter : null;
     const content = [text(body.name, 200), retainText(body.bio), text(body.company, 200), asString(body.blog), twitterUsername ? `twitter_username: ${twitterUsername}` : null].filter(Boolean).join('\n');
     const account: ResearchAccount = { platform: 'github', handle: login, id, profileUrl: returnedUrl };
+    // The requested-vs-returned handle and the stable native id are already
+    // verified above: this proof is the only attestation of a case alias.
+    const aliasProof: ResearchAliasProof = { kind: 'native_profile', platform: 'github', nativeId: id, requestedUrl: raw, returnedUrl };
     const website = asString(body.blog);
     const context = website ? nativeProfileLinkContext(content, website) : null;
-    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [body.blog, twitterUsername ? `https://x.com/${twitterUsername}` : null]), linkContexts: [context, twitterUsername ? nativeUsernameLinkContext(content, twitterUsername, `https://x.com/${twitterUsername}`) : null].filter((item): item is NonNullable<typeof item> => item !== null), limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。'] }], bytes, 0);
+    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [body.blog, twitterUsername ? `https://x.com/${twitterUsername}` : null]), linkContexts: [context, twitterUsername ? nativeUsernameLinkContext(content, twitterUsername, `https://x.com/${twitterUsername}`) : null].filter((item): item is NonNullable<typeof item> => item !== null), aliasProof, limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。'] }], bytes, 0);
   }
   return { async execute(action, signal) {
     signal.throwIfAborted();
