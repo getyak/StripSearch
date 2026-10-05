@@ -377,7 +377,7 @@ test('initial obligations are frozen before IO and never enumerate the whole cat
     { registryVersion: 'registry-test/v1', now: '2026-10-05T00:00:00.000Z' }
   );
   assert.equal(plan.frozenAt, '2026-10-05T00:00:00.000Z');
-  assert.equal(plan.policyVersion, 'first-step/v7');
+  assert.equal(plan.policyVersion, 'first-step/v8');
   const triggers = new Set(plan.obligations.map((o) => o.trigger));
   assert.ok(triggers.has('initial_wave'));
   assert.ok(plan.obligations.length >= 5 && plan.obligations.length <= 12, 'a bounded initial wave, not 4421 rules');

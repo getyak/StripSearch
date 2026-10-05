@@ -710,6 +710,17 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const indexedTitles = new Map<string, string[]>();
   const inputNames = ctx.input.kind === 'name_query' ? ctx.input.value.toLowerCase().split(/[\/／]/).map(value => value.trim()).filter(Boolean) : [];
   const matchesInput = (title: string): boolean => inputNames.some(name => title.toLowerCase().includes(name));
+  // Compare complete actually supplied names with actually observed handles;
+  // this only ranks/proposes uncertain entries, never constructs a URL or
+  // proves that two profiles are the same person.
+  const normalizedName = (value:string):string => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
+  const suppliedNameKeys = inputNames.map(normalizedName).filter(Boolean);
+  const observedHandleMatchesInput = (ref:FirstStepAccountRef):boolean => {
+    const handles=[ref.handle??''];
+    if(ref.platform==='personal_site')handles.push(new URL(ref.profileUrl).hostname.split('.')[0]??'');
+    return handles.some(handle=>suppliedNameKeys.includes(normalizedName(handle)));
+  };
+  const indexedHandleMatchKeys = new Set<string>();
   const relatedLeads = new Map<string, FirstStepRelatedLeadView>();
   const linkObservations: FirstStepLinkObservation[] = [];
   const observationIds = new Set<string>();
@@ -868,17 +879,23 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         // investigate, never a canonical alias or ownership proof.
         const titleHandles = [...page.title.matchAll(/(?:^|[\s(])@([\p{L}\p{N}_.-]+)/gu)].map(match => match[1]!);
         const conflictingHandle = resultRef.handle !== null && titleHandles.some(handle => handle.toLowerCase() === resultRef.handle!.toLowerCase() && handle !== resultRef.handle);
-        const ref = register(page.url, {candidate: !conflictingHandle && (!genericSite || matchesInput(page.title) || ctx.input.kind === 'homepage_url' && comparableUrl(page.url) === comparableUrl(ctx.input.value)),
+        const ref = register(page.url, {candidate: !conflictingHandle && (!genericSite || matchesInput(page.title) || observedHandleMatchesInput(resultRef) || ctx.input.kind === 'homepage_url' && comparableUrl(page.url) === comparableUrl(ctx.input.value)),
           note: conflictingHandle ? '搜索标题中的账号标识与入口大小写不一致；未取得实际账号证明，保留待核对资料，不推定别名。' : undefined});
         if (!ref) continue;
         indexedTitles.set(ref.accountKey, [...(indexedTitles.get(ref.accountKey) ?? []), page.title]);
         const names=ctx.input.value.split(/\s*[\/／]\s*/).map(name=>name.trim().toLowerCase()).filter(Boolean);
         if(names.some(name=>page.title.toLowerCase().includes(name))){
          for(const link of page.links){
-          // Even an attributable post in an index's outbound list can be a
-          // quoted third party. Preserve its literal receipt as material;
-          // only direct results or actually read contexts propose accounts.
-          const linked=register(link, {candidate: false});if(!linked)continue;
+          // A quoted third party stays material. An explicit indexed
+          // handle or a complete supplied-name handle only supplies an
+          // uncertain candidate and IO priority, never ownership or an alias.
+          const classifiedLink=classifyFirstStepUrl(link);
+          const linkedRef=classifiedLink.ok?classifiedLink.ref:null;
+          const titleHandleMatch=linkedRef!==null&&linkedRef.handle!==null&&titleHandles.some(handle=>handle.toLowerCase()===linkedRef.handle!.toLowerCase());
+          const attributableLead=linkedRef!==null&&(linkedRef.entry==='profile'||linkedRef.attributable)&&
+            (observedHandleMatchesInput(linkedRef)||titleHandleMatch);
+          const linked=register(link, {candidate: attributableLead});if(!linked)continue;
+          if(attributableLead&&(linked.platform==='github'||linked.platform==='x'))indexedHandleMatchKeys.add(linked.accountKey);
           // An index's link list is observed discovery metadata, never an
           // authorial claim, identity support or fetch authorization. An
           // unverified outbound link inherits NO name relevance from its
@@ -1104,10 +1121,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       const unresolvedNativePair = namespace !== null && [...candidateRefs.values()].some(other =>
         other.accountKey !== ref.accountKey && nativeNamespace(other) === namespace);
       const pairMatchesInput = namespace !== null && [...candidateRefs.values()].some(other =>
-        nativeNamespace(other) === namespace && (indexedTitles.get(other.accountKey) ?? []).some(matchesInput));
+        nativeNamespace(other) === namespace && ((indexedTitles.get(other.accountKey) ?? []).some(matchesInput)||observedHandleMatchesInput(other)||indexedHandleMatchKeys.has(other.accountKey)));
       if (unresolvedNativePair && pairMatchesInput) return -150 - ((indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? 25 : 0);
     }
-    const relevance = (indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? -100 : 0;
+    const relevance = (indexedTitles.get(ref.accountKey) ?? []).some(matchesInput)||observedHandleMatchesInput(ref)||indexedHandleMatchKeys.has(ref.accountKey) ? -100 : 0;
     if (ref.platform === 'personal_site' || ref.platform === 'linktree') return relevance;
     // Native name-matching profiles can reveal the author's actual home and
     // stable account ID; they precede a long tail of matching website titles.

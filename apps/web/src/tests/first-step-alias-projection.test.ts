@@ -467,6 +467,40 @@ test('unrelated native variant pairs cannot displace a matching profile and home
   } finally {h.db.close();}
 });
 
+test('an explicitly indexed handle proposes only matching observed entries and still requires real alias proof', async () => {
+  const mirror='https://fixture-viewer.dev/public/special_user',canonical='https://x.com/Special_User';
+  const posts=['https://x.com/special_user/status/1001','https://x.com/Special_User/status/1002'];
+  const quoted='https://x.com/quoted_company/status/1003',different='https://x.com/specialuser/status/1004';
+  const policy={maxSearchQueries:1,maxSearchResults:12,maxProfileReads:2,maxModelCalls:0,policyVersion:'first-step/v8'};
+  const h=harness({kind:'name_query',value:'Fixture Author',question:null},{
+    search:()=>[page(mirror,'Indexed profile, not original evidence.',{title:'Fixture Author (@special_user)',links:[...posts,quoted,different]})],
+    read:url=>[page(canonical,'Original native account without ownership.',{aliasProof:{kind:'native_profile',platform:'x',nativeId:'123456',requestedUrl:url,returnedUrl:canonical}})],budget:policy
+  });h.ctx.budget=policy;
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.ok(h.reads.includes('https://x.com/special_user'));
+    assert.equal(view.accounts.filter(account=>account.platform==='x').length,1);
+    assert.equal(view.accounts.find(account=>account.profileUrl===canonical)!.identity.state,'proposed');
+    assert.equal(view.accounts.find(account=>account.profileUrl===canonical)!.defaultSuggestion.suggested,false);
+    assert.ok(view.relatedLeads.some(lead=>lead.url===quoted));assert.ok(view.relatedLeads.some(lead=>lead.url===different));
+    assert.ok(view.accounts.every(account=>account.userSelection.state==='unanswered'));
+  } finally {h.db.close();}
+});
+
+test('a complete supplied name in an actually observed homepage handle permits a minimal read without asserting ownership', async () => {
+  const home='https://fixtureauthor.dev/',noise='https://unrelated-company.dev/';
+  const policy={maxSearchQueries:1,maxSearchResults:12,maxProfileReads:2,maxModelCalls:0,policyVersion:'first-step/v8'};
+  const h=harness({kind:'name_query',value:'Fixture Author',question:null},{
+    search:()=>[page(home,'Indexed site.',{title:'A synthetic weblog'}),page(noise,'Indexed site.',{title:'A synthetic company'})],
+    read:url=>[page(url,'Original site without an ownership statement.',{title:'A synthetic weblog'})],budget:policy
+  });h.ctx.budget=policy;
+  try {
+    const view=await discoverFirstStep(h.ctx);assert.deepEqual(h.reads,[home]);
+    const account=view.accounts.find(account=>account.profileUrl===home)!;assert.ok(account);assert.equal(account.identity.state,'proposed');assert.equal(account.defaultSuggestion.suggested,false);
+    assert.equal(view.accounts.some(account=>account.profileUrl===noise),false);assert.ok(view.relatedLeads.some(lead=>lead.url===noise));
+  } finally {h.db.close();}
+});
+
 test('a name-matching native profile precedes the long tail of matching site titles without gaining ownership', async () => {
   const native='https://github.com/fixture-author';
   const noise=['https://fixture-directory.dev/','https://fixture-news.dev/','https://fixture-events.dev/'];
