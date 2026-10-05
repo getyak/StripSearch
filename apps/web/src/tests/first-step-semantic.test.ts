@@ -7,6 +7,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { loadPlatformCatalog } from '../server/platforms/catalog.js';
 import { applyCoreSchema, openDatabase, type DB } from '../server/db/index.js';
 import { Store } from '../server/store.js';
 import { FirstStepStore } from '../server/research/first-step-store.js';
@@ -704,4 +706,25 @@ test('a generic blog section and its posts share a scope; unrelated website sect
   assert.equal(root.accountKey, article.accountKey);
   assert.equal(root.accountUrl, 'https://river-fixture.org/blog/');
   assert.notEqual(root.accountKey, classify('https://river-fixture.org/news/other-author').accountKey);
+});
+
+
+test('full platform catalog binds relevant receipts using one ledger materialization, not per-rule parsing', async () => {
+  const h = harness({kind: 'name_query', value: 'Mira Kepler', question: null}, {search: () => [page(home, 'Mira Kepler builds compilers.')], read: url => [page(url, 'Mira Kepler builds compilers.')]});
+  let finalizing = false, reads = 0;
+  const original = h.store.research.receipts.bind(h.store.research);
+  h.store.research.receipts = runId => { if (finalizing) reads++; return original(runId); };
+  h.ctx.report = (_stage, label) => { if (label === '整理归属依据与候选账号') finalizing = true; };
+  h.ctx.catalog = loadPlatformCatalog(fileURLToPath(new URL('../../data/platforms', import.meta.url)));
+  try {
+    const view = await discoverFirstStep(h.ctx);
+    assert.ok(view.routes.length > 1000, 'exercise the actual full local catalog');
+    assert.ok(reads <= 3, `finalization materialized the ledger ${reads} times`);
+    const unrelated = view.routes.find(route => route.platform === 'instagram');
+    assert.ok(unrelated);
+    assert.deepEqual(unrelated.receiptKeys, [], 'an unrelated platform never borrows search/read receipts');
+    const web = view.routes.find(route => route.routeId === 'web-search')!;
+    assert.ok(web.receiptKeys.length > 0);
+    assert.ok(web.receiptKeys.every(key => view.receipts.find(receipt => receipt.requestKey === key)?.kind === 'search'));
+  } finally { h.db.close(); }
 });

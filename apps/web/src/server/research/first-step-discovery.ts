@@ -1144,6 +1144,27 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    no observed clue keep their honest initial status. Catalog obligations
   //    match only their ACTUAL platform (never shared material use); generic
   //    purpose routes may summarize by material use.
+  // Catalogs can contain thousands of rules. Materialize the ledger once,
+  // then reuse source-bound classification instead of reparsing every body
+  // for every route/receipt pair on the HTTP event loop.
+  const rawReceipts = new Map(ctx.store.research.receipts(ctx.runId).map(receipt => [receipt.key, receipt]));
+  const platformReceiptKeys = new Map<string, Set<string>>();
+  const materialReceiptKeys = new Map<string, Set<string>>();
+  const searchReceiptKeys: string[] = [];
+  for (const receipt of ctx.search.receipts()) {
+    if (receipt.kind === 'model') continue;
+    if (receipt.kind === 'search') searchReceiptKeys.push(receipt.requestKey);
+    const raw = rawReceipts.get(receipt.requestKey)?.result as ResearchToolResult | null;
+    const urls = [...(receipt.kind === 'profile_read' ? [receipt.target] : []), ...(raw?.pages ?? []).map(page => page.url),
+      ...linkObservations.filter(observation => observation.sourceUrl === receipt.target).map(observation => observation.targetUrl)];
+    for (const url of new Set(urls)) {
+      const classified = classifyFirstStepUrl(url);
+      if (!classified.ok) continue;
+      for (const [map, key] of [[platformReceiptKeys, classified.ref.platform], [materialReceiptKeys, classified.ref.materialUse]] as const) {
+        const keys = map.get(key) ?? new Set<string>(); keys.add(receipt.requestKey); map.set(key, keys);
+      }
+    }
+  }
   const routes: FirstStepRouteStatusView[] = plan.obligations.map((obligation) => {
     const matching =
       obligation.source === 'catalog'
@@ -1180,18 +1201,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
               : obligation.source === 'catalog'
                 ? `目录义务（${ctx.catalog?.registryVersion ?? plan.registryVersion}）：本次未观察到真实线索，保持 ${obligation.initialState === 'planned' ? 'no_clue' : obligation.initialState}。`
                 : '本次输入未观察到该路线的真实线索；不代表没有此类账号。',
-      receiptKeys: ctx.search.receipts().filter((receipt) => {
-        if (obligation.routeId === 'web-search') return receipt.kind === 'search';
-        if (receipt.kind === 'model') return false;
-        const raw = ctx.store.research.receipt(ctx.runId, receipt.requestKey)?.result as ResearchToolResult | null;
-        const urls = [...(receipt.kind === 'profile_read' ? [receipt.target] : []), ...(raw?.pages ?? []).map(page => page.url)];
-        return urls.some(url => {
-          const classified = classifyFirstStepUrl(url);
-          return classified.ok && (obligation.source === 'catalog'
-            ? classified.ref.platform === obligation.platform
-            : classified.ref.materialUse === obligation.materialUse);
-        }) || linkObservations.some(observation => observation.sourceId === receipt.requestKey && matching.some(account => account.accountKey === observation.targetAccountKey));
-      }).map(receipt => receipt.requestKey)
+      receiptKeys: obligation.routeId === 'web-search' ? searchReceiptKeys : [...(
+        obligation.source === 'catalog' ? platformReceiptKeys.get(obligation.platform) : materialReceiptKeys.get(obligation.materialUse)
+      ) ?? []]
     };
   });
   if (budgetExhausted) {
