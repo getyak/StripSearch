@@ -534,6 +534,7 @@ async function loadRuns(): Promise<void> {
 }
 
 async function selectRun(runId: string): Promise<void> {
+  byId<HTMLDetailsElement>('more-menu').open = false;
   const epoch = ++state.runEpoch;
   state.activeRunId = runId;
   state.resumeBusy = false;
@@ -1188,6 +1189,7 @@ type SourceOrigin = 'citation' | 'list' | 'search';
 
 function focusSource(sourceKey: string, origin: SourceOrigin = 'citation', trigger: HTMLElement | null = null): void {
   if (!state.run) return;
+  byId<HTMLDetailsElement>('more-menu').open = false;
   state.selectedSourceKey = sourceKey;
   if (origin !== 'list') state.filter = 'all';
   const narrow = isNarrow();
