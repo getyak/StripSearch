@@ -126,7 +126,7 @@ test('a valid 2048-class URL input is read as supplied and searched only through
   assert.equal(view.input.value, LONG_URL, 'the input is kept exactly as supplied');
 
   const searches = calls.filter((call): call is Extract<ResearchToolAction, { type: 'search' }> => call.type === 'search');
-  const reads = calls.filter((call): call is Extract<ResearchToolAction, { type: 'read' }> => call.type === 'read');
+  const reads = calls.filter((call): call is Extract<ResearchToolAction, { url: string }> => call.type === 'read');
   assert.equal(searches.length, 1, 'the URL input keeps its single frozen home family');
   const query = searches[0]!.query;
   assert.ok(query.length <= 600, 'the planned query fits the frozen SEARCH contract');
