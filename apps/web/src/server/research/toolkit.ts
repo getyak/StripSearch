@@ -1,7 +1,8 @@
+import { pacedFirecrawl } from './provider-gate.js';
 import { isIP } from 'node:net';
 import { extractGitHubHandle, isPrivateHost, sanitizeText } from '../../shared/validation.js';
 import { classifyFirstStepUrl } from '../../shared/first-step-discovery.js';
-import { extractOriginalLinkContexts, nativeProfileLinkContext } from './link-context.js';
+import { extractOriginalLinkContexts, nativeProfileLinkContext, nativeUsernameLinkContext } from './link-context.js';
 import { asArray, asNumber, asRecord, asString, safeFetchJson } from '../adapters/http.js';
 import { ProviderError } from '../adapters/types.js';
 import type { HttpRequestInit } from '../adapters/types.js';
@@ -153,7 +154,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
   async function firecrawl(urlInput: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const url = ordinaryUrl(urlInput);
     const apiKey = key(options.firecrawlApiKey, '网页');
-    const { body, bytes } = await request('https://api.firecrawl.dev/v2/scrape', { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown', 'html'], parsers: [], onlyMainContent: false, onlyCleanContent: false, timeout: Math.min(30_000, options.timeoutMs), skipTlsVerification: false }) }, signal);
+    const { body, bytes } = await pacedFirecrawl(options.transport, signal, Number.isFinite(options.firecrawlIntervalMs) ? Math.max(0, options.firecrawlIntervalMs!) : 6100, () => request('https://api.firecrawl.dev/v2/scrape', { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown', 'html'], parsers: [], onlyMainContent: false, onlyCleanContent: false, timeout: Math.min(30_000, options.timeoutMs), skipTlsVerification: false }) }, signal));
     const data = asRecord(body.data); const metadata = asRecord(data.metadata);
     if (body.success !== true || metadata.statusCode !== 200 || metadata.error) fail('目标网页未成功返回公开正文。');
     const contentType = asString(metadata.contentType) ?? asString(metadata.mimeType) ?? asString(metadata['content-type']);
@@ -213,11 +214,13 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const login = asString(body.login); const returnedUrl = publicUrl(body.html_url);
     const id = decimalId(body.id) ?? (typeof body.id === 'number' && Number.isSafeInteger(body.id) && body.id >= 0 ? String(body.id) : null);
     if (!login || login.toLowerCase() !== handle.toLowerCase() || !id || comparable(returnedUrl).toLowerCase() !== comparable(url).toLowerCase()) fail('返回的 GitHub 账号与请求不匹配。');
-    const content = [text(body.name, 200), retainText(body.bio), text(body.company, 200), asString(body.blog)].filter(Boolean).join('\n');
+    const twitter = asString(body.twitter_username);
+    const twitterUsername = twitter && /^[A-Za-z0-9_]{1,15}$/.test(twitter) ? twitter : null;
+    const content = [text(body.name, 200), retainText(body.bio), text(body.company, 200), asString(body.blog), twitterUsername ? `twitter_username: ${twitterUsername}` : null].filter(Boolean).join('\n');
     const account: ResearchAccount = { platform: 'github', handle: login, id, profileUrl: returnedUrl };
     const website = asString(body.blog);
     const context = website ? nativeProfileLinkContext(content, website) : null;
-    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [body.blog]), linkContexts: context ? [context] : [], limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。'] }], bytes, 0);
+    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [body.blog, twitterUsername ? `https://x.com/${twitterUsername}` : null]), linkContexts: [context, twitterUsername ? nativeUsernameLinkContext(content, twitterUsername, `https://x.com/${twitterUsername}`) : null].filter((item): item is NonNullable<typeof item> => item !== null), limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。'] }], bytes, 0);
   }
   return { async execute(action, signal) {
     signal.throwIfAborted();

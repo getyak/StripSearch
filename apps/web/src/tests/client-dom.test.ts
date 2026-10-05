@@ -206,3 +206,21 @@ test('return refuses a replaced sentence or a different source at the same repor
     report.remove(); scroller.remove();
   }
 });
+
+
+test('a terminal empty report explains the gap and opens retained actual sources without creating conclusions', () => {
+  const container = domContainer();
+  const calls: string[] = [];
+  const view = viewWith({ state: 'partial', answer: [], observations: [], limitations: ['公开材料未完成核对。'] });
+  const original = JSON.stringify(view);
+  renderReport(container, view, { onCitation: key => calls.push(key) });
+  assert.match(container.textContent ?? '', /还没有可核对的结论/);
+  assert.match(container.textContent ?? '', /已保留 1 个来源/);
+  assert.match(container.textContent ?? '', /公开材料未完成核对/);
+  container.querySelector<HTMLButtonElement>('.report-incomplete .citation')!.click();
+  assert.deepEqual(calls, ['S1']);
+  assert.equal(JSON.stringify(view), original);
+  assert.equal(container.querySelectorAll('.report-copy').length, 0);
+  renderReport(container, viewWith({ state: 'researching', answer: [] }), { onCitation: () => undefined });
+  assert.equal(container.querySelector('.report-incomplete'), null);
+});

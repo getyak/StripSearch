@@ -124,7 +124,7 @@ test('chosen cluster accounts are the main choices; unconfirmed leads are a coll
     assert.doesNotMatch(clusterButtons[0]!.textContent ?? '', /<img/);
     assert.match(container.querySelector('.first-step-cluster-basis')!.textContent ?? '', /合成测试研究价值/);
   } finally {
-    fixture.close();
+    fixture.db.close();
     env.document.body.replaceChildren();
   }
 });
@@ -161,7 +161,7 @@ test('same-name candidates stay clearly selectable: choosing a cluster moves its
     assert.equal(secondary.querySelectorAll('.first-step-card').length, 2, 'the other same-name lead and the colleague stay available, collapsed');
     assert.match(secondary.textContent ?? '', /未确认 \/ 不并入人物结论/);
   } finally {
-    fixture.close();
+    fixture.db.close();
     env.document.body.replaceChildren();
   }
 });
@@ -206,5 +206,21 @@ test('one grounded target is suggested while alternatives stay available; no aut
     assert.ok(actual.view.accounts.every(account=>account.userSelection.state==='unanswered'));
     assert.equal(posted.length,0);
     panel.destroy();container.remove();
-  } finally {fixture.close();}
+  } finally {fixture.db.close();}
+});
+
+
+test('a linked cluster for an unrelated name never becomes the recommended target or default scope', async () => {
+  const fixture = seedFirstStep({ accounts: [ { url: 'https://github.com/morgan-chen', identityState: 'supported', supportedBy: { sourceUrl: 'https://morgan-site.dev/', quote: 'My GitHub profile: https://github.com/morgan-chen' } } ] });
+  fixture.republish(view => ({ ...view, clusters: view.clusters.map(cluster => ({ ...cluster, displayName: 'Morgan Chen', linkage: 'linked' as const })) }));
+  const container = env.document.createElement('div');
+  const posted: FirstStepSelectionPayload[] = [];
+  const panel = createFirstStepPanel({ api: panelApi(fixture, posted), container, runId: fixture.run.id });
+  try {
+    await panel.refresh();
+    assert.equal(panel.selectedCount(), 0);
+    assert.equal(container.querySelector('.first-step-cluster')?.getAttribute('aria-pressed'), 'false');
+    assert.doesNotMatch(container.textContent ?? '', /建议目标 ·/);
+    assert.deepEqual(posted, []);
+  } finally { panel.destroy(); fixture.db.close(); }
 });

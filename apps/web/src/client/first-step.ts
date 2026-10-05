@@ -108,6 +108,16 @@ function excerptText(quote: string): string {
   ).replace(/\s+/g, ' ').trim();
 }
 
+/** Relevance chooses a visual recommendation only; it never proves identity. */
+function clusterFitsInput(cluster: FirstStepPersonClusterView, current: FirstStepDiscoveryView): boolean {
+  if (current.input.kind === 'homepage_url') {
+    return cluster.accountIds.some(id => current.accounts.some(account => account.accountId === id && account.profileUrl?.replace(/\/$/, '') === current.input.value.replace(/\/$/, '')));
+  }
+  const title = cluster.displayName.toLocaleLowerCase();
+  const names = current.input.value.split(/\s*[\/／]\s*/).map(name => name.trim().toLocaleLowerCase()).filter(name => name.length >= 2);
+  return names.some(name => title === name || title.startsWith(`${name} `) || title.startsWith(`${name} |`) || title.startsWith(`${name}’`) || title.startsWith(`${name}'`));
+}
+
 export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   const draft = new Map<string, FirstStepDecisionDraft>();
   const cache = firstStepDraftCache(deps.ownerId, deps.runId);
@@ -179,7 +189,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     // Person cluster choice.
     const clusterBox = make('section', { className: 'first-step-clusters', attrs: { 'aria-label': '人物候选', 'data-single':view.clusters.length === 1 ? 'true' : 'false' } });
     clusterBox.appendChild(make('h3', { text: '确认目标人物' }));
-    const linkedChoices = view.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0);
+    const linkedChoices = view.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0 && clusterFitsInput(cluster, view!));
     const recommendedOnly = linkedChoices.length === 1 && clusterId === linkedChoices[0]!.clusterId;
     const prominentIds = new Set(recommendedOnly ? [clusterId] : [clusterId, ...view.clusters.slice(0, clusterId ? 2 : 3).map(cluster => cluster.clusterId)]);
     const otherCount = view.clusters.filter(cluster => !prominentIds.has(cluster.clusterId)).length;
@@ -647,9 +657,9 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const sameView = view !== null && JSON.stringify(view) === JSON.stringify(next) && (nextRunRevision === undefined || nextRunRevision === runRevision);
     view = next;
     if (typeof nextRunRevision === 'number') runRevision = nextRunRevision;
-    if (clusterId === null && next.clusters.length === 1) clusterId = next.clusters[0]!.clusterId;
+    if (clusterId === null && next.clusters.length === 1 && clusterFitsInput(next.clusters[0]!, next)) clusterId = next.clusters[0]!.clusterId;
     if (clusterId === null && initialSnapshot) {
-      const linked = next.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0);
+      const linked = next.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0 && clusterFitsInput(cluster, next));
       if (linked.length === 1) clusterId = linked[0]!.clusterId;
     }
     // The draft survives every server push: existing decisions are never

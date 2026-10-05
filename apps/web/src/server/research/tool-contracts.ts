@@ -24,5 +24,7 @@ export interface ResearchToolResult {
 export interface ResearchToolsOptions {
  transport: HttpTransport; exaApiKey: string | null; firecrawlApiKey: string | null;
  tikhubApiKey: string | null; githubToken: string | null; timeoutMs: number; maxBytes: number;
+ /** Operator-owned pacing; model decisions cannot alter it. Default respects the smallest hosted scrape plan. */
+ firecrawlIntervalMs?: number;
 }
 export interface ResearchTools { execute(action: ResearchToolAction, signal: AbortSignal): Promise<ResearchToolResult> }

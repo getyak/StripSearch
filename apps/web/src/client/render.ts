@@ -147,6 +147,19 @@ export function renderReport(
     container.appendChild(make('p', { className: 'reading-arrival', text: '正在核对人物线索。找到的资料会逐步出现在这里。' }));
   }
 
+  const hasAnswer = view.answer.some(section => section.body.trim() || section.bullets.length > 0);
+  if (!hasAnswer && view.observations.length === 0 && !['queued', 'researching', 'needs_input'].includes(view.state)) {
+    const incomplete = make('section', { className: 'report-section report-incomplete' });
+    incomplete.appendChild(make('h3', { text: '还没有可核对的结论' }));
+    const retained = view.sources.filter(source => !source.excluded && source.fetchStatus === 'ok');
+    incomplete.appendChild(make('p', { text: retained.length > 0
+      ? `已保留 ${retained.length} 个来源，但这次研究未形成有依据的结论。可以先查看已取得的材料。`
+      : '这次研究尚未取得足够的公开材料。可以从更多菜单重试，或新建研究补充一个公开主页。' }));
+    if (view.limitations.length > 0) incomplete.appendChild(make('p', { className: 'limit-note', text: view.limitations.join('；') }));
+    for (const source of retained.slice(0, 6)) incomplete.appendChild(citationButton(source.sourceKey, `retained-${source.sourceKey}`, source.title, handlers));
+    container.appendChild(incomplete);
+  }
+
   view.answer.forEach((section, sectionIndex) => {
     if (!section.body.trim() && section.bullets.length === 0) return;
     const sectionEl = make('section', { className: 'report-section' });

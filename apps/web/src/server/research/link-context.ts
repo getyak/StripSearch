@@ -65,3 +65,11 @@ export function nativeProfileLinkContext(original: string, url: string): Researc
   const index = original.indexOf(url);
   return index < 0 ? null : { url, quote: url, locator: `账号资料 website 字段，第 ${String(index + 1)}–${String(index + url.length)} 字符`, binding: 'native_profile_field', surface: 'profile_field' };
 }
+
+
+/** A verified native username field binds its documented profile URL without manufacturing a quote. */
+export function nativeUsernameLinkContext(original: string, username: string, url: string): ResearchLinkContext | null {
+  const field = `twitter_username: ${username}`;
+  const index = original.indexOf(field);
+  return index < 0 ? null : { url, quote: field, locator: `GitHub 公开账号 twitter_username 字段，第 ${index + 1}–${index + field.length} 字符`, binding: 'native_profile_field', surface: 'profile_field' };
+}

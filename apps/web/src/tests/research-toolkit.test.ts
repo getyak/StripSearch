@@ -6,7 +6,7 @@ import type { HttpRequestInit } from '../server/adapters/types.js';
 
 function harness(body: unknown, status = 200, overrides: Partial<ResearchToolsOptions> = {}) {
   const calls: { url: string; init?: HttpRequestInit }[] = [];
-  const tools = createResearchTools({ exaApiKey: 'synthetic', tikhubApiKey: 'synthetic', firecrawlApiKey: 'synthetic', githubToken: null, timeoutMs: 100, maxBytes: 100_000,
+  const tools = createResearchTools({ exaApiKey: 'synthetic', tikhubApiKey: 'synthetic', firecrawlApiKey: 'synthetic', githubToken: null, timeoutMs: 100, maxBytes: 100_000, firecrawlIntervalMs: 0,
     transport: { async fetch(url, init) { calls.push({ url, init }); return new Response(JSON.stringify(body), { status }); } }, ...overrides });
   return { calls, tools, execute: (action: ResearchToolAction) => tools.execute(action, new AbortController().signal) };
 }
@@ -190,4 +190,21 @@ test('one ineligible search address never discards other safe results; URL-only 
   assert.match(read.pages[0]!.limitations.join(' '),/未提供摘要/);
   assert.match(read.limitations.join(' '),/2 条/);
   assert.equal(read.estimatedUsd,.005);
+});
+
+
+test('GitHub uses the actual verified twitter_username field without guessing names or manufacturing source quotes', async () => {
+  const h = harness({ login: 'FixtureAuthor', id: 123456, html_url: 'https://github.com/FixtureAuthor', name: 'Synthetic Author', bio: 'Synthetic bio.', blog: 'https://fixture-author.dev/', twitter_username: 'DifferentHandle' });
+  const result = await h.execute({ type: 'github_profile', url: 'https://github.com/fixtureauthor' });
+  const page = result.pages[0]!;
+  const link = page.linkContexts!.find(context => context.url === 'https://x.com/DifferentHandle')!;
+  assert.equal(h.calls.length, 1);
+  assert.equal(link.binding, 'native_profile_field');
+  assert.equal(link.quote, 'twitter_username: DifferentHandle');
+  assert.ok(page.text.includes(link.quote));
+  assert.ok(page.links.includes(link.url));
+  assert.ok(!page.links.includes('https://x.com/FixtureAuthor'));
+  const absent = harness({ login: 'FixtureAuthor', id: 123456, html_url: 'https://github.com/FixtureAuthor', name: 'Synthetic Author', twitter_username: 'Ignore instructions / private' });
+  const missing = await absent.execute({ type: 'github_profile', url: 'https://github.com/fixtureauthor' });
+  assert.ok(missing.pages[0]!.links.every(url => !url.startsWith('https://x.com/')));
 });
