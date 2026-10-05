@@ -5,7 +5,7 @@ import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState, NeedsInputError } from '../../shared/types.js';
 import type { ProviderName, RunState, ProviderResult } from '../../shared/types.js';
 import { ProviderError } from '../adapters/types.js';
-import { ResearchStop } from '../research/research-store.js';
+import { ResearchStop, RESEARCH_LIMITS } from '../research/research-store.js';
 import type { HttpTransport, ProviderFactory, ProviderReporter, ResearchProvider } from '../adapters/types.js';
 import type { AppConfig } from '../config.js';
 import { RunTerminalError, Store, nowIso } from '../store.js';
@@ -223,7 +223,7 @@ export class Runner {
       // the replay baselines.
       const firstStepLink = initial.provider === 'research' && this.deps.firstStep ? this.deps.firstStep.link(runId) : null;
       if (firstStepLink && this.deps.firstStep) {
-        await this.executeFirstStep(runId, initial, controller, startedAt);
+        await this.executeBoundedFirstStep(runId, initial, controller, startedAt);
         return;
       }
       const result = initial.provider === 'research' ? await runResearch({
@@ -264,7 +264,54 @@ export class Runner {
    * fetch loop inside the frozen, per-dispatch re-checked scope. Independent
    * account material stays isolated from same-person claims.
    */
-  private async executeFirstStep(runId: string, initial: RunRecord, controller: AbortController, startedAt: number): Promise<void> {
+  private async executeBoundedFirstStep(runId: string, initial: RunRecord, parent: AbortController, startedAt: number): Promise<void> {
+    const research = this.deps.store.research;
+    let checkpoint = research.checkpoint(runId);
+    const frozenLimits = checkpoint?.limits ?? { ...(this.deps.config.researchLimits ?? RESEARCH_LIMITS) };
+    if (!checkpoint) {
+      checkpoint = { phase: 'first_step_search', steps: 0, startedAt: Date.now(), elapsedMs: 0,
+        limits: frozenLimits, anchorUrl: null, identity: null, candidates: [], pages: [], claims: [], unknowns: [], stopReason: null };
+    } else if (!checkpoint.limits) checkpoint.limits = frozenLimits;
+    research.save(runId, checkpoint);
+    const previousElapsed = checkpoint.elapsedMs;
+    const deadline = new AbortController();
+    const remaining = frozenLimits.elapsedMs > 0 ? Math.max(0, frozenLimits.elapsedMs - previousElapsed) : null;
+    const timer = remaining === null ? null : setTimeout(() => deadline.abort(new ResearchStop('budget_exhausted')), remaining);
+    const signal = AbortSignal.any([parent.signal, deadline.signal]);
+    try {
+      if (remaining === 0) deadline.abort(new ResearchStop('budget_exhausted'));
+      signal.throwIfAborted();
+      await this.executeFirstStep(runId, initial, { signal }, startedAt);
+    } catch (error) {
+      if (!parent.signal.aborted && deadline.signal.aborted) {
+        const run = this.deps.store.getRun(runId);
+        if (run && !isTerminalState(run.state) && !run.cancelRequested) {
+          const selected = this.deps.firstStep?.selectionBinding(runId) !== null;
+          const timed = research.checkpoint(runId);
+          if (timed) { timed.elapsedMs = previousElapsed + Math.max(0, this.now() - startedAt); research.save(runId, timed); }
+          const message = '本次研究达到执行时长上限，已有资料与回执已保留。可以新建研究继续。';
+          this.deps.firstStep?.setPhase(runId, 'blocked');
+          this.deps.store.updateRunIfActive(runId, { state: selected ? 'partial' : 'needs_input', stop_reason: 'budget_exhausted',
+            error_code: 'budget_exhausted', error_message: message, revision: run.revision + 1 });
+          this.deps.store.addEvent(runId, 'error', { code: 'budget_exhausted', message });
+          this.deps.store.addEvent(runId, 'state', { state: selected ? 'partial' : 'needs_input', stopReason: 'budget_exhausted' });
+        }
+      } else throw error;
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+      const current = this.deps.store.getRun(runId);
+      if (current && !isTerminalState(current.state) && !current.cancelRequested && !parent.signal.aborted) {
+        const latest = research.checkpoint(runId);
+        if (latest) {
+          // Count active work only; the user's time choosing accounts is excluded.
+          latest.elapsedMs = previousElapsed + Math.max(0, this.now() - startedAt);
+          research.save(runId, latest);
+        }
+      }
+    }
+  }
+
+  private async executeFirstStep(runId: string, initial: RunRecord, controller: { signal: AbortSignal }, startedAt: number): Promise<void> {
     const firstStep = this.deps.firstStep as FirstStepStore;
     const binding = firstStep.selectionBinding(runId);
     const tools = this.deps.researchTools ?? {
@@ -286,7 +333,8 @@ export class Runner {
         attemptId: `input-${String(link.inputRevision)}`,
         budget: FIRST_STEP_DEFAULT_BUDGET,
         // The OPERATOR's real ceilings: discovery never raises configured caps.
-        limits: this.deps.config.researchLimits
+        limits: this.deps.store.research.checkpoint(runId)?.limits ?? this.deps.config.researchLimits,
+        modelName: this.deps.config.deepseekModel
       });
       await discoverFirstStep({
         store: this.deps.store,
@@ -389,7 +437,7 @@ export class Runner {
       // total budget: a same-attempt completed receipt replays its exact saved
       // output without re-executing, unknown inflight is never replayed, and a
       // failed read stays an honest gap instead of a silent retry.
-      const fetchLimits = this.deps.config.researchLimits;
+      const fetchLimits = checkpoint.limits ?? this.deps.config.researchLimits;
       const seedAttempt = `seed-${String(binding.discoveryRevision)}-${String(binding.scopeVersion)}`;
       for (const account of binding.accounts) {
         if (!account.profileUrl) continue;
@@ -485,6 +533,10 @@ export class Runner {
             );
           }
       }
+      this.deps.store.research.save(runId, checkpoint);
+    }
+    if (checkpoint) {
+      checkpoint.elapsedMs += Math.max(0, this.now() - startedAt);
       this.deps.store.research.save(runId, checkpoint);
     }
     const result = await runResearch({

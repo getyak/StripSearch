@@ -466,7 +466,12 @@ export class FirstStepStore {
     }
     const liveScopeVersion = this.cases.getCase(ownerId, link.caseId)?.scopeVersion ?? 0;
     const current = this.currentDiscovery(runId);
-    if (!current) return { mode: 'first_step', view: this.emptyView(link, liveScopeVersion), link };
+    if (!current) {
+      const view = this.emptyView(link, liveScopeVersion);
+      if (run.errorMessage) view.gaps = [run.errorMessage];
+      view.stopReason = run.stopReason;
+      return { mode: 'first_step', view, link };
+    }
     const accounts = this.cases.listAccounts(ownerId, link.caseId);
     const byId = new Map(accounts.map((account) => [account.accountId, account]));
     const exclusions = this.activeExclusions(runId);
@@ -874,9 +879,17 @@ export class FirstStepStore {
       }
       const parent = this.store.getRunForOwner(parentRunId, ownerId);
       if (!parent) throw new FirstStepSelectionError('run_not_found', '未找到父研究。');
-      const link = this.attachRun(childRun, childRun.question);
-      const current = this.currentDiscovery(parentRunId);
+      if (childRun.ownerId !== ownerId) throw new FirstStepSelectionError('run_not_found', '未找到子研究。');
       const timestamp = nowIso();
+      // The follow-up shares the existing case and its live facets. Creating
+      // a second empty case would disagree with the inherited scope binding.
+      this.db.prepare(`INSERT INTO first_step_links (
+        run_id, case_id, input_revision, discovery_revision, selection_revision, phase,
+        selection_scope_version, selection_discovery_revision, selected_json, excluded_json,
+        submitted_at, created_at, updated_at
+      ) VALUES (?, ?, 1, 0, 0, 'fetching', NULL, NULL, '[]', '[]', NULL, ?, ?)`)
+        .run(childRun.id, binding.caseId, timestamp, timestamp);
+      const current = this.currentDiscovery(parentRunId);
       if (current) {
         this.db
           .prepare(

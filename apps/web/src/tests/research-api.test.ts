@@ -247,6 +247,14 @@ test('followups require a frozen parent scope and inherit it instead of bypassin
   const made = await server.client.json<{ run: CanonicalView }>('/api/runs', { json: { input: 'Research Ada Fixture' } });
   const parentId = made.body.run.runId;
   await waitFor(() => server.store.getRun(parentId)?.state === 'needs_input');
+  const ownerId = server.store.getRun(parentId)!.ownerId;
+  const wrongProviderParent = server.store.insertRun({ ownerId, question: 'Legacy GitHub metadata', seedUrl: null, provider: 'github',
+    parentRunId: null, retryOf: null, followup: false, idempotencyKey: null, bodyFingerprint: 'legacy-github' });
+  const wrongProvider = await server.client.json<{error:{code:string}}>('/api/runs', {
+    json: {input:'Research another public person', provider:'research', followup:true, parentRunId:wrongProviderParent.id}
+  });
+  assert.equal(wrongProvider.status, 409);
+  assert.equal(wrongProvider.body.error.code, 'invalid_parent_provider');
   // Before the parent's scope is frozen, no follow-up child may start.
   const early = await server.client.json<{ error: { code: string } }>(`/api/runs/${parentId}/followup`, {
     json: { question: 'Please summarize their public work' }
@@ -285,6 +293,10 @@ test('followups require a frozen parent scope and inherit it instead of bypassin
   );
   assert.equal(childView.body.mode, 'first_step');
   assert.equal(childView.body.view.selection.submitted, true, 'the child inherits the frozen scope instead of asking again');
+  const binding = server.boot.firstStep.selectionBinding(childId)!;
+  assert.equal(childView.body.view.caseId, binding.caseId);
+  assert.equal(childView.body.view.selection.scopeVersion, binding.scopeVersion);
+  assert.equal(server.boot.firstStep.link(childId)!.caseId, server.boot.firstStep.link(parentId)!.caseId);
   await waitFor(() => ['partial', 'completed', 'failed', 'needs_input'].includes(server.store.getRun(childId)?.state ?? ''));
   assert.notEqual(server.store.getRun(childId)?.state, 'needs_input', 'no repeated scope confirmation for an inherited scope');
 });

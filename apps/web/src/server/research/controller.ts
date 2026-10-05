@@ -30,7 +30,7 @@ function draft(page:StoredPage,anchor:string|null,scope?:ResearchOptions['firstS
 export async function runResearch(options:ResearchOptions):Promise<ProviderResult>{
  const {store,run,tools,planner}=options;
  const persisted=store.research.checkpoint(run.id);
- const limits=persisted?(persisted.limits??RESEARCH_LIMITS):(options.limits??RESEARCH_LIMITS);
+ const limits=persisted?(persisted.limits??(persisted.firstStep?options.limits:undefined)??RESEARCH_LIMITS):(options.limits??RESEARCH_LIMITS);
  const launched=Date.now();
  const checkpoint:ResearchCheckpoint=persisted??{phase:'identity',steps:0,startedAt:launched,elapsedMs:0,anchorUrl:normalizeResearchUrl(run.seedUrl),identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null};
  checkpoint.limits??={...limits};

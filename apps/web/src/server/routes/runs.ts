@@ -127,6 +127,12 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     if (followup && !parentRunId) {
       throw new HttpError(400, 'invalid_parent', '追问必须指定已完成范围确认的父研究。');
     }
+    if (parentRunId && followup) {
+      const parent = store.getRunForOwner(parentRunId, user.id)!;
+      if ((parent.provider !== 'research' && parent.provider !== 'exa') || parent.provider !== provider) {
+        throw new HttpError(409, 'invalid_parent_provider', '追问必须沿用父研究的研究方式。');
+      }
+    }
     if (parentRunId && followup && deps.firstStep?.link(parentRunId) && !deps.firstStep?.selectionBinding(parentRunId)) {
       throw new HttpError(409, 'parent_scope_not_frozen', '父研究尚未确认研究范围，无法追问。');
     }

@@ -44,6 +44,7 @@ export interface FirstStepPanelDeps {
   runId: string;
   /** Called after a successful submit so the host can refresh the run view. */
   onAfterSubmit?: (result: FirstStepSelectionResponse) => void;
+  onAfterExpand?: () => void;
   now?: () => number;
 }
 
@@ -103,6 +104,10 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   let errorText = '';
   let status = 'loading';
   let submitKey: string | null = null;
+  let submitIntent: string | null = null;
+  let hintDraft = '';
+  let hintStatus = '';
+  let expanding = false;
   let idempotencySeq = 0;
   const now = deps.now ?? ((): number => Date.now());
   let openEvidence: { close: () => void } | null = null;
@@ -125,23 +130,39 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
 
   const render = (): void => {
     const root = deps.container;
+    const active = root.ownerDocument.activeElement as HTMLElement | null;
+    const focusKey = active && root.contains(active) ? active.dataset.focusKey : null;
+    const scroller = root.closest<HTMLElement>('.work-body');
+    const scrollTop = scroller?.scrollTop;
+    const openKeys = new Set([...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map(el => el.dataset.detailKey));
+    const previousHint = root.querySelector<HTMLInputElement>('[data-focus-key="hint"]');
+    if (previousHint) hintDraft = previousHint.value;
     clear(root);
     root.className = 'first-step';
     if (!view) {
       root.appendChild(make('p', { className: 'first-step-status', text: status === 'loading' ? '正在读取发现结果…' : status }));
       return;
     }
+    const intro = make('header', { className: 'first-step-intro' });
+    intro.append(make('p', {className:'first-step-eyebrow', text:'01 确认目标   ·   02 深入研究   ·   03 整理报告'}),
+      make('h2', {text:'先认识这个人，再选研究范围'}),
+      make('p', {text:'核对人物与公开账号。确认后，我们只深入读取你选择的范围。'}));
+    root.appendChild(intro);
     // Person cluster choice.
-    const clusterBox = make('section', { className: 'first-step-clusters', attrs: { 'aria-label': '人物候选' } });
+    const clusterBox = make('section', { className: 'first-step-clusters', attrs: { 'aria-label': '人物候选', 'data-single':view.clusters.length === 1 ? 'true' : 'false' } });
     clusterBox.appendChild(make('h3', { text: '确认目标人物' }));
     for (const cluster of view.clusters) {
       const chosen = clusterId === cluster.clusterId;
       const button = make('button', {
         className: `first-step-cluster${chosen ? ' chosen' : ''}`,
-        attrs: { type: 'button', 'aria-pressed': chosen ? 'true' : 'false' },
+        attrs: { type: 'button', 'aria-pressed': chosen ? 'true' : 'false', 'data-focus-key': `cluster-${cluster.clusterId}` },
         on: {
           click: () => {
             clusterId = cluster.clusterId;
+            // Changing the person cannot grant reading a different person's accounts.
+            for (const [id, decision] of draft) {
+              if (decision.selection === 'selected' && !cluster.accountIds.includes(id)) decision.selection = 'not_selected';
+            }
             render();
           }
         }
@@ -150,7 +171,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         make('strong', { text: cluster.displayName }),
         make('span', { className: 'first-step-cluster-anchor', text: shortUrl(cluster.anchorUrl) || cluster.anchorLabel })
       );
-      for (const lead of cluster.leads.slice(0, 3)) {
+      for (const lead of cluster.leads.filter(lead => !/https?:\/\//i.test(lead.statement)).slice(0, 2)) {
         button.appendChild(make('small', { text: lead.statement }));
       }
       if (cluster.conflicts.length > 0) {
@@ -168,11 +189,11 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     statusBox.appendChild(
       make('p', {
         className: 'first-step-status',
-        text: `发现修订 v${String(view.discoveryRevision)} · ${view.readyForChoice ? '可选择研究范围' : '发现仍在进行'}`
+        text: view.readyForChoice ? `找到 ${String(view.accounts.length)} 个公开入口 · 请核对后选择` : '正在寻找公开主页与跨平台线索…'
       })
     );
     if (view.gaps.length > 0) {
-      const details = make('details', { className: 'first-step-gaps' });
+      const details = make('details', { className: 'first-step-gaps', attrs: {'data-detail-key':'gaps'} });
       details.appendChild(make('summary', { text: `发现边界与缺口（${String(view.gaps.length)}）` }));
       const list = make('ul', {});
       for (const gap of view.gaps.slice(0, 12)) list.appendChild(make('li', { text: gap }));
@@ -196,18 +217,20 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     root.appendChild(cardsBox);
 
     // Secondary actions: manual clue / continue search.
-    const secondary = make('details', { className: 'first-step-secondary' });
+    const secondary = make('details', { className: 'first-step-secondary', attrs: {'data-detail-key':'hint'} });
     secondary.appendChild(make('summary', { text: '补充一个公开主页或区分线索' }));
     const hintInput = make('input', {
-      attrs: { type: 'text', placeholder: '例如：他是 Lantern 的作者', 'aria-label': '补线索' }
+      attrs: { type: 'text', placeholder: '例如：他是 Lantern 的作者', 'aria-label': '补线索', 'data-focus-key': 'hint' }
     }) as HTMLInputElement;
-    const hintState = make('span', { className: 'muted', text: '' });
+    hintInput.value = hintDraft;
+    hintInput.addEventListener('input', () => { hintDraft = hintInput.value; });
+    const hintState = make('span', { className: 'muted', text: hintStatus, attrs:{role:'status'} });
     secondary.appendChild(hintInput);
     secondary.appendChild(
       make('button', {
         className: 'button',
-        text: '发起新的发现',
-        attrs: { type: 'button' },
+        text: expanding ? '正在提交…' : '发起新的发现',
+        attrs: { type: 'button', 'data-focus-key':'expand', ...(expanding ? {disabled:true} : {}) },
         on: {
           click: () => {
             void (async () => {
@@ -216,12 +239,20 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
                 hintState.textContent = '请先填写线索。';
                 return;
               }
-              hintState.textContent = '已提交新的发现请求…';
+              if (expanding) return;
+              expanding = true;
+              hintStatus = '正在提交新的发现请求…';
+              hintState.textContent = hintStatus;
               try {
                 await deps.api.expandFirstStep(deps.runId, { hint }, `expand-${String(now())}-${String(++idempotencySeq)}`);
-                hintState.textContent = '已排队；新的发现结果会以新修订出现。';
+                hintStatus = '已排队，正在寻找更多公开线索。';
+                hintState.textContent = hintStatus;
+                deps.onAfterExpand?.();
               } catch (error) {
-                hintState.textContent = error instanceof Error ? error.message : '扩展失败。';
+                hintStatus = error instanceof Error ? error.message : '扩展失败。';
+                hintState.textContent = hintStatus;
+              } finally {
+                expanding = false;
               }
             })();
           }
@@ -244,7 +275,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const primary = make('button', {
       className: 'button primary first-step-primary',
       text: count > 0 ? `确认目标，研究已选 ${String(count)} 个账号` : '确认目标，研究已选账号',
-      attrs: { type: 'button' },
+      attrs: { type: 'button', 'data-focus-key':'submit' },
       on: {
         click: () => {
           void submit();
@@ -258,6 +289,14 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       footer.appendChild(make('p', { className: 'muted', text: '请至少选择一个账号；不确定的账号可选“仅研究这个公开账号”。' }));
     }
     root.appendChild(footer);
+    for (const details of root.querySelectorAll<HTMLDetailsElement>('details')) {
+      if (openKeys.has(details.dataset.detailKey)) details.open = true;
+    }
+    if (focusKey) {
+      const replacement = [...root.querySelectorAll<HTMLElement>('[data-focus-key]')].find(el => el.dataset.focusKey === focusKey);
+      replacement?.focus({preventScroll:true});
+    }
+    if (scroller && scrollTop !== undefined) scroller.scrollTop = scrollTop;
   };
 
   const renderCard = (account: FirstStepAccountView): HTMLElement => {
@@ -279,7 +318,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const top = make('div', { className: 'first-step-card-top' });
     const label = make('label', { className: 'first-step-select' });
     const checkbox = make('input', {
-      attrs: { type: 'checkbox', 'aria-label': `选择 ${account.platformLabel} ${account.handle ?? ''}`, ...(checked ? { checked: true } : {}) }
+      attrs: { type: 'checkbox', 'data-focus-key': `account-${account.accountId}`, 'aria-label': `选择 ${account.platformLabel} ${account.handle ?? ''}`, ...(checked ? { checked: true } : {}) }
     }) as HTMLInputElement;
     checkbox.checked = checked;
     checkbox.disabled = decision.excluded || view?.selection.submitted === true;
@@ -288,7 +327,6 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const syncFromCheckbox = (): void => applyChecked(checkbox.checked);
     checkbox.addEventListener('click', (event) => {
       event.stopPropagation();
-      applyChecked(!checked);
     });
     checkbox.addEventListener('change', (event) => {
       event.stopPropagation();
@@ -312,12 +350,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     );
     card.appendChild(top);
     card.appendChild(make('p', { className: 'first-step-value', text: account.researchSummary }));
-    card.appendChild(
-      make('p', {
-        className: 'first-step-reason',
-        text: `${account.identity.basisLabel}；${account.defaultSuggestion.reason}`
-      })
-    );
+
     card.appendChild(make('p', { className: 'first-step-boundary', text: `当前边界：${account.accessLabel}${account.requiresIndependentScope ? '；需要独立账号范围' : ''}` }));
 
     const actions = make('div', { className: 'first-step-row-actions' });
@@ -326,7 +359,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         make('button', {
           className: 'text-button',
           text: '不是此人',
-          attrs: { type: 'button', 'aria-label': `声明 ${account.platformLabel} 不是此人` },
+          attrs: { type: 'button', 'aria-label': `声明 ${account.platformLabel} 不是此人`, 'data-focus-key': `exclude-${account.accountId}` },
           on: {
             click: (event) => {
               event.stopPropagation();
@@ -342,7 +375,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
           make('button', {
             className: 'text-button',
             text: decision.selection === 'only_this_account' ? '已选为独立账号范围' : '仅研究这个公开账号',
-            attrs: { type: 'button' },
+            attrs: { type: 'button', 'data-focus-key': `independent-${account.accountId}` },
             on: {
               click: (event) => {
                 event.stopPropagation();
@@ -359,7 +392,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         make('button', {
           className: 'text-button',
           text: '撤销排除声明',
-          attrs: { type: 'button' },
+          attrs: { type: 'button', 'data-focus-key': `exclude-${account.accountId}` },
           on: {
             click: (event) => {
               event.stopPropagation();
@@ -375,8 +408,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     card.appendChild(actions);
 
     // Evidence panel: source title/URL, exact span, role and limitation.
-    const evidence = make('details', { className: 'first-step-evidence' });
-    const summary = make('summary', { text: `为什么推荐（${String(account.identity.evidence.length)} 条依据）` });
+    const evidence = make('details', { className: 'first-step-evidence', attrs:{'data-detail-key':`evidence-${account.accountId}`} });
+    const summary = make('summary', { text: `为什么推荐（${String(account.identity.evidence.length)} 条依据）`, attrs:{'data-focus-key':`evidence-${account.accountId}`} });
     evidence.appendChild(summary);
     evidence.addEventListener('toggle', () => {
       if (evidence.open) {
@@ -398,6 +431,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       }
     });
     const evidenceList = make('div', {});
+    evidenceList.appendChild(make('p', {className:'first-step-reason', text:`${account.identity.basisLabel}；${account.defaultSuggestion.reason}`}));
     for (const item of account.identity.evidence) {
       const block = make('div', { className: 'first-step-evidence-item' });
       block.appendChild(make('p', { text: `${item.sourceTitle}（${shortUrl(item.sourceUrl)}）· ${item.role === 'identity_support' ? '归属依据' : '反证'}` }));
@@ -452,9 +486,13 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         return { accountId: account.accountId, selection: decision.selection, excluded: decision.excluded };
       })
     };
-    submitKey = submitKey ?? `select-${deps.runId}-${String(now())}`;
+    const intent = JSON.stringify(payload);
+    if (submitIntent !== intent) {
+      submitIntent = intent;
+      submitKey = `select-${deps.runId}-${String(now())}-${String(++idempotencySeq)}`;
+    }
     try {
-      const result = await deps.api.submitFirstStepSelection(deps.runId, payload, submitKey);
+      const result = await deps.api.submitFirstStepSelection(deps.runId, payload, submitKey!);
       saving = false;
       status = 'submitted';
       if (result.view) applyView(result.view, result.selection.runRevision);
@@ -470,18 +508,23 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   };
 
   const applyView = (next: FirstStepDiscoveryView, nextRunRevision?: number): void => {
+    const initialSnapshot = view === null;
+    const sameView = view !== null && JSON.stringify(view) === JSON.stringify(next) && (nextRunRevision === undefined || nextRunRevision === runRevision);
     view = next;
     if (typeof nextRunRevision === 'number') runRevision = nextRunRevision;
-    if (clusterId === null && next.clusters.length > 0) clusterId = next.clusters[0]!.clusterId;
+    if (clusterId === null && next.clusters.length === 1) clusterId = next.clusters[0]!.clusterId;
     // The draft survives every server push: existing decisions are never
     // overwritten and NEW accounts start unchecked regardless of suggestions.
     for (const account of next.accounts) {
       if (!draft.has(account.accountId)) {
-        draft.set(account.accountId, { selection: 'unanswered', excluded: false });
+        const belongs = next.clusters.find(c => c.clusterId === clusterId)?.accountIds.includes(account.accountId) ?? false;
+        const suggested = initialSnapshot && belongs && account.defaultSuggestion.suggested && account.identity.state === 'supported' && !account.requiresIndependentScope;
+        const persisted = next.selection.submitted && next.selection.selectedAccountIds.includes(account.accountId);
+        draft.set(account.accountId, { selection: persisted ? (account.requiresIndependentScope ? 'only_this_account' : 'selected') : suggested ? 'selected' : 'unanswered', excluded: next.selection.excludedAccountIds.includes(account.accountId) });
       }
     }
     status = 'ready';
-    render();
+    if (!sameView) render();
   };
 
   const renderLegacy = (response: FirstStepDiscoveryResponse): void => {
@@ -497,9 +540,18 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         })
       );
     }
-    deps.container.appendChild(
-      make('p', { className: 'muted', text: '这是历史作业的旧候选记录；可发起新的发现生成新修订。' })
-    );
+    deps.container.appendChild(make('p', {className:'muted', text:'保留原有记录，继续查找个人网站、作品、社交与其它公开平台。'}));
+    const action = make('button', {className:'button primary', text:'继续发现这个人的公开账号', attrs:{type:'button'}, on:{click:()=>{
+      if (expanding) return;
+      expanding = true; action.disabled = true; action.textContent = '正在启动发现…';
+      void deps.api.expandFirstStep(deps.runId, {}, `legacy-expand-${String(now())}-${String(++idempotencySeq)}`).then(()=>{
+        deps.onAfterExpand?.();
+      }).catch(error=>{
+        const message = make('p',{className:'error-text',text:error instanceof Error ? error.message : '启动失败，请重试。',attrs:{role:'alert'}});
+        deps.container.appendChild(message);
+      }).finally(()=>{expanding=false;action.disabled=false;action.textContent='继续发现这个人的公开账号';});
+    }}});
+    if (response.canExpand) deps.container.appendChild(action);
   };
 
   return {

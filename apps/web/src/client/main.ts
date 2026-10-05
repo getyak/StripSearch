@@ -953,6 +953,7 @@ function syncFirstStep(runId: string): void {
       api,
       container: els.firstStepPanel,
       runId,
+      onAfterExpand: () => { void selectRun(runId); },
       onAfterSubmit: () => {
         void selectRun(runId);
       }
@@ -978,6 +979,10 @@ function renderNeedsPanel(): void {
   const firstStep = Boolean(needs && run && run.provider === 'research');
   show(els.needsPanel, needs && !firstStep);
   show(els.firstStepPanel, firstStep);
+  els.workBody.classList.toggle('choosing-target', firstStep);
+  show(els.chatForm, !firstStep);
+  show(els.chatHint, !firstStep);
+  show(els.report, !firstStep);
   if (firstStep && run) {
     syncFirstStep(run.runId);
   } else {

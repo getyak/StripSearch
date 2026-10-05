@@ -25,11 +25,11 @@
 import { createHash } from 'node:crypto';
 import type { Store } from '../store.js';
 import type { HttpTransport } from '../adapters/types.js';
-import { invokeDeepSeek } from './planner.js';
+import { invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { runDshDecision } from './dsh-decision.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchPage } from './tool-contracts.js';
 import type { ResearchBudgetLimits } from '../../shared/types.js';
-import { RESEARCH_LIMITS, ResearchStop, type ActionReceipt } from './research-store.js';
+import { RESEARCH_LIMITS, ResearchStop, type ActionReceipt, type ActionUsage } from './research-store.js';
 import {
   FirstStepStore,
   FirstStepSelectionError,
@@ -80,7 +80,7 @@ export interface FirstStepCheckedSearch {
   /** Real request receipts for the discovery projection (original timestamps). */
   receipts(): FirstStepReceiptView[];
   /** Meter one restricted model call through the same ledger. */
-  withModel<T>(requestKey: string, call: () => Promise<T>): Promise<T>;
+  withModel<T>(requestKey: string, call: () => Promise<T>, reservation?: { inputTokens: number; outputTokens: number }): Promise<T>;
 }
 
 export interface FirstStepCheckedSearchOptions {
@@ -92,6 +92,7 @@ export interface FirstStepCheckedSearchOptions {
   /** Frozen per-discovery budget; 0 disables that ceiling. */
   budget: FirstStepBudgetPolicy;
   limits?: ResearchBudgetLimits;
+  modelName?: string;
 }
 
 function digest(value: unknown): string {
@@ -178,8 +179,8 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
     receipts() {
       return [...log];
     },
-    async withModel(requestKey, call) {
-      const old = options.store.research.reserve(options.runId, requestKey, 'model', { model: 'first-step-search-model' }, { inputTokens: 0, outputTokens: 0 }, limits);
+    async withModel(requestKey, call, reservation = { inputTokens: 0, outputTokens: 0 }) {
+      const old = options.store.research.reserve(options.runId, requestKey, 'model', { model: options.modelName ?? 'first-step-search-model' }, reservation, limits);
       if (old) {
         // Same-attempt recovery: replay the EXACT saved result with its
         // original receipt time. Unknown inflight attempts are never replayed
@@ -189,7 +190,8 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
       }
       try {
         const result = await call();
-        options.store.research.settle(options.runId, requestKey, result, { estimatedUsd: null, unknownCost: true });
+        const usage = result && typeof result === 'object' && 'usage' in result ? (result as { usage?: ActionUsage }).usage : undefined;
+        options.store.research.settle(options.runId, requestKey, result, usage ?? { estimatedUsd: null, unknownCost: true });
         return result;
       } catch (error) {
         try {
@@ -233,6 +235,14 @@ export interface FirstStepProposalModelInput {
 export interface FirstStepProposalModelResult {
   proposals: FirstStepModelProposal[];
   leads: FirstStepModelLead[];
+  /** Provider-measured usage, never read from the model's decision object. */
+  usage?: ActionUsage;
+}
+
+function proposalReservation(input: FirstStepProposalModelInput): { inputTokens: number; outputTokens: number } {
+  // UTF-8 bytes bound token count; allowance covers the DSH/tool envelope.
+  const windows = input.excerpts.map(e => ({ url: e.url, title: e.title, text: e.text.slice(0, 1500) }));
+  return { inputTokens: Buffer.byteLength(JSON.stringify({ question: input.question, windows }), 'utf8') + 16_000, outputTokens: 1200 };
 }
 
 /**
@@ -261,16 +271,28 @@ export function createFirstStepProposalModel(options: {
         window: 'excerpt window; full text stored server-side'
       }))
     });
+    let usage: ActionUsage = { estimatedUsd: null, unknownCost: true };
+    const reserved = proposalReservation(input);
     const raw = (await runDshDecision({
       prompt,
       signal,
       model: options.model,
       maxTokens: 1200,
       timeoutMs: 60_000,
-      invoke: (request) => invokeDeepSeek(options.transport, options.apiKey, request)
+      invoke: async (request) => {
+        if (Buffer.byteLength(JSON.stringify(request.body), 'utf8') > reserved.inputTokens || Number(request.body.max_tokens) > reserved.outputTokens) {
+          throw new ResearchStop('budget_exhausted');
+        }
+        const response = await invokeDeepSeek(options.transport, options.apiKey, request);
+        const measured = parseMessagesUsage(response.body);
+        usage = measured.known ? { inputTokens: measured.inputTokens, outputTokens: measured.outputTokens,
+          estimatedUsd: estimateModelUsd(options.model, measured.inputTokens, measured.outputTokens),
+          unknownCost: estimateModelUsd(options.model, measured.inputTokens, measured.outputTokens) === null } : usage;
+        return response;
+      }
     })) as unknown;
     const byUrl = new Map(input.excerpts.map((excerpt: FirstStepProposalModelInput['excerpts'][number]) => [excerpt.url, excerpt.requestKey]));
-    const result: FirstStepProposalModelResult = { proposals: [], leads: [] };
+    const result: FirstStepProposalModelResult = { proposals: [], leads: [], usage };
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return result;
     const body = raw as { proposals?: unknown; leads?: unknown };
     if (Array.isArray(body.proposals)) {
@@ -709,7 +731,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
             .find((receipt) => receipt.kind === 'tool' && (receipt.request as { url?: string } | null)?.url === entry.page.url)?.key ?? ''
       }));
       const raw = await ctx.search.withModel(requestKey('model'), () =>
-        ctx.propose!(ctx.signal, { question: ctx.input.question ?? ctx.input.value, excerpts })
+        ctx.propose!(ctx.signal, { question: ctx.input.question ?? ctx.input.value, excerpts }),
+        proposalReservation({ question: ctx.input.question ?? ctx.input.value, excerpts })
       );
       if (Array.isArray(raw)) proposals = raw;
       else if (raw && typeof raw === 'object') {
