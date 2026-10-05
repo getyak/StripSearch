@@ -101,6 +101,8 @@
 
 身份投影的 `validity/reviewReason` 来自当前 CaseReport 的依赖判断，与历史存储的 identity state 分开。撤回依据后，旧修订与原始 facet 保留，但默认推荐失效；不能凭旧 supported 状态提交人物合并。已提交人物范围在下一次 dispatch 和 ingest 都复核依据有效性，撤回后暂停；明确选择的独立账号范围仍只提供该账号自身材料。
 
+共享网站的个人目录（如 `/~name/`、`/people/name/`、`/users/name/`）与托管站点目录具有独立账号键；选择其中一人只授权该目录及可归属的内容，不扩展到整个学校或共享域名。
+
 拟接线接口（名字可在实施计划中适配已有 router）：
 
 - `GET /api/runs/:id/discovery`：按 owner 返回当前不可变发现投影、版本与真实增量；SSE 发版本/阶段变化，重新读取权威投影。

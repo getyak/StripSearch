@@ -839,6 +839,21 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
       break;
   }
 
+  // A shared host is not one person's account. Common published personal
+  // namespaces keep the owner's directory and its descendants separate.
+  const personalNamespace = path.match(/^\/(~[^/]+|(?:people|users|faculty|members|authors)\/[^/]+)(?:\/|$)/i);
+  const hostedSite = host === 'sites.google.com' ? path.match(/^\/(site|view)\/([^/]+)(?:\/|$)/) : null;
+  const namespace = personalNamespace?.[1] ?? (hostedSite ? `${hostedSite[1]}/${hostedSite[2]}` : null);
+  if (namespace) {
+    const accountUrl = `https://${host}/${namespace}/`;
+    const relative = path.slice(namespace.length + 1).replace(/^\/+/, '');
+    const home = relative === '' || /^(?:index\.(?:html?|php)|about|bio)$/i.test(relative);
+    return { ok: true, ref: refOf('personal_site', home ? accountUrl : href, {
+      accountUrl, handle: namespace.split('/').at(-1)!.replace(/^~/, ''), instance: host,
+      materialUse: home ? 'identity_anchor' : 'related_material', accountKind: 'unknown', entry: home ? 'profile' : 'page'
+    }) };
+  }
+
   // Generic public web: a site root or About/Bio/Profile page is an identity
   // anchor candidate; other pages are related material of the same site. All
   // generic site pages share the site's conservative account key (one
