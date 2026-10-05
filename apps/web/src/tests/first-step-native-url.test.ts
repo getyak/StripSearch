@@ -46,3 +46,13 @@ test('a publication blog listing and a specific article keep different identity 
   assert.equal(list.entry, 'profile'); assert.equal(article.entry, 'page');
   assert.equal(list.accountKey, article.accountKey);
 });
+
+
+test('documented Medium username URL schemes share one account without merging arbitrary hosts', () => {
+ const a=ref('https://synthetic-author.medium.com/');
+ const b=ref('https://medium.com/@synthetic-author');
+ assert.equal(a.accountKey,b.accountKey);
+ assert.equal(ref('https://synthetic-author.medium.com/story-title-1234').accountKey,b.accountKey);
+ assert.notEqual(ref('https://synthetic-author.other-blog.dev/').accountKey,b.accountKey);
+ assert.notEqual(ref('https://different-author.medium.com/').accountKey,b.accountKey);
+});

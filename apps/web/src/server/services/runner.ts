@@ -1,4 +1,4 @@
-import { runResearch } from '../research/controller.js';
+import { buildResearchReport, failedUsage, runResearch, scopeRefusalRecord, tagScopeRefusal, type ScopedResearchTools } from '../research/controller.js';
 import { createDshPlanner, type ResearchPlanner } from '../research/planner.js';
 import type { ResearchTools } from '../research/tool-contracts.js';
 import { LIMITS } from '../../shared/limits.js';
@@ -10,7 +10,7 @@ import type { HttpTransport, ProviderFactory, ProviderReporter, ResearchProvider
 import type { AppConfig } from '../config.js';
 import { RunTerminalError, Store, nowIso } from '../store.js';
 import type { RunRecord } from '../store.js';
-import { FirstStepStore } from '../research/first-step-store.js';
+import { FirstStepStore, FirstStepSelectionError } from '../research/first-step-store.js';
 import { createFirstStepCheckedSearch, createFirstStepProposalModel, discoverFirstStep } from '../research/first-step-discovery.js';
 import type { FirstStepCheckedSearch } from '../research/first-step-discovery.js';
 import { classifyFirstStepUrl, FIRST_STEP_DEFAULT_BUDGET } from '../../shared/first-step-discovery.js';
@@ -394,15 +394,35 @@ export class Runner {
         return classified.ok ? classified.ref.accountKey : null;
       }
     };
-    const guardedTools: ResearchTools = {
-      async execute(action, signal) {
+    const guardedTools: ScopedResearchTools = {
+      // Fail-closed predispatch check, run before any metered reservation so a
+      // rejected predispatch action is never billed and leaves no receipt.
+      predispatch(action) {
         guard.assertDispatch(action);
+      },
+      async execute(action, signal) {
+        try {
+          guard.assertDispatch(action);
+        } catch (error) {
+          // Rejected BEFORE any provider request ran: never billed downstream.
+          throw tagScopeRefusal(error, { dispatched: false });
+        }
         const result = await tools.execute(action, signal);
-        guard.assertIngest(result.pages.map((page) => ({ url: page.url, links: page.links })));
+        try {
+          guard.assertIngest(result.pages.map((page) => ({ url: page.url, links: page.links })));
+        } catch (error) {
+          // The request ran but its late result is refused: the measured cost
+          // is metered honestly and the material is never ingested.
+          throw tagScopeRefusal(error, {
+            dispatched: true,
+            usage: { estimatedUsd: result.estimatedUsd, credits: result.credits, bytes: result.bytes, unknownCost: result.estimatedUsd === null }
+          });
+        }
         return result;
       }
     };
     const checkpoint = this.deps.store.research.checkpoint(runId);
+    let scopeStopped = false;
     if (checkpoint) {
       // Never reintroduce legacy/unsolicited pages into the new model corpus:
       // only material attributable to a frozen selected account stays.
@@ -452,6 +472,8 @@ export class Runner {
         const requestKey = `firststep:fetch:${seedAttempt}:${account.accountId}`;
         let result: Awaited<ReturnType<ResearchTools['execute']>> | null = null;
         try {
+          // Predispatch refusal stops BEFORE any reservation: never billed.
+          guardedTools.predispatch?.(action);
           const old = this.deps.store.research.reserve(runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, fetchLimits, true);
           if (old) {
             if (old.state !== 'completed') {
@@ -472,7 +494,7 @@ export class Runner {
               });
             } catch (error) {
               try {
-                this.deps.store.research.settle(runId, requestKey, null, { estimatedUsd: null, unknownCost: true }, 'failed');
+                this.deps.store.research.settle(runId, requestKey, null, failedUsage(error), 'failed');
               } catch { /* cancelled/deleted runs refuse late receipts */ }
               throw error;
             }
@@ -490,6 +512,20 @@ export class Runner {
             // A failed initial read is a real gap for this account, not absence.
             checkpoint.unknowns.push(`所选账号初始材料未读取成功（${error.code}）：${account.profileUrl}；不代表无资料。`);
             continue;
+          }
+          if (error instanceof FirstStepSelectionError && error.code === 'out_of_scope') {
+            // Fail-closed per-account refusal: an honest gap, never a fetch;
+            // the remaining selected accounts keep their initial material.
+            checkpoint.unknowns.push(`所选账号初始材料被范围守卫拒绝（${error.detail}）；${scopeRefusalRecord(error)?.dispatched?'请求已发生，实际用量保留，返回材料未入库':'未发送请求'}，缺口保留，已读材料不变。`);
+            continue;
+          }
+          if (error instanceof FirstStepSelectionError && error.code === 'scope_changed') {
+            // Frozen scope withdrawn mid-seed: STOP all further reads and keep
+            // the preserved material for review; never internal_error and
+            // never a needs_input screen over a stale immutable binding.
+            checkpoint.unknowns.push(`冻结范围已撤回或失效（${error.detail}）；停止继续读取与新结论，已读材料与检查点保留待复核；如需继续，请通过现有第一步流程以新的范围重新开始研究。`);
+            scopeStopped = true;
+            break;
           }
           throw error;
         }
@@ -536,6 +572,21 @@ export class Runner {
       }
       this.deps.store.research.save(runId, checkpoint);
     }
+    if (checkpoint && scopeStopped) {
+      checkpoint.elapsedMs += Math.max(0, this.now() - startedAt);
+      // A scope stop publishes a paused review report from the preserved
+      // checkpoint: same sources, no new claims, explicit scope stop reason.
+      const paused = buildResearchReport({
+        store: this.deps.store,
+        run: initial,
+        checkpoint,
+        limits: checkpoint.limits ?? this.deps.config.researchLimits ?? RESEARCH_LIMITS,
+        firstStepScope
+      }, 'scope_changed', 'partial');
+      this.deps.store.research.save(runId, checkpoint);
+      this.finishWithResult(runId, initial, paused, startedAt);
+      return;
+    }
     if (checkpoint) {
       checkpoint.elapsedMs += Math.max(0, this.now() - startedAt);
       this.deps.store.research.save(runId, checkpoint);
@@ -558,7 +609,8 @@ export class Runner {
 
   private finishWithResult(runId: string, initial: RunRecord, result: ProviderResult, startedAt: number): void {
       this.assertWritable(runId);
-      this.deps.firstStep?.setPhase(runId, 'done');
+      // A scope stop stays reviewable (blocked), never pretending completion.
+      this.deps.firstStep?.setPhase(runId, result.stopReason === 'scope_changed' || result.stopReason === 'source_revoked' ? 'blocked' : 'done');
       // The provider result is the single source of truth; realtime source
       // events may have arrived during the run with transient fields.
       this.deps.store.replaceSources(runId, result.sources);
@@ -630,6 +682,21 @@ export class Runner {
     if (aborted) {
       // Cancellation already handled above; otherwise the process is stopping
       // and restart recovery will mark the run partial.
+      return;
+    }
+    if (error instanceof FirstStepSelectionError) {
+      // Defensive: a scope-guard refusal must never surface as internal_error.
+      this.deps.firstStep?.setPhase(runId, 'blocked');
+      const message = `${error.detail}；已读材料与检查点保留待复核；如需继续，请通过现有第一步流程以新的范围重新开始研究。`;
+      this.deps.store.updateRunIfActive(runId, {
+        state: 'partial',
+        error_code: error.code,
+        error_message: message,
+        stop_reason: error.code,
+        finished_at: nowIso()
+      });
+      this.deps.store.addEvent(runId, 'error', { code: error.code, message });
+      this.deps.store.addEvent(runId, 'state', { state: 'partial' satisfies RunState, stopReason: error.code });
       return;
     }
     const providerError = error instanceof ProviderError ? error : null;

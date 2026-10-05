@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assessIdentityLink,
+  firstStepQueryPlan,
   classifyFirstStepUrl,
   firstStepAccountCategory,
   firstStepAccountIdentity,
@@ -12,6 +13,7 @@ import {
   validateDecisionCompleteness,
   validateFirstStepSelectionInput,
   validateSelectionDecision,
+  FIRST_STEP_DEFAULT_BUDGET,
   FIRST_STEP_SCHEMA_VERSION,
   type FirstStepAccountView,
   type FirstStepLinkObservation,
@@ -582,4 +584,13 @@ test('evidence projections carry inspectable source metadata and never invent fa
   assert.equal(evidence.sourceTitle, '合成 About');
   assert.ok(evidence.quote && evidence.quote.length > 0);
   assert.ok(evidence.limitation.length > 0);
+});
+
+
+test('mixed-script input uses its supplied Latin name in constrained searches without inventing handles', () => {
+ const input={kind:'name_query' as const,value:'张晓 Ming Zhang'};
+ const queries=firstStepQueryPlan(input,FIRST_STEP_DEFAULT_BUDGET);
+ assert.equal(input.value,'张晓 Ming Zhang');
+ assert.ok(queries.some(q=>q.includeDomains?.includes('x.com')&&q.query==='Ming Zhang Twitter X profile'));
+ assert.ok(queries.every(q=>!q.query.includes('@')));
 });

@@ -158,3 +158,5 @@
 2026-10-05 真实覆盖修正（v3）：在读取之前冻结通用上限 ≤10 次检索 / 每次12结果 / 16次身份读取 / 2次模型调用，操作员总上限优先。初始检索明确覆盖网站、作品、写作、X、Instagram/Threads、Bluesky/Mastodon、学术与视频；社交域名过滤使用 Exa `includeDomains`，不拼猜用户名。用户输入明确给出的姓名/别名可分别检索，读取中的别名扩展限于与输入匹配的实际来源，避免追踪无关网页作者。GitHub `twitter_username` 只从已核对账号的真实原生字段生成其文档定义的主页入口；摘录仍为实际字段值。共用网页读取通道默认按最小 Firecrawl 计划节奏串行，可取消，不自动重试、不扩大调用预算，等待计入整个研究的时限。机构目录的独立人物路径保留独立账号键；博客列表入口可用于识别，文章不能证明整个宿主账号归属。
 
 来源：[Exa Search domain filters](https://exa.ai/docs/reference/search)、[Firecrawl rate limits](https://docs.firecrawl.dev/rate-limits)、[GitHub user fields](https://docs.github.com/en/rest/users/users)、[Stanford Profiles directory](https://profiles.stanford.edu/)。以上接口验证不代替真实召回、语义归属、界面或下游报告验收。
+
+运行补充：Medium 官方明确 `username.medium.com` 与 `medium.com/@username` 是同一用户名的个人主页 URL 方案（https://help.medium.com/hc/en-us/articles/115004746707-Your-profile-page-URL）。仅此平台的已记录方案共享账号键；任意自定义域名不按名字猜测归并。混合文字输入中的完整 Latin 姓名可作为用户已提供的查询变体；保留原始输入，不生成用户名。

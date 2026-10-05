@@ -443,15 +443,17 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
   const isCustomMedium = host.endsWith('.medium.com') && host !== 'www.medium.com' && customHostLabel.length > 0;
   const isBearblog = (host.endsWith('.bear.blog') || host.endsWith('.bearblog.dev')) && customHostLabel.length > 0;
   if (!known && (isCustomMedium || isBearblog)) {
-    const accountUrl = `https://${host}/`;
+    // Documented Medium profile URL schemes share the same username. This is
+    // a platform URL rule, not cross-platform person identity inference.
+    const accountUrl = isCustomMedium ? `https://medium.com/@${customHostLabel}` : `https://${host}/`;
     return {
       ok: true,
       ref: refOf(isCustomMedium ? 'medium' : 'rss_blog', segments.length === 0 ? accountUrl : href, {
         accountUrl,
         handle: customHostLabel,
-        instance: host,
+        instance: isCustomMedium ? null : host,
         materialUse: 'writing',
-        accountKind: 'publication',
+        accountKind: isCustomMedium ? 'person' : 'publication',
         entry: segments.length === 0 || isBearblog && segments.length === 1 && ['blog', 'about', 'posts'].includes(segments[0]!) ? 'profile' : 'page'
       })
     };
@@ -1588,10 +1590,15 @@ export function firstStepQueryPlan(
   const max = budget.maxSearchQueries > 0 ? budget.maxSearchQueries : 0;
   if (max === 0) return plan;
   const families = input.kind === 'name_query' ? FIRST_STEP_QUERY_FAMILIES : FIRST_STEP_QUERY_FAMILIES.slice(0, 1);
+  const suppliedNames = input.kind === 'name_query' ? value.split(/\s*[\/／]\s*/).map(name => name.trim()).filter(Boolean) : [value];
+  const firstName=suppliedNames[0]??value;
+  // A mixed-script input already contains this name; use its complete Latin
+  // spelling for domain-constrained retrieval, without inventing an alias.
+  const latinName=/[\u3400-\u9fff]/u.test(firstName)?firstName.match(/[A-Za-z][A-Za-z .’'\-]*[A-Za-z]/u)?.[0]?.trim():undefined;
+
   for (const entry of families) {
     if (plan.length >= max) break;
-    const names = input.kind === 'name_query' ? value.split(/\s*[\/／]\s*/).map(name => name.trim()).filter(Boolean) : [value];
-    const query = entry.build(names[0] ?? value);
+    const query = entry.build(entry.includeDomains && latinName ? latinName : firstName);
     if (!plan.some((item) => item.query === query && JSON.stringify(item.includeDomains) === JSON.stringify(entry.includeDomains))) plan.push({ query, family: entry.family, ...(entry.includeDomains ? { includeDomains: entry.includeDomains } : {}) });
   }
   let aliasSlots = 0;

@@ -757,6 +757,7 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       if (next) state.run.state = next;
       renderHeader();
       renderActivityPanel();
+      renderHistoryRail();
       if (next && isTerminalState(next)) scheduleSnapshotRefresh(runId, epoch);
       break;
     }
@@ -1158,8 +1159,13 @@ function renderSourcePanels(): void {
 }
 
 function renderHistoryRail(): void {
-  renderHistory(els.historyRail, state.runs, state.activeRunId, (runId) => void selectRun(runId));
-  renderHistory(els.drawerHistory, state.runs, state.activeRunId, (runId) => {
+  // The live canonical snapshot is newer than the initial history fetch. Derive
+  // this row for both rails without replacing other runs or private authority.
+  const rows = state.runs.map(row => state.run?.runId === row.runId && state.run.revision >= row.revision
+    ? {...row, state: state.run.state, revision: state.run.revision, updatedAt: state.run.updatedAt, sourceCount: state.run.sources.length}
+    : row);
+  renderHistory(els.historyRail, rows, state.activeRunId, (runId) => void selectRun(runId));
+  renderHistory(els.drawerHistory, rows, state.activeRunId, (runId) => {
     closeDrawer(els.historyDrawer, true);
     void selectRun(runId);
   });

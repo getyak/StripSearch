@@ -5,17 +5,40 @@ import { extractGitHubHandle, normalizeResearchUrl, sanitizeText } from '../../s
 import { ProviderError, type HttpTransport } from '../adapters/types.js';
 import type { Store, RunRecord } from '../store.js';
 import { type ResearchPlanner, invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
-import { RESEARCH_LIMITS, ResearchStop, remainingOf, type ResearchCheckpoint, type StoredPage, type ResearchClaim } from './research-store.js';
+import { RESEARCH_LIMITS, ResearchStop, remainingOf, type ActionUsage, type ResearchCheckpoint, type StoredPage, type ResearchClaim } from './research-store.js';
+import { FirstStepSelectionError } from './first-step-store.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchTools } from './tool-contracts.js';
 
+/** Optional fail-closed scope check run BEFORE any metered reservation exists. */
+export interface ScopedResearchTools extends ResearchTools { predispatch?(action:ResearchToolAction):void; }
 export interface ResearchOptions {
- store:Store;run:RunRecord;tools:ResearchTools;planner:ResearchPlanner;signal:AbortSignal;
+ store:Store;run:RunRecord;tools:ScopedResearchTools;planner:ResearchPlanner;signal:AbortSignal;
  transport?:HttpTransport;deepseekApiKey?:string|null;socialAvailable?:boolean;firecrawlAvailable?:boolean;
  limits?:ResearchBudgetLimits;
  /** First-step fetch scope: independent-account material never joins person claims. */
  firstStepScope?:{independentAccountKeys:ReadonlySet<string>;accountKeyOf:(url:string)=>string|null};
 }
 function object(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value);}
+interface RefusalRecord { dispatched:boolean; usage?:ActionUsage }
+const refusalRecords=new WeakMap<object,RefusalRecord>();
+/** Tag a scope-guard refusal with dispatch provenance so metering stays honest. */
+export function tagScopeRefusal<T>(error:T,record:RefusalRecord):T {
+ if(error&&(typeof error==='object'||typeof error==='function'))refusalRecords.set(error as object,record);
+ return error;
+}
+export function scopeRefusalRecord(error:unknown):RefusalRecord|null {
+ return error&&(typeof error==='object'||typeof error==='function')?refusalRecords.get(error as object)??null:null;
+}
+/** Honest failure metering: a predispatch refusal is never billed; a refused late ingest keeps its dispatched cost. */
+export function failedUsage(error:unknown):ActionUsage {
+ const record=scopeRefusalRecord(error);
+ if(!record)return {estimatedUsd:null,unknownCost:true};
+ return record.dispatched?(record.usage??{estimatedUsd:null,unknownCost:true}):{inputTokens:0,outputTokens:0,estimatedUsd:0,credits:0,unknownCost:false};
+}
+/** Scope withdrawal/revocation always stops; it is never a gap to plan around. */
+function isScopeStop(error:unknown):boolean {
+ return (error instanceof ResearchStop&&error.code==='source_revoked')||(error instanceof FirstStepSelectionError&&error.code==='scope_changed');
+}
 function digest(value:unknown):string{return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);}
 function candidateId(url:string):string{return 'candidate_'+digest(url);}
 /** Keep everything a tool supplied: only control characters are stripped. */
@@ -26,6 +49,42 @@ function draft(page:StoredPage,anchor:string|null,scope?:ResearchOptions['firstS
  return {key:page.sourceKey,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,excerptLocator:page.retrieval==='search'?'搜索发现材料，尚未回读原文':'公开页面文本',
  identityLabel:independent?'独立账号范围：尚未证明与其他账号同人':page.url===anchor?'所选公开主页':'来源归属未独立验证',identityConfirmed:page.url===anchor&&!independent,fetchStatus:page.text?'ok':'inaccessible',
  limits:[...page.limitations,...independent?['独立账号材料：只作该账号自身记录，不并入同一人物结论。']:page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
+function stillActivePagesOf(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint):StoredPage[]{
+ return checkpoint.pages.filter(page=>store.isResearchSourceActive(run.id,page.sourceKey,run.ownerId));
+}
+function scopeGapsOf(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint){
+ const pages=stillActivePagesOf(store,run,checkpoint);
+ return {pages,
+  discoveryOnly:pages.filter(p=>p.retrieval==='search'),
+  unread:[...new Set(pages.flatMap(p=>p.links))].filter(url=>!pages.some(p=>p.url===url)),
+  truncated:pages.filter(p=>p.textTruncated),
+  unresolved:[...checkpoint.unknowns,...(checkpoint.coverageGaps??[])]};
+}
+export interface ResearchReportContext {
+ store:Store;run:RunRecord;checkpoint:ResearchCheckpoint;limits:ResearchBudgetLimits;
+ /** First-step fetch scope: independent-account material never joins person claims. */
+ firstStepScope?:ResearchOptions['firstStepScope'];
+}
+/** Deterministic report from the preserved checkpoint: never invents facts, keeps every gap. */
+export function buildResearchReport(context:ResearchReportContext,reason:string,state:'completed'|'partial'):ProviderResult{
+ const {store,run,checkpoint,limits}=context;
+ checkpoint.phase='done';checkpoint.stopReason=reason;
+ const scope=scopeGapsOf(store,run,checkpoint);const pages=scope.pages;const keys=new Set(pages.map(p=>p.sourceKey));
+ const claims=checkpoint.claims.filter(c=>keys.has(c.sourceKey)&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')));
+ const coverage=researchDepthCoverage(claims,keys);
+ const gaps=coverage.filter(c=>c.state==='gap').map(c=>`${c.label}：${c.note}`);
+ const depthLimits=[...gaps,
+  ...scope.discoveryOnly.length?[`${scope.discoveryOnly.length} 个来源只有搜索发现材料、未回读原文；只能当线索，不算已读证据。`]:[],
+  ...scope.unread.length?[`还有 ${scope.unread.length} 条已发现链接未回读；它们是待判断线索，不等于均属于此人。`]:[],
+  ...scope.truncated.length?[`${scope.truncated.length} 个来源的原文被截断或不完整；截断部分仍是缺口，不能当作完整原文。`]:[],
+  ...scope.unresolved.length?[`还有 ${scope.unresolved.length} 项未解决记录（unresolved）；存在明确未解决项时不能称全平台或全部历史研究完成。`]:[]];
+ const observations=claims.map(c=>({statement:c.statement,kind:c.kind,sourceKeys:[c.sourceKey],limitations:['来源原文摘录；身份归属与独立事实核实另行判断。']}));
+ const budget=store.research.budget(run.id,limits);
+ const scopeStop=reason==='scope_changed'||reason==='source_revoked';
+ const identity=checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates};
+ return {state,identity:scopeStop&&checkpoint.identity?{...identity,note:`${identity.note?`${identity.note} `:''}冻结范围已失效或撤回（${reason}）：已读材料保留待复核，不能据此继续人物结论。`}:identity,sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl,context.firstStepScope)),observations,
+  answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[],...scopeStop?['冻结范围已失效或撤回：如需继续，请通过现有第一步流程以新的范围重新开始研究。']:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
+}
 
 export async function runResearch(options:ResearchOptions):Promise<ProviderResult>{
  const {store,run,tools,planner}=options;
@@ -54,7 +113,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
  const save=()=>{active();checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);};
  const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':'读取相关资料',status:'active'});};
- const stillActivePages=()=>checkpoint.pages.filter(page=>store.isResearchSourceActive(run.id,page.sourceKey,run.ownerId));
+ const stillActivePages=()=>stillActivePagesOf(store,run,checkpoint);
  const allowedUrls=()=>new Set([checkpoint.anchorUrl,...stillActivePages().flatMap(p=>[p.url,...p.links])].filter((v):v is string=>!!v));
  const dependencies=(action:ResearchToolAction):string[]=>{
   if(action.type==='search'||action.url===checkpoint.anchorUrl)return [];
@@ -93,6 +152,8 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    if(action.type==='firecrawl'&&(!options.firecrawlAvailable||['x.com','twitter.com'].includes(new URL(url).hostname)))throw new ResearchStop('tool_unavailable');
    if((action.type==='social_profile'||action.type==='social_posts')&&!options.socialAvailable)throw new ResearchStop('tool_unavailable');
   }else if(!action.query.trim()||action.query.length>600)throw new ResearchStop('invalid_decision');
+  // A scope refusal rejects BEFORE any metered reservation: never billed, no receipt.
+  options.tools.predispatch?.(action);
   const key='tool:'+digest(action);
   const old=store.research.reserve(run.id,key,'tool',action,{inputTokens:0,outputTokens:0},limits,Boolean(options.firstStepScope));
   if(old){if(old.state==='failed')throw new ProviderError('provider_bad_response','资料请求已有已结算失败回执，不自动重放。');return old.result as ResearchToolResult;}
@@ -102,7 +163,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    store.research.settle(run.id,key,result,{estimatedUsd:result.estimatedUsd,credits:result.credits,bytes:result.bytes,unknownCost:result.estimatedUsd===null});
    active();return result;
   }catch(error){
-   if(!options.signal.aborted){try{store.research.settle(run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');}catch{/* A cancelled/deleted run cannot accept late receipts. */}}
+   if(!options.signal.aborted){try{store.research.settle(run.id,key,null,failedUsage(error),'failed');}catch{/* A cancelled/deleted run cannot accept late receipts. */}}
    throw error;
   }
  };
@@ -124,27 +185,12 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  };
  // Completeness blockers are counted, never hidden: discovery-only sources,
  // unread discovered links, truncated originals and explicit unresolved items.
- const scopeGaps=()=>{const pages=stillActivePages();return {pages,
-  discoveryOnly:pages.filter(p=>p.retrieval==='search'),
-  unread:[...new Set(pages.flatMap(p=>p.links))].filter(url=>!pages.some(p=>p.url===url)),
-  truncated:pages.filter(p=>p.textTruncated),
-  unresolved:[...checkpoint.unknowns,...(checkpoint.coverageGaps??[])]};};
+ const scopeGaps=()=>scopeGapsOf(store,run,checkpoint);
  const finish=(reason:string,state:'completed'|'partial'):ProviderResult=>{
-  checkpoint.phase='done';checkpoint.stopReason=reason;
-  if(!options.signal.aborted){checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);}
-  const scope=scopeGaps();const pages=scope.pages;const keys=new Set(pages.map(p=>p.sourceKey));
-  const claims=checkpoint.claims.filter(c=>keys.has(c.sourceKey)&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')));
-  const coverage=researchDepthCoverage(claims,keys);
-  const gaps=coverage.filter(c=>c.state==='gap').map(c=>`${c.label}：${c.note}`);
-  const depthLimits=[...gaps,
-   ...scope.discoveryOnly.length?[`${scope.discoveryOnly.length} 个来源只有搜索发现材料、未回读原文；只能当线索，不算已读证据。`]:[],
-   ...scope.unread.length?[`还有 ${scope.unread.length} 条已发现链接未回读；它们是待判断线索，不等于均属于此人。`]:[],
-   ...scope.truncated.length?[`${scope.truncated.length} 个来源的原文被截断或不完整；截断部分仍是缺口，不能当作完整原文。`]:[],
-   ...scope.unresolved.length?[`还有 ${scope.unresolved.length} 项未解决记录（unresolved）；存在明确未解决项时不能称全平台或全部历史研究完成。`]:[]];
-  const observations=claims.map(c=>({statement:c.statement,kind:c.kind,sourceKeys:[c.sourceKey],limitations:['来源原文摘录；身份归属与独立事实核实另行判断。']}));
-  const budget=store.research.budget(run.id,limits);
-  return {state,identity:checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates},sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl,options.firstStepScope)),observations,
-   answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
+  if(!options.signal.aborted){checkpoint.elapsedMs=priorElapsed+Date.now()-launched;}
+  const result=buildResearchReport({store,run,checkpoint,limits,firstStepScope:options.firstStepScope},reason,state);
+  if(!options.signal.aborted){store.research.save(run.id,checkpoint);}
+  return result;
  };
  const verify=async():Promise<ProviderResult>=>{
   const claims=checkpoint.pendingClaims??[];
@@ -162,6 +208,8 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   let checked:unknown;
   try{checked=await ask('verify',claims);}catch(error){
    if(options.signal.aborted)throw error;
+   // Scope withdrawal stops with its explicit reason; it never rewrites claims.
+   if(isScopeStop(error))throw error;
    return quoteFallback('verification_unavailable');
   }
   active();
@@ -295,7 +343,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     if(step.kind!=='tool')continue;
     const action=step.action;
     if(action.type==='search'){if(!action.query.trim()||action.query.length>600)throw new ResearchStop('invalid_decision');}
-    else {const url=normalizeResearchUrl(action.url);if(!url||!allowedUrls().has(url))throw new ResearchStop('url_not_discovered');}
+    else {const url=normalizeResearchUrl(action.url);if(!url||(!options.firstStepScope&&!allowedUrls().has(url)))throw new ResearchStop('url_not_discovered');}
    }
    let madeProgress=false;
    const localWindows=new Set(checkpoint.localWindows??[]);
@@ -334,6 +382,14 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      // A known adapter failure is a gap in this branch, not the end of all research.
      // Its settled attempt is retained and never retried automatically.
      if(error instanceof ProviderError){checkpoint.unknowns.push(`资料分支未读成功：${action.type==='search'?'检索':action.url}（${error.code}）；不代表无资料。`);save();continue;}
+     // A per-target scope refusal is fail-closed but not fatal: the refused
+     // target was never fetched, the honest gap stays visible, and planning
+     // continues under the same model/tool/elapsed caps with retained material.
+     if(error instanceof ResearchStop&&error.code==='url_not_discovered'&&options.firstStepScope){checkpoint.unknowns.push(`拒绝未在已读资料中发现的地址：${action.type==='search'?'检索':action.url}；未发送请求。请只选择目录中已观察到且属于所选账号的链接，或检查已存原文。`);save();continue;}
+     if(error instanceof FirstStepSelectionError&&error.code==='out_of_scope'){
+      const dispatched=scopeRefusalRecord(error)?.dispatched===true;
+      checkpoint.unknowns.push(`范围外目标拒绝${dispatched?'入库':'读取'}（${error.detail}）；${dispatched?'请求已发生，实际用量保留，返回材料未入库':'未发送请求'}，缺口保留，已读材料不变。`);save();continue;
+     }
      throw error;
     }
    }
@@ -345,6 +401,15 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   if(error instanceof NeedsInputError){checkpoint.phase='needs_input';save();throw error;}
   if(options.signal.aborted)throw error;
   if(error instanceof ResearchStop&&error.code==='run_inactive')throw error;
+  // Scope withdrawal/revocation stops explicitly with an honest gap and the
+  // preserved material; it never degrades into research_error/internal_error
+  // and never opens a needs_input screen over a stale immutable binding.
+  if(isScopeStop(error)){
+   const detail=error instanceof FirstStepSelectionError?error.detail:'依赖的来源已被撤回或失效';
+   checkpoint.unknowns.push(`冻结范围或来源有效性已撤回（${detail}）；停止继续读取与新结论，已读材料与检查点保留待复核。`);
+   return finish(error instanceof ResearchStop?'source_revoked':'scope_changed','partial');
+  }
+  if(error instanceof FirstStepSelectionError){checkpoint.unknowns.push(`范围守卫拒绝（${error.detail}）；缺口保留，已读材料不变。`);return finish('research_error','partial');}
   const reason=deadline.signal.aborted?'budget_exhausted':error instanceof ResearchStop?error.code:error instanceof ProviderError?error.code:'research_error';
   return finish(reason,'partial');
  }finally{clearTimeout(timer);}
