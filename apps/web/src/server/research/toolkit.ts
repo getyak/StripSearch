@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { extractGitHubHandle, isPrivateHost, sanitizeText } from '../../shared/validation.js';
+import { classifyFirstStepUrl } from '../../shared/first-step-discovery.js';
 import { asArray, asNumber, asRecord, asString, safeFetchJson } from '../adapters/http.js';
 import { ProviderError } from '../adapters/types.js';
 import type { HttpRequestInit } from '../adapters/types.js';
@@ -61,8 +62,12 @@ function text(raw: unknown, max = TEXT_LIMIT): string { return sanitizeText(raw,
 /** Original text keeps everything a provider supplied; HTTP bytes stay bounded. */
 function retainText(raw: unknown): string { return sanitizeText(raw, Number.MAX_SAFE_INTEGER); }
 function profileKind(url: string): ResearchPage['kind'] {
-  const parsed = new URL(url);
-  if (extractGitHubHandle(url) || (X_HOSTS.has(parsed.hostname) && /^\/[A-Za-z0-9_]{1,15}\/?$/.test(parsed.pathname)) || /(^|\.)linkedin\.com$/.test(parsed.hostname) && /^\/in\/[^/]+\/?$/.test(parsed.pathname) || /^\/(?:about|bio|profile)\/?$/i.test(parsed.pathname)) return 'profile';
+  // Shared first-step classification replaces the old profile whitelist: a
+  // personal-site root, video channel, publication or academic profile is a
+  // profile instead of being dropped as third-party. Content pages stay
+  // third-party.
+  const classified = classifyFirstStepUrl(url);
+  if (classified.ok && classified.ref.entry === 'profile') return 'profile';
   return 'third_party';
 }
 function result(pages: ResearchPage[], bytes: number, estimatedUsd: number | null, credits: number | null = null, limitations: string[] = [], nextCursor?: string | null): ResearchToolResult {
@@ -100,13 +105,16 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const query = searching ? action.query.trim() : '';
     if (searching && (!query || query.length > 600)) fail('搜索内容为空或过长。');
     const requested = action.type === 'read' ? publicUrl(action.url) : null;
+    // Search result counts are configurable (first-step wide recall); the
+    // historical default of 5 stays for every caller that does not ask.
+    const searchCount = action.type === 'search' ? Math.min(25, Math.max(1, Math.trunc(action.numResults ?? 5))) : 5;
     // Original contents requests must not fix maxCharacters: the toolkit keeps
     // all supplied text and any provider/HTTP truncation is an explicit gap.
-    const payload = searching ? { query, numResults: 5, contents: { text: { maxCharacters: TEXT_LIMIT }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: true, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
+    const payload = searching ? { query, numResults: searchCount, contents: { text: { maxCharacters: TEXT_LIMIT }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: true, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
     const { body, bytes } = await request(`https://api.exa.ai/${searching ? 'search' : 'contents'}`, { method: 'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(payload) }, signal);
     if (!Array.isArray(body.results)) fail('网页供应商返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
-    for (const raw of asArray(body.results).slice(0, searching ? 5 : 1)) {
+    for (const raw of asArray(body.results).slice(0, searching ? searchCount : 1)) {
       const item = asRecord(raw);
       const url = publicUrl(item.url);
       if (requested && comparable(url) !== comparable(requested)) fail('返回网页与请求地址不匹配。');

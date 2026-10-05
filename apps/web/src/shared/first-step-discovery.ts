@@ -1,0 +1,1768 @@
+/**
+ * Shared contract for the first step: name / public URL input -> multi-platform
+ * Search discovery -> evidence-aware person & account presentation -> one
+ * atomic, version-bound account selection.
+ *
+ * Authority rules (see docs/superpowers/specs/2026-10-05-search-first-step-design.md):
+ * - `ResearchCase / AccountSelection / ScopeVersion / EvidenceRef /
+ *   SourceRevision` (research-case.ts) stay the fact store; this module only
+ *   defines the presentation projection, the conservative account keys, the
+ *   identity-evidence rules and the selection input shape.
+ * - Identity support is only granted by an explicit, role-correct association
+ *   read from an actual source. Shared handle, shared avatar, name similarity
+ *   and search-index snippets only produce candidates. Two observations of the
+ *   same source are never independent evidence. A search snippet is never an
+ *   original ("搜索索引不当原文").
+ * - A user selection never upgrades identity evidence; an exclusion statement
+ *   ("不是此人") is recorded separately from an unchecked box and revoking it
+ *   never becomes support.
+ *
+ * This module has no runtime dependencies so server, client and tests share
+ * one authority for the shapes and the rules.
+ */
+
+import type {
+  AllowedScope,
+  IdentitySupportState,
+  ResearchValue,
+  UserSelection,
+  AccessCoverage
+} from './research-case.js';
+import { ACCOUNT_KEY_PREFIX, canonicalJson } from './discovery-plan.js';
+import type { DiscoveredAccountIdentity } from './discovery-plan.js';
+
+export const FIRST_STEP_SCHEMA_VERSION = 'stripsearch/first-step-discovery/v1';
+export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
+export const FIRST_STEP_POLICY_VERSION = 'first-step/v1';
+
+/* ------------------------------------------------------------------ */
+/* Input                                                               */
+/* ------------------------------------------------------------------ */
+
+export type FirstStepInputKind = 'name_query' | 'homepage_url';
+
+export interface FirstStepInput {
+  kind: FirstStepInputKind;
+  /** Natural name or the exact public URL text the user supplied. */
+  value: string;
+  /** The user's full question, kept separate from the name clue. */
+  question?: string | null;
+}
+
+/* ------------------------------------------------------------------ */
+/* URL classification and conservative account keys                    */
+/* ------------------------------------------------------------------ */
+
+export type FirstStepPlatform =
+  | 'personal_site'
+  | 'linktree'
+  | 'github'
+  | 'gitlab'
+  | 'huggingface'
+  | 'stackoverflow'
+  | 'devto'
+  | 'x'
+  | 'linkedin'
+  | 'youtube'
+  | 'bilibili'
+  | 'tiktok'
+  | 'substack'
+  | 'medium'
+  | 'mastodon'
+  | 'bluesky'
+  | 'instagram'
+  | 'threads'
+  | 'facebook'
+  | 'reddit'
+  | 'hackernews'
+  | 'quora'
+  | 'telegram'
+  | 'pinterest'
+  | 'vk'
+  | 'google_scholar'
+  | 'orcid'
+  | 'dblp'
+  | 'zhihu'
+  | 'weibo'
+  | 'douban'
+  | 'xiaohongshu'
+  | 'jike'
+  | 'rss_blog'
+  | 'web_page';
+
+export type FirstStepMaterialUse =
+  | 'identity_anchor'
+  | 'technical_work'
+  | 'writing'
+  | 'expression'
+  | 'video_audio'
+  | 'academic'
+  | 'community'
+  | 'related_material';
+
+export type FirstStepAccountKind = 'person' | 'publication' | 'channel' | 'organization' | 'unknown';
+
+export type FirstStepAccountCategory =
+  | 'identity_work'
+  | 'writing'
+  | 'expression'
+  | 'video_audio'
+  | 'academic'
+  | 'related_material'
+  | 'organization';
+
+export interface FirstStepAccountRef {
+  platform: FirstStepPlatform;
+  platformLabel: string;
+  handle: string | null;
+  /** Instance / publication domain for instance-scoped platforms. */
+  instance: string | null;
+  /** Platform-native stable id (YouTube channel id, Scholar user id, ...). */
+  stableId: string | null;
+  /** This page's canonical URL exactly as classified; never rewritten later. */
+  profileUrl: string;
+  /**
+   * Canonical account/home URL this page is attributable to (GET-92
+   * `profileUrlRule` shape). Content pages share their account's URL; an
+   * unattributable page keeps its own URL. Never guessed from other authors.
+   */
+  accountUrl: string;
+  /** Conservative canonical key; same referent = same key, never cross-platform. */
+  accountKey: string;
+  materialUse: FirstStepMaterialUse;
+  accountKind: FirstStepAccountKind;
+  /** `profile` is an account/home entry; `page` is a content page of an account. */
+  entry: 'profile' | 'page';
+}
+
+export type FirstStepUrlClassification =
+  | { ok: true; ref: FirstStepAccountRef }
+  | { ok: false; code: 'unsafe_url' | 'not_a_url'; reason: string };
+
+const KNOWN_HOSTS = new Map<string, FirstStepPlatform>([
+  ['github.com', 'github'],
+  ['gitlab.com', 'gitlab'],
+  ['huggingface.co', 'huggingface'],
+  ['stackoverflow.com', 'stackoverflow'],
+  ['stackexchange.com', 'stackoverflow'],
+  ['dev.to', 'devto'],
+  ['x.com', 'x'],
+  ['twitter.com', 'x'],
+  ['linkedin.com', 'linkedin'],
+  ['youtube.com', 'youtube'],
+  ['youtu.be', 'youtube'],
+  ['space.bilibili.com', 'bilibili'],
+  ['bilibili.com', 'bilibili'],
+  ['tiktok.com', 'tiktok'],
+  ['substack.com', 'substack'],
+  ['medium.com', 'medium'],
+  ['bluesky.app', 'bluesky'],
+  ['bsky.app', 'bluesky'],
+  ['instagram.com', 'instagram'],
+  ['threads.net', 'threads'],
+  ['threads.com', 'threads'],
+  ['facebook.com', 'facebook'],
+  ['fb.com', 'facebook'],
+  ['reddit.com', 'reddit'],
+  ['news.ycombinator.com', 'hackernews'],
+  ['quora.com', 'quora'],
+  ['t.me', 'telegram'],
+  ['pinterest.com', 'pinterest'],
+  ['vk.com', 'vk'],
+  ['scholar.google.com', 'google_scholar'],
+  ['orcid.org', 'orcid'],
+  ['dblp.org', 'dblp'],
+  ['zhihu.com', 'zhihu'],
+  ['weibo.com', 'weibo'],
+  ['douban.com', 'douban'],
+  ['xiaohongshu.com', 'xiaohongshu'],
+  ['okjike.com', 'jike'],
+  ['linktr.ee', 'linktree'],
+  ['beacons.ai', 'linktree']
+]);
+
+/** Host lookup with only the verified common public prefixes, never a guess. */
+function hostPlatform(host: string): FirstStepPlatform | null {
+  const direct = KNOWN_HOSTS.get(host) ?? KNOWN_HOSTS.get(host.replace(/^www\./, ''));
+  if (direct) return direct;
+  const stripped = host.replace(/^(?:m|mobile|amp)\./, '');
+  return KNOWN_HOSTS.get(stripped) ?? KNOWN_HOSTS.get(stripped.replace(/^www\./, '')) ?? null;
+}
+
+const PLATFORM_LABELS: Record<FirstStepPlatform, string> = {
+  personal_site: '个人网站',
+  linktree: '链接目录',
+  github: 'GitHub',
+  gitlab: 'GitLab',
+  huggingface: 'Hugging Face',
+  stackoverflow: 'Stack Overflow',
+  devto: 'DEV',
+  x: 'X',
+  linkedin: 'LinkedIn',
+  youtube: 'YouTube',
+  bilibili: 'Bilibili',
+  tiktok: 'TikTok',
+  substack: 'Substack',
+  medium: 'Medium',
+  mastodon: 'Mastodon',
+  bluesky: 'Bluesky',
+  instagram: 'Instagram',
+  threads: 'Threads',
+  facebook: 'Facebook',
+  reddit: 'Reddit',
+  hackernews: 'Hacker News',
+  quora: 'Quora',
+  telegram: 'Telegram 公开频道',
+  pinterest: 'Pinterest',
+  vk: 'VK',
+  google_scholar: 'Google Scholar',
+  orcid: 'ORCID',
+  dblp: 'DBLP',
+  zhihu: '知乎',
+  weibo: '微博',
+  douban: '豆瓣',
+  xiaohongshu: '小红书',
+  jike: '即刻',
+  rss_blog: '独立博客',
+  web_page: '公开网页'
+};
+
+/** URL shapes the offline checks must never treat as public fetch targets. */
+const BLOCKED_HOST_SUFFIXES = ['localhost', 'local', 'internal', 'test', 'invalid', 'localdomain', 'example', 'example.com', 'example.org', 'example.net'];
+const BLOCKED_HOSTS = new Set(['example.com', 'example.org', 'example.net', 'example.invalid']);
+
+function isBlockedHost(host: string): boolean {
+  if (BLOCKED_HOSTS.has(host)) return true;
+  return BLOCKED_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
+function isLiteralIp(host: string): boolean {
+  if (/^[0-9]{1,3}(?:\.[0-9]{1,3}){3}$/.test(host)) return true;
+  return host.includes(':') || /^\[.*\]$/.test(host);
+}
+
+/** GET-92-style conservative URL normalization (scheme + authority only). */
+function normalizeSchemeHost(value: string): string {
+  const schemeEnd = value.indexOf('://');
+  if (schemeEnd < 0) return value;
+  const scheme = value.slice(0, schemeEnd).toLowerCase();
+  const rest = value.slice(schemeEnd + 3);
+  const boundary = rest.search(/[/?#]/);
+  const authority = boundary < 0 ? rest : rest.slice(0, boundary);
+  const tail = boundary < 0 ? '' : rest.slice(boundary);
+  return `${scheme}://${authority.toLowerCase()}${tail}`;
+}
+
+/**
+ * The GET-58/92 identity projection of one classified reference, so server
+ * code can run the verified `canonicalAccountKey` over exactly this identity.
+ */
+export function firstStepAccountIdentity(ref: {
+  platform: FirstStepPlatform;
+  instance: string | null;
+  accountKind: FirstStepAccountKind;
+  handle: string | null;
+  accountUrl: string;
+}): DiscoveredAccountIdentity {
+  return {
+    platformId: ref.platform,
+    instance: ref.instance === null ? null : ref.instance.toLowerCase(),
+    accountKind: ref.accountKind,
+    nativeId: null,
+    nativeIdIssuer: null,
+    profileUrl: ref.accountUrl,
+    actorUrl: null,
+    handle: ref.handle,
+    handleVerified: ref.handle !== null,
+    homeInstance: ref.instance === null ? null : ref.instance.toLowerCase(),
+    associationProof: null
+  };
+}
+
+/**
+ * Conservative canonical account key, reusing the GET-92 account-key ladder
+ * (`ACCOUNT_KEY_PREFIX` + `canonicalJson` in the exact `canonicalAccountKey`
+ * URL-fallback shape). Two URLs map to the same key only when they clearly
+ * denote the same platform referent; cross-platform merge never happens here,
+ * same-platform lookalikes stay distinct, and a content page only shares a key
+ * with the account/site it is actually attributable to.
+ */
+export function firstStepAccountKey(ref: {
+  platform: FirstStepPlatform;
+  instance: string | null;
+  accountKind: FirstStepAccountKind;
+  handle: string | null;
+  accountUrl: string;
+}): string {
+  const identity = firstStepAccountIdentity(ref);
+  return `${ACCOUNT_KEY_PREFIX}:${canonicalJson({
+    v: ACCOUNT_KEY_PREFIX,
+    platformId: identity.platformId,
+    instance: identity.instance,
+    accountKind: identity.accountKind,
+    mode: 'url',
+    url: normalizeSchemeHost(identity.profileUrl as string)
+  })}`;
+}
+
+function refOf(
+  platform: FirstStepPlatform,
+  pageUrl: string,
+  parts: {
+    /** Canonical account/home URL this page is attributable to. */
+    accountUrl?: string;
+    handle?: string | null;
+    instance?: string | null;
+    stableId?: string | null;
+    materialUse: FirstStepMaterialUse;
+    accountKind?: FirstStepAccountKind;
+    entry: 'profile' | 'page';
+  }
+): FirstStepAccountRef {
+  const handle = parts.handle ?? null;
+  const instance = parts.instance === undefined ? null : parts.instance;
+  const stableId = parts.stableId ?? null;
+  const accountUrl = parts.accountUrl ?? pageUrl;
+  const accountKind = parts.accountKind ?? 'unknown';
+  return {
+    platform,
+    platformLabel: PLATFORM_LABELS[platform],
+    handle,
+    instance,
+    stableId,
+    profileUrl: pageUrl,
+    accountUrl,
+    accountKey: firstStepAccountKey({ platform, instance, accountKind, handle, accountUrl }),
+    materialUse: parts.materialUse,
+    accountKind,
+    entry: parts.entry
+  };
+}
+
+/**
+ * Classify one public URL into an account/page reference. This is pure string
+ * work: it performs no network access and never validates that the account
+ * exists. Unknown shapes are classified honestly (`web_page`) instead of being
+ * dropped by an old allowlist.
+ */
+const X_RESERVED_SEGMENTS = new Set(['home', 'explore', 'search', 'notifications', 'messages', 'settings', 'i', 'intent', 'login', 'signup', 'share', 'compose']);
+const YOUTUBE_CHANNEL_TABS = new Set(['', 'videos', 'shorts', 'streams', 'playlists', 'community', 'about', 'featured', 'channels', 'search']);
+const RESERVED_FIRST_SEGMENTS = new Set(['p', 'pin', 'reel', 'tv', 'stories', 'explore', 'accounts', 'pages', 'groups', 'watch', 'marketplace', 'events', 'photo', 'photo.php', 'story.php', 'user', 'users', 'search', 'settings', 'about', 'help', 'login', 'signup', 'tag', 'tags', 'topics', 'r', 'u']);
+
+export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 2048) {
+    return { ok: false, code: 'not_a_url', reason: '链接为空或过长。' };
+  }
+  const trimmed = raw.trim();
+  if (/[\u0000-\u0020\u007f\\]/.test(trimmed)) {
+    return { ok: false, code: 'unsafe_url', reason: '链接包含控制字符或空白。' };
+  }
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return { ok: false, code: 'not_a_url', reason: '不是有效的 URL。' };
+  }
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  const unsafe =
+    url.protocol !== 'https:' ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.port !== '' ||
+    !host.includes('.') ||
+    isBlockedHost(host) ||
+    isLiteralIp(host);
+  if (unsafe) {
+    return { ok: false, code: 'unsafe_url', reason: '只接受公开 HTTPS 链接，不能使用本机、内网或示例域名。' };
+  }
+  const canonical = new URL(url.href);
+  canonical.hash = '';
+  canonical.hostname = host;
+  const href = canonical.href;
+  const path = canonical.pathname.replace(/\/+$/, '');
+  const segments = path.split('/').filter(Boolean);
+
+  // Instance-scoped Mastodon profiles: https://instance/@user or /users/user.
+  // Known platforms are matched first so substack.com/@user stays a Substack
+  // profile, not an instance account.
+  const known = hostPlatform(host);
+  const substackHost = /^([a-z0-9-]+)\.substack\.com$/.exec(host);
+
+  if (substackHost) {
+    const name = substackHost[1]!;
+    const accountUrl = `https://${host}/`;
+    if (segments.length === 0) {
+      return { ok: true, ref: refOf('substack', accountUrl, { accountUrl, handle: name, instance: host, materialUse: 'writing', accountKind: 'publication', entry: 'profile' }) };
+    }
+    return {
+      ok: true,
+      ref: refOf('substack', href, {
+        accountUrl,
+        handle: name,
+        instance: host,
+        materialUse: 'writing',
+        accountKind: 'publication',
+        entry: 'page'
+      })
+    };
+  }
+
+  // Fediverse instance profiles: only the /@user convention on a non-catalog
+  // host is instance-scoped. Arbitrary /users or /u paths are never guessed
+  // into Mastodon accounts.
+  if (!known && canonical.pathname.startsWith('/@')) {
+    const handle = canonical.pathname.slice(2).split('/')[0] ?? '';
+    if (/^[A-Za-z0-9_.-]{1,64}$/.test(handle)) {
+      const accountUrl = `https://${host}/@${handle}`;
+      return {
+        ok: true,
+        ref: refOf('mastodon', segments.length > 1 ? href : accountUrl, {
+          accountUrl,
+          handle,
+          instance: host,
+          materialUse: 'expression',
+          accountKind: 'person',
+          entry: segments.length > 1 ? 'page' : 'profile'
+        })
+      };
+    }
+  }
+
+  switch (known) {
+    case 'github': {
+      const handle = segments[0] ?? '';
+      if (!/^[A-Za-z0-9-]{1,39}$/.test(handle)) {
+        return { ok: true, ref: refOf('github', href, { materialUse: 'technical_work', entry: 'page' }) };
+      }
+      const accountUrl = `https://github.com/${handle}`;
+      return {
+        ok: true,
+        ref: refOf('github', segments.length <= 1 ? accountUrl : href, {
+          accountUrl,
+          handle,
+          materialUse: 'technical_work',
+          accountKind: 'person',
+          entry: segments.length <= 1 ? 'profile' : 'page'
+        })
+      };
+    }
+    case 'x': {
+      const handle = segments[0] ?? '';
+      const hasHandle = /^[A-Za-z0-9_]{1,15}$/.test(handle) && !X_RESERVED_SEGMENTS.has(handle.toLowerCase());
+      const accountUrl = hasHandle ? `https://x.com/${handle}` : href;
+      return {
+        ok: true,
+        ref: refOf('x', hasHandle && segments.length <= 1 ? accountUrl : href, {
+          accountUrl,
+          handle: hasHandle ? handle : null,
+          materialUse: 'expression',
+          accountKind: hasHandle ? 'person' : 'unknown',
+          entry: hasHandle && segments.length <= 1 ? 'profile' : 'page'
+        })
+      };
+    }
+    case 'linkedin': {
+      const kind = segments[0] ?? '';
+      const slug = segments[1] ?? '';
+      if ((kind === 'in' || kind === 'company') && slug) {
+        const accountUrl = `https://www.linkedin.com/${kind}/${slug}/`;
+        return {
+          ok: true,
+          ref: refOf('linkedin', segments.length <= 2 ? accountUrl : href, {
+            accountUrl,
+            handle: slug,
+            materialUse: 'identity_anchor',
+            accountKind: kind === 'company' ? 'organization' : 'person',
+            entry: segments.length <= 2 ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('linkedin', href, { materialUse: 'identity_anchor', entry: 'page' }) };
+    }
+    case 'youtube': {
+      const at = canonical.pathname.match(/^\/@([A-Za-z0-9_.-]{1,64})(?:\/(.*))?$/);
+      if (at) {
+        const accountUrl = `https://www.youtube.com/@${at[1]}`;
+        const tab = (at[2] ?? '').split('/')[0] ?? '';
+        const isChannelSurface = at[2] === undefined || YOUTUBE_CHANNEL_TABS.has(tab);
+        return {
+          ok: true,
+          ref: refOf('youtube', isChannelSurface ? accountUrl : href, {
+            accountUrl,
+            handle: at[1],
+            materialUse: 'video_audio',
+            accountKind: 'channel',
+            entry: isChannelSurface ? 'profile' : 'page'
+          })
+        };
+      }
+      const channel = segments[0] === 'channel' ? segments[1] ?? '' : '';
+      if (/^UC[A-Za-z0-9_-]{10,}$/.test(channel)) {
+        const accountUrl = `https://www.youtube.com/channel/${channel}`;
+        return {
+          ok: true,
+          ref: refOf('youtube', segments.length <= 2 ? accountUrl : href, {
+            accountUrl,
+            stableId: channel,
+            materialUse: 'video_audio',
+            accountKind: 'channel',
+            entry: segments.length <= 2 ? 'profile' : 'page'
+          })
+        };
+      }
+      const legacy = segments[0] === 'c' || segments[0] === 'user' ? segments[1] ?? '' : '';
+      if (legacy) {
+        const accountUrl = `https://www.youtube.com/${segments[0]}/${legacy}`;
+        return {
+          ok: true,
+          ref: refOf('youtube', segments.length <= 2 ? accountUrl : href, {
+            accountUrl,
+            handle: legacy,
+            materialUse: 'video_audio',
+            accountKind: 'channel',
+            entry: segments.length <= 2 ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('youtube', href, { materialUse: 'video_audio', entry: 'page' }) };
+    }
+    case 'bilibili': {
+      const isSpaceHost = host === 'space.bilibili.com' || host === 'www.bilibili.com' && segments[0] === 'space';
+      const id = isSpaceHost ? (host === 'space.bilibili.com' ? segments[0] ?? '' : segments[1] ?? '') : '';
+      if (/^[0-9]+$/.test(id)) {
+        const accountUrl = `https://space.bilibili.com/${id}`;
+        return {
+          ok: true,
+          ref: refOf('bilibili', segments.length <= 1 ? accountUrl : href, {
+            accountUrl,
+            stableId: id,
+            materialUse: 'video_audio',
+            accountKind: 'channel',
+            entry: segments.length <= 1 ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('bilibili', href, { materialUse: 'video_audio', entry: 'page' }) };
+    }
+    case 'substack': {
+      const at = canonical.pathname.match(/^\/@([A-Za-z0-9_.-]{1,64})(?:\/(.*))?$/);
+      if (at) {
+        const accountUrl = `https://substack.com/@${at[1]}`;
+        return {
+          ok: true,
+          ref: refOf('substack', at[2] === undefined ? accountUrl : href, {
+            accountUrl,
+            handle: at[1],
+            materialUse: 'writing',
+            accountKind: 'person',
+            entry: at[2] === undefined ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('substack', href, { handle: segments[0] ?? null, materialUse: 'writing', entry: segments.length > 0 ? 'page' : 'profile' }) };
+    }
+    case 'medium': {
+      const at = canonical.pathname.match(/^\/@([A-Za-z0-9_.-]{1,64})(?:\/(.*))?$/);
+      if (at) {
+        const accountUrl = `https://medium.com/@${at[1]}`;
+        return {
+          ok: true,
+          ref: refOf('medium', at[2] === undefined ? accountUrl : href, {
+            accountUrl,
+            handle: at[1],
+            materialUse: 'writing',
+            accountKind: 'person',
+            entry: at[2] === undefined ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('medium', href, { handle: segments[0] ?? null, materialUse: 'writing', entry: segments.length > 0 ? 'page' : 'profile' }) };
+    }
+    case 'bluesky': {
+      // bsky.app profiles live at /profile/<handle|did>; bluesky.app is only a
+      // redirect host. Subpaths (feed/post lists) stay attributable pages.
+      const profileIndex = segments[0] === 'profile' ? 1 : -1;
+      const handle = profileIndex > 0 ? segments[profileIndex] ?? '' : '';
+      if (/^[A-Za-z0-9_.-]{1,64}$/.test(handle)) {
+        const accountUrl = `https://bsky.app/profile/${handle}`;
+        return {
+          ok: true,
+          ref: refOf('bluesky', segments.length <= 2 ? accountUrl : href, {
+            accountUrl,
+            handle,
+            materialUse: 'expression',
+            accountKind: 'person',
+            entry: segments.length <= 2 ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('bluesky', href, { materialUse: 'expression', entry: 'page' }) };
+    }
+    case 'instagram':
+    case 'threads': {
+      const raw = canonical.pathname.replace(/^\//, '');
+      const first = raw.split('/')[0] ?? '';
+      const handle = first.startsWith('@') ? first.slice(1) : first;
+      const isProfile = /^[A-Za-z0-9_.]{1,64}$/.test(handle) && !RESERVED_FIRST_SEGMENTS.has(first.toLowerCase());
+      const accountUrl = isProfile ? `https://www.${known === 'instagram' ? 'instagram.com' : 'threads.net'}/@${handle}` : href;
+      return {
+        ok: true,
+        ref: refOf(known, isProfile && segments.length <= 1 ? accountUrl : href, {
+          accountUrl,
+          handle: isProfile ? handle : null,
+          materialUse: 'expression',
+          accountKind: isProfile ? 'person' : 'unknown',
+          entry: isProfile && segments.length <= 1 ? 'profile' : 'page'
+        })
+      };
+    }
+    case 'facebook': {
+      const first = segments[0] ?? '';
+      const id = canonical.searchParams.get('id');
+      const isProfile = first !== '' && !RESERVED_FIRST_SEGMENTS.has(first.toLowerCase()) && /^[A-Za-z0-9_.-]{1,80}$/.test(first);
+      const accountUrl = isProfile
+        ? `https://www.facebook.com/${first}`
+        : id && /^[0-9]+$/.test(id)
+          ? `https://www.facebook.com/profile.php?id=${id}`
+          : href;
+      return {
+        ok: true,
+        ref: refOf('facebook', isProfile && segments.length <= 1 ? accountUrl : href, {
+          accountUrl,
+          handle: isProfile ? first : id ?? null,
+          materialUse: 'expression',
+          accountKind: isProfile || id ? 'person' : 'unknown',
+          entry: (isProfile && segments.length <= 1) || (canonical.pathname === '/profile.php' && id) ? 'profile' : 'page'
+        })
+      };
+    }
+    case 'reddit': {
+      const user = segments[0] === 'user' || segments[0] === 'u' ? segments[1] ?? '' : '';
+      if (/^[A-Za-z0-9_-]{1,64}$/.test(user)) {
+        const accountUrl = `https://www.reddit.com/user/${user}/`;
+        return {
+          ok: true,
+          ref: refOf('reddit', segments.length <= 2 ? accountUrl : href, {
+            accountUrl,
+            handle: user,
+            materialUse: 'community',
+            accountKind: 'person',
+            entry: segments.length <= 2 ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('reddit', href, { materialUse: 'community', entry: 'page' }) };
+    }
+    case 'hackernews': {
+      const user = canonical.pathname === '/user' ? canonical.searchParams.get('id') : null;
+      if (user && /^[A-Za-z0-9_-]{1,64}$/.test(user)) {
+        const accountUrl = `https://news.ycombinator.com/user?id=${user}`;
+        return { ok: true, ref: refOf('hackernews', accountUrl, { accountUrl, handle: user, materialUse: 'community', accountKind: 'person', entry: 'profile' }) };
+      }
+      return { ok: true, ref: refOf('hackernews', href, { materialUse: 'community', entry: 'page' }) };
+    }
+    case 'quora': {
+      const profile = segments[0] === 'profile' ? segments[1] ?? '' : '';
+      if (profile) {
+        const accountUrl = `https://www.quora.com/profile/${profile}`;
+        return {
+          ok: true,
+          ref: refOf('quora', segments.length <= 2 ? accountUrl : href, {
+            accountUrl,
+            handle: profile,
+            materialUse: 'community',
+            accountKind: 'person',
+            entry: segments.length <= 2 ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('quora', href, { materialUse: 'community', entry: 'page' }) };
+    }
+    case 'telegram': {
+      const channel = segments[0] ?? '';
+      if (/^[A-Za-z0-9_]{4,64}$/.test(channel)) {
+        const accountUrl = `https://t.me/${channel}`;
+        return {
+          ok: true,
+          ref: refOf('telegram', segments.length <= 1 ? accountUrl : href, {
+            accountUrl,
+            handle: channel,
+            materialUse: 'expression',
+            accountKind: 'channel',
+            entry: segments.length <= 1 ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('telegram', href, { materialUse: 'expression', entry: 'page' }) };
+    }
+    case 'pinterest':
+    case 'vk': {
+      const first = segments[0] ?? '';
+      const isProfile = first !== '' && !RESERVED_FIRST_SEGMENTS.has(first.toLowerCase()) && /^[A-Za-z0-9_.-]{1,80}$/.test(first);
+      const accountUrl = isProfile ? `https://www.${known === 'pinterest' ? 'pinterest.com' : 'vk.com'}/${first}` : href;
+      return {
+        ok: true,
+        ref: refOf(known, isProfile && segments.length <= 1 ? accountUrl : href, {
+          accountUrl,
+          handle: isProfile ? first : null,
+          materialUse: 'expression',
+          accountKind: isProfile ? 'person' : 'unknown',
+          entry: isProfile && segments.length <= 1 ? 'profile' : 'page'
+        })
+      };
+    }
+    case 'google_scholar': {
+      const user = canonical.searchParams.get('user');
+      if (user && /^[A-Za-z0-9_-]{4,}$/.test(user)) {
+        return {
+          ok: true,
+          ref: refOf('google_scholar', `https://scholar.google.com/citations?user=${encodeURIComponent(user)}`, {
+            stableId: user,
+            materialUse: 'academic',
+            accountKind: 'person',
+            entry: 'profile'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('google_scholar', href, { materialUse: 'academic', entry: 'page' }) };
+    }
+    case 'orcid': {
+      const id = segments[0] ?? '';
+      if (/^[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]$/.test(id)) {
+        return {
+          ok: true,
+          ref: refOf('orcid', `https://orcid.org/${id}`, {
+            stableId: id,
+            materialUse: 'academic',
+            accountKind: 'person',
+            entry: 'profile'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('orcid', href, { materialUse: 'academic', entry: 'page' }) };
+    }
+    case 'dblp': {
+      const pid = segments[0] === 'pid' ? segments.slice(1).join('/') : '';
+      if (pid) {
+        return {
+          ok: true,
+          ref: refOf('dblp', `https://dblp.org/pid/${pid}`, {
+            stableId: pid,
+            materialUse: 'academic',
+            accountKind: 'person',
+            entry: 'profile'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('dblp', href, { materialUse: 'academic', entry: 'page' }) };
+    }
+    case 'zhihu':
+    case 'douban': {
+      const id = segments[0] === 'people' ? segments[1] ?? '' : '';
+      if (id) {
+        return {
+          ok: true,
+          ref: refOf(known, `https://www.${host}/people/${id}`, {
+            handle: id,
+            materialUse: 'expression',
+            accountKind: 'person',
+            entry: 'profile'
+          })
+        };
+      }
+      return { ok: true, ref: refOf(known, href, { materialUse: 'expression', entry: 'page' }) };
+    }
+    case 'xiaohongshu': {
+      const id = segments[0] === 'user' && segments[1] === 'profile' ? segments[2] ?? '' : '';
+      if (id) {
+        return {
+          ok: true,
+          ref: refOf('xiaohongshu', `https://www.xiaohongshu.com/user/profile/${id}`, {
+            stableId: id,
+            materialUse: 'expression',
+            accountKind: 'person',
+            entry: 'profile'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('xiaohongshu', href, { materialUse: 'expression', entry: 'page' }) };
+    }
+    case 'weibo': {
+      const id = segments[0] === 'u' ? segments[1] ?? '' : segments[0] ?? '';
+      if (/^[0-9]+$/.test(id)) {
+        return {
+          ok: true,
+          ref: refOf('weibo', `https://weibo.com/u/${id}`, {
+            stableId: id,
+            materialUse: 'expression',
+            accountKind: 'person',
+            entry: segments.length <= 1 ? 'profile' : 'page'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('weibo', href, { materialUse: 'expression', entry: 'page' }) };
+    }
+    case 'linktree': {
+      const handle = segments[0] ?? '';
+      if (handle) {
+        return {
+          ok: true,
+          ref: refOf('linktree', `https://linktr.ee/${handle}`, {
+            handle,
+            materialUse: 'identity_anchor',
+            accountKind: 'person',
+            entry: 'profile'
+          })
+        };
+      }
+      return { ok: true, ref: refOf('linktree', href, { materialUse: 'identity_anchor', entry: 'page' }) };
+    }
+    case 'stackoverflow':
+    case 'huggingface':
+    case 'gitlab':
+    case 'devto':
+    case 'tiktok':
+    case 'jike': {
+      const handle = segments[0] ?? '';
+      const isProfile = handle !== '' && !['questions', 'q', 'tags', 'users', 'search', 'video', 'explore'].includes(handle);
+      return {
+        ok: true,
+        ref: refOf(known, href, {
+          handle: isProfile ? handle : null,
+          materialUse: known === 'tiktok' ? 'video_audio' : known === 'jike' ? 'expression' : 'technical_work',
+          accountKind: isProfile && segments.length <= 1 ? 'person' : 'unknown',
+          entry: isProfile && segments.length <= 1 ? 'profile' : 'page'
+        })
+      };
+    }
+    default:
+      break;
+  }
+
+  // Generic public web: a site root or About/Bio/Profile page is an identity
+  // anchor candidate; other pages are related material of the same site. All
+  // generic site pages share the site's conservative account key (one
+  // platformId per referent), so attributable site content can expand inside
+  // the site's own scope while other sites' content never does.
+  const lowerPath = path.toLowerCase();
+  const isAbout = /^\/(about|bio|profile|about\/me)?$/i.test(lowerPath) && segments.length <= 1;
+  const isRoot = segments.length === 0;
+  const materialUse: FirstStepMaterialUse = isRoot || isAbout ? 'identity_anchor' : 'related_material';
+  const siteUrl = `https://${host}/`;
+  return {
+    ok: true,
+    ref: refOf('personal_site', href, {
+      accountUrl: siteUrl,
+      handle: host,
+      instance: host,
+      materialUse,
+      accountKind: 'unknown',
+      entry: isRoot || isAbout ? 'profile' : 'page'
+    })
+  };
+}
+
+/** Display grouping for the account cards ("按研究用途列出账号"). */
+export function firstStepAccountCategory(ref: FirstStepAccountRef): FirstStepAccountCategory {
+  if (ref.accountKind === 'organization') return 'organization';
+  switch (ref.materialUse) {
+    case 'identity_anchor':
+    case 'technical_work':
+      return 'identity_work';
+    case 'writing':
+      return 'writing';
+    case 'expression':
+    case 'community':
+      return 'expression';
+    case 'video_audio':
+      return 'video_audio';
+    case 'academic':
+      return 'academic';
+    default:
+      return 'related_material';
+  }
+}
+
+export const FIRST_STEP_CATEGORY_LABELS: Record<FirstStepAccountCategory, string> = {
+  identity_work: '身份与作品',
+  writing: '文章与通讯',
+  expression: '公开表达',
+  video_audio: '视频与音频',
+  academic: '学术与机构资料',
+  related_material: '相关资料',
+  organization: '组织与第三方'
+};
+
+/* ------------------------------------------------------------------ */
+/* Identity evidence rules                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How an observation was obtained. `indexed` is a search-index snippet (never
+ * an original), `link_only` means only a link was seen without reading its
+ * target, `read` means the original page text was actually read.
+ */
+export type FirstStepRetrieval = 'read' | 'indexed' | 'link_only';
+
+export type FirstStepLinkRole =
+  | 'self_account_section'
+  | 'explicit_directory'
+  | 'explicit_claim'
+  | 'explicit_denial'
+  | 'prose_mention'
+  | 'unknown_role';
+
+export interface FirstStepLinkObservation {
+  observationId: string;
+  /** Case source id this observation was read or indexed from. */
+  sourceId: string;
+  sourceRevision: number;
+  /** The ACTUAL source page URL this observation was read from. */
+  sourceUrl: string;
+  /** sha256 of the full stored source text; never just the quote. */
+  sourceContentHash: string | null;
+  sourceRetrievedAt: string | null;
+  /** Account key the observed page belongs to; null for third-party pages. */
+  fromAccountKey: string | null;
+  targetAccountKey: string;
+  targetUrl: string;
+  linkRole: FirstStepLinkRole;
+  direction: 'outbound' | 'inbound';
+  retrieval: FirstStepRetrieval;
+  quote: string | null;
+  /** Precise locator inside the source; never invented. */
+  locator: string | null;
+  observedAt: string;
+}
+
+/** Classification of the OBSERVED extraction context around a link. */
+export type FirstStepLinkContextClass = 'ownership' | 'third_party' | 'unknown';
+
+const THIRD_PARTY_MARKERS = /recommend|colleague|friend|朋友|推荐|同事|他们|她们|团队成员|staff|粉丝|fan\b|转载|转发|interview|采访|嘉宾|guest|mentions|cited|inspired by|\bhe\b|\bshe\b|\bhis\b|\bher\b|\btheir\b|他|她/i;
+const OWNERSHIP_MARKERS = /\bmy\b|\bmine\b|\bi am\b|\bi'm\b|\bme\b|follow me|contact me|find me|\baccounts?\b|\bprofiles?\b|我的|我是|我在|关注我|联系我|账号|主页/i;
+
+/**
+ * Context classification for one observed link span. Ownership roles require
+ * actually observed ownership context; ordinary prose, recommendations and
+ * unknown extraction context never grant ownership. A third-party marker wins
+ * over an ownership marker in the same span.
+ */
+export function classifyLinkContext(quote: string | null): FirstStepLinkContextClass {
+  if (typeof quote !== 'string' || quote.trim().length < 2) return 'unknown';
+  if (THIRD_PARTY_MARKERS.test(quote)) return 'third_party';
+  if (OWNERSHIP_MARKERS.test(quote)) return 'ownership';
+  return 'unknown';
+}
+
+/**
+ * Role of one observed link, anchored to the observed extraction context and
+ * the observed source page. `link_only`/unknown context stays a candidate;
+ * ordinary mentions never become ownership even on a profile page.
+ */
+export function linkRoleFromContext(input: {
+  quote: string | null;
+  sourceIsOwnProfilePage: boolean;
+  sourceIsDirectory: boolean;
+}): { role: FirstStepLinkRole; retrieval: 'read' | 'link_only' } {
+  const context = classifyLinkContext(input.quote);
+  if (context === 'third_party') return { role: 'prose_mention', retrieval: 'read' };
+  if (context === 'unknown') return { role: 'unknown_role', retrieval: 'link_only' };
+  if (input.sourceIsDirectory) return { role: 'explicit_directory', retrieval: 'read' };
+  if (input.sourceIsOwnProfilePage) return { role: 'self_account_section', retrieval: 'read' };
+  return { role: 'unknown_role', retrieval: 'link_only' };
+}
+
+export type FirstStepIdentityBasis =
+  | 'explicit_self_link'
+  | 'explicit_directory_link'
+  | 'explicit_claim'
+  | 'mutual_link'
+  | 'shared_handle'
+  | 'shared_avatar'
+  | 'name_similarity'
+  | 'search_index'
+  | 'explicit_denial'
+  | 'none';
+
+export interface FirstStepIdentityAssessment {
+  accountKey: string;
+  state: IdentitySupportState;
+  /** Strongest observed basis; the presentation label derives from it. */
+  basis: FirstStepIdentityBasis;
+  /** Observation ids counted as identity support (role-checked, read only). */
+  supportObservationIds: string[];
+  /** Observation ids counted as identity counterevidence. */
+  counterevidenceObservationIds: string[];
+  /** Distinct source ids among the supports; same source never counts twice. */
+  independentSources: number;
+  /** Weak candidate observations (handle/avatar/name/index similarity). */
+  candidateObservationIds: string[];
+  conflicts: string[];
+}
+
+function hasStoredQuote(observation: FirstStepLinkObservation): boolean {
+  return typeof observation.quote === 'string' && observation.quote.trim().length >= 2;
+}
+
+const DENIAL_MARKERS = /不是|否认|并非|不是我|与[^。.]{0,12}无关|不相关|非本人|冒充|假账号|山寨|impersonat|\bnot me\b|\bnot my\b|\bnot affiliated\b|\bno affiliation\b|\bdenies\b|\bdispute[sd]?\b|\bfake\b|\bscam\b/i;
+
+/**
+ * An explicit denial needs actual negative association text with the target;
+ * an ordinary mention can never become a denial (and a denial can never be
+ * fabricated from role labels or ordinary prose).
+ */
+export function isExplicitDenialQuote(quote: string | null, targetUrl: string | null = null): boolean {
+  if (typeof quote !== 'string' || quote.trim().length < 2) return false;
+  if (targetUrl !== null && !quote.includes(targetUrl) && !quote.includes(targetUrl.replace(/\/+$/, ''))) return false;
+  return DENIAL_MARKERS.test(quote);
+}
+
+function basisOf(observation: FirstStepLinkObservation): FirstStepIdentityBasis {
+  // A search snippet is never an original: indexed claims AND indexed denials
+  // can never be promoted to original evidence.
+  if (observation.retrieval === 'indexed') return 'search_index';
+  // A link without readable context stays a candidate with no basis at all.
+  if (observation.retrieval === 'link_only') return 'none';
+  // Denials and explicit associations need actually stored quoted text read
+  // from the original page; a role label alone invents nothing, and one
+  // observed direction never counts as both pages mutually linking.
+  if (observation.linkRole === 'explicit_denial') {
+    // The observation record binds the quote to its target; a denial still
+    // needs actual negative association text.
+    return hasStoredQuote(observation) && isExplicitDenialQuote(observation.quote) ? 'explicit_denial' : 'none';
+  }
+  switch (observation.linkRole) {
+    case 'self_account_section':
+      return observation.direction === 'outbound' && hasStoredQuote(observation) ? 'explicit_self_link' : 'none';
+    case 'explicit_directory':
+      return observation.direction === 'outbound' && hasStoredQuote(observation) ? 'explicit_directory_link' : 'none';
+    case 'explicit_claim':
+      return hasStoredQuote(observation) ? 'explicit_claim' : 'none';
+    default:
+      return 'none';
+  }
+}
+
+const SUPPORTING_BASES: ReadonlySet<FirstStepIdentityBasis> = new Set([
+  'explicit_self_link',
+  'explicit_directory_link',
+  'explicit_claim'
+]);
+
+/**
+ * Identity-link assessment for one account. Only explicit, role-correct
+ * associations actually read from a source support identity; shared handle,
+ * avatar or name similarity and search-index snippets stay candidates.
+ */
+export function assessIdentityLink(
+  accountKey: string,
+  observations: readonly FirstStepLinkObservation[]
+): FirstStepIdentityAssessment {
+  const relevant = observations.filter((o) => o.targetAccountKey === accountKey);
+  const support: string[] = [];
+  const counterevidence: string[] = [];
+  const candidates: string[] = [];
+  const conflicts: string[] = [];
+  // Independence groups by the SOURCE ACCOUNT/owner of the observed page (a
+  // third-party page without an owning account groups by its source id): two
+  // pages of one source account are one basis, never two independent sources.
+  const supportSources = new Set<string>();
+  const groupOf = (o: FirstStepLinkObservation): string =>
+    o.fromAccountKey !== null ? `account:${o.fromAccountKey}` : `source:${o.sourceId}`;
+  let strongest: FirstStepIdentityBasis = 'none';
+  for (const observation of relevant) {
+    const basis = basisOf(observation);
+    if (basis === 'explicit_denial') {
+      counterevidence.push(observation.observationId);
+      continue;
+    }
+    if (SUPPORTING_BASES.has(basis)) {
+      supportSources.add(groupOf(observation));
+      support.push(observation.observationId);
+      if (strongest === 'none' || strongest === 'mutual_link') strongest = basis;
+      continue;
+    }
+    candidates.push(observation.observationId);
+    if (strongest === 'none') strongest = basis;
+    if (basis === 'shared_handle' || basis === 'shared_avatar' || basis === 'name_similarity') {
+      conflicts.push(`观察 ${observation.observationId} 只有相似线索（${basis}），不能作为身份依据。`);
+    }
+  }
+  let state: IdentitySupportState = 'proposed';
+  if (counterevidence.length > 0 && support.length > 0) state = 'disputed';
+  else if (counterevidence.length > 0) state = 'rejected';
+  else if (support.length > 0 && supportSources.size >= 1) state = 'supported';
+  return {
+    accountKey,
+    state,
+    basis: strongest,
+    supportObservationIds: support,
+    counterevidenceObservationIds: counterevidence,
+    independentSources: supportSources.size,
+    candidateObservationIds: candidates,
+    conflicts
+  };
+}
+
+export const FIRST_STEP_BASIS_LABELS: Record<FirstStepIdentityBasis, string> = {
+  explicit_self_link: '本人公开页面明确链接',
+  explicit_directory_link: '公开链接目录明确列出',
+  explicit_claim: '原文明确声明关联',
+  mutual_link: '双方页面互链',
+  shared_handle: '仅有相同 handle 线索',
+  shared_avatar: '仅有相同头像线索',
+  name_similarity: '仅有名字相似线索',
+  search_index: '仅搜索索引可见',
+  explicit_denial: '原文明确否认关联',
+  none: '没有可核对的归属依据'
+};
+
+/* ------------------------------------------------------------------ */
+/* Default suggestions                                                 */
+/* ------------------------------------------------------------------ */
+
+export interface FirstStepSuggestionPolicy {
+  /** Organizations/fan pages never get a default person suggestion. */
+  allowAccountKinds: ReadonlyArray<FirstStepAccountKind>;
+  policyVersion: string;
+}
+
+export const FIRST_STEP_SUGGESTION_POLICY: FirstStepSuggestionPolicy = {
+  allowAccountKinds: ['person', 'publication', 'channel'],
+  policyVersion: FIRST_STEP_POLICY_VERSION
+};
+
+export interface FirstStepSuggestion {
+  suggested: boolean;
+  reason: string;
+}
+
+/**
+ * Default checkbox suggestion. Only a supported account with actual source
+ * receipts, no conflict and an allowed account kind may be pre-checked. The
+ * user's persisted selection stays `unanswered` until they submit.
+ */
+export function firstStepDefaultSuggestion(
+  assessment: FirstStepIdentityAssessment,
+  accountKind: FirstStepAccountKind,
+  access: { readable: boolean; note: string | null },
+  policy: FirstStepSuggestionPolicy = FIRST_STEP_SUGGESTION_POLICY
+): FirstStepSuggestion {
+  if (assessment.state === 'disputed' || assessment.state === 'rejected' || assessment.state === 'revoked') {
+    return { suggested: false, reason: '存在冲突或否认依据，不形成勾选建议。' };
+  }
+  if (assessment.state !== 'supported') {
+    return { suggested: false, reason: '归属线索不足，默认不勾选。' };
+  }
+  if (assessment.supportObservationIds.length === 0) {
+    return { suggested: false, reason: '支持状态缺少实际来源依据，默认不勾选。' };
+  }
+  if (!policy.allowAccountKinds.includes(accountKind)) {
+    return { suggested: false, reason: '组织/第三方账号不作为本人研究的默认勾选。' };
+  }
+  // Access limits are shown honestly and never prove or disprove identity.
+  return {
+    suggested: true,
+    reason: access.readable
+      ? '归属依据完整且无冲突，建议纳入研究范围。'
+      : `归属依据完整且无冲突；访问受限（${access.note ?? '受限'}）不影响归属判断。`
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Evidence projection                                                 */
+/* ------------------------------------------------------------------ */
+
+export interface FirstStepEvidenceView {
+  evidenceId: string;
+  /** Real case source id + revision; never invented by the projection. */
+  sourceId: string;
+  sourceRevision: number;
+  /** Authoritative source-revision metadata for inspection. */
+  sourceUrl: string;
+  sourceTitle: string;
+  sourceLocator: string | null;
+  sourceRetrievedAt: string;
+  role: 'identity_support' | 'identity_counterevidence';
+  /** Precise short supporting span exactly as stored. */
+  quote: string | null;
+  locator: string | null;
+  retrieval: FirstStepRetrieval;
+  /** Short human label of what this evidence shows. */
+  label: string;
+  /** Honest limitation of this evidence; never omitted. */
+  limitation: string;
+  observedAt: string;
+}
+
+export type FirstStepAccessLabel = '原文可读' | '仅索引可见' | '仅见链接' | '读取受限' | '尚未检查';
+
+export interface FirstStepAccountView {
+  accountId: string;
+  caseId: string;
+  accountKey: string;
+  platform: string;
+  platformLabel: string;
+  displayName: string | null;
+  handle: string | null;
+  instance: string | null;
+  profileUrl: string | null;
+  category: FirstStepAccountCategory;
+  materialUse: FirstStepMaterialUse;
+  accountKind: FirstStepAccountKind;
+  identity: {
+    state: IdentitySupportState;
+    basis: FirstStepIdentityBasis;
+    basisLabel: string;
+    evidence: FirstStepEvidenceView[];
+    counterevidence: FirstStepEvidenceView[];
+    conflicts: string[];
+  };
+  /** Persisted facets, verbatim. A suggestion never lands here. */
+  userSelection: UserSelection;
+  allowedScope: AllowedScope;
+  researchValue: ResearchValue;
+  accessCoverage: AccessCoverage;
+  /** What researching this account can reveal (a value claim, not a fact). */
+  researchSummary: string;
+  accessLabel: FirstStepAccessLabel;
+  defaultSuggestion: FirstStepSuggestion;
+  /** True for accounts kept out of same-person conclusions. */
+  requiresIndependentScope: boolean;
+}
+
+export interface FirstStepPersonAtomView {
+  atomId: string;
+  statement: string;
+  /** Evidence ids with role identity_support or factual provenance slots. */
+  evidenceIds: string[];
+}
+
+export interface FirstStepPersonClusterView {
+  clusterId: string;
+  displayName: string;
+  anchorUrl: string | null;
+  anchorLabel: string;
+  leads: FirstStepPersonAtomView[];
+  conflicts: string[];
+  accountIds: string[];
+}
+
+export type FirstStepRouteState =
+  | 'planned'
+  | 'running'
+  | 'found'
+  | 'not_found'
+  | 'no_clue'
+  | 'unsupported'
+  | 'no_adapter'
+  | 'access_limited'
+  | 'rate_limited'
+  | 'timeout'
+  | 'deferred'
+  | 'skipped_budget'
+  | 'unknown';
+
+export interface FirstStepRouteStatusView {
+  routeId: string;
+  platform: string;
+  platformLabel: string;
+  materialUse: FirstStepMaterialUse;
+  state: FirstStepRouteState;
+  note: string | null;
+  /** Real request receipt keys for this route; empty = nothing was requested. */
+  receiptKeys: string[];
+}
+
+export interface FirstStepReceiptView {
+  requestKey: string;
+  kind: 'search' | 'profile_read' | 'model';
+  state: 'inflight' | 'completed' | 'failed';
+  /** indexed = search result; read = fetched original; link_only = link seen. */
+  retrieval: FirstStepRetrieval;
+  target: string;
+  observedAt: string;
+  estimatedUsd: number | null;
+  unknownCost: boolean;
+}
+
+export type FirstStepPhase =
+  | 'freezing'
+  | 'finding_home'
+  | 'expanding_accounts'
+  | 'verifying_attribution'
+  | 'ready_for_choice'
+  | 'awaiting_selection'
+  | 'fetching'
+  | 'done'
+  | 'blocked'
+  | 'cancelled';
+
+export interface FirstStepSelectionStateView {
+  /**
+   * Authoritative CURRENT CaseStore scope version. Before submission this is
+   * the live version the selection must echo; it is never a hidden zero.
+   */
+  scopeVersion: number;
+  /** Frozen scope version of a submitted selection; null before submission. */
+  frozenScopeVersion: number | null;
+  submitted: boolean;
+  submittedAt: string | null;
+  selectedAccountIds: string[];
+  excludedAccountIds: string[];
+}
+
+export interface FirstStepDiscoveryView {
+  schemaVersion: typeof FIRST_STEP_SCHEMA_VERSION;
+  runId: string;
+  caseId: string;
+  discoveryRevision: number;
+  inputRevision: number;
+  registryVersion: string;
+  /** Bound catalog content hash; null when no catalog snapshot was bound. */
+  catalogHash: string | null;
+  policyVersion: string;
+  phase: FirstStepPhase;
+  stopReason: string | null;
+  readyForChoice: boolean;
+  input: FirstStepInput;
+  clusters: FirstStepPersonClusterView[];
+  accounts: FirstStepAccountView[];
+  routes: FirstStepRouteStatusView[];
+  gaps: string[];
+  receipts: FirstStepReceiptView[];
+  budget: {
+    toolCalls: number;
+    modelCalls: number;
+    estimatedUsd: number;
+    unknownCost: boolean;
+  };
+  selection: FirstStepSelectionStateView;
+  updatedAt: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Frozen initial obligations                                          */
+/* ------------------------------------------------------------------ */
+
+export interface FirstStepRouteObligation {
+  routeId: string;
+  platform: string;
+  platformLabel: string;
+  materialUse: FirstStepMaterialUse;
+  /** `initial_wave` is frozen before any IO; later routes need a real clue. */
+  trigger: 'initial_wave' | 'anchor_expansion' | 'manual_hint';
+  requires: 'search' | 'profile_read';
+  /** `catalog` obligations come from the bound platform catalog snapshot. */
+  source: 'generic' | 'catalog';
+  /** Honest initial status before any observation: never fake success. */
+  initialState: FirstStepRouteState;
+  note: string;
+}
+
+export interface FirstStepBudgetPolicy {
+  maxSearchQueries: number;
+  maxSearchResults: number;
+  maxProfileReads: number;
+  maxModelCalls: number;
+  policyVersion: string;
+}
+
+export const FIRST_STEP_DEFAULT_BUDGET: FirstStepBudgetPolicy = {
+  maxSearchQueries: 6,
+  maxSearchResults: 12,
+  maxProfileReads: 8,
+  maxModelCalls: 2,
+  policyVersion: FIRST_STEP_POLICY_VERSION
+};
+
+/** Deliberate query families covering home/work/writing/social/academic/video. */
+export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: 'home' | 'work' | 'writing' | 'social' | 'academic' | 'video'; build: (value: string) => string }> = [
+  { family: 'home', build: (value) => `${value}` },
+  { family: 'work', build: (value) => `${value} works projects` },
+  { family: 'writing', build: (value) => `${value} blog newsletter` },
+  { family: 'social', build: (value) => `${value} social profile` },
+  { family: 'academic', build: (value) => `${value} scholar publications` },
+  { family: 'video', build: (value) => `${value} video channel` }
+];
+
+/**
+ * Frozen query plan: deliberate coverage per family first, then ACTUAL
+ * observed alias expansion with the remaining budget. No guessed usernames,
+ * no human-gold seeding.
+ */
+export function firstStepQueryPlan(
+  input: FirstStepInput,
+  budget: FirstStepBudgetPolicy,
+  observedAliases: readonly string[] = []
+): Array<{ query: string; family: string }> {
+  const value = input.value.trim();
+  if (value.length === 0) return [];
+  const plan: Array<{ query: string; family: string }> = [];
+  const max = budget.maxSearchQueries > 0 ? budget.maxSearchQueries : 0;
+  if (max === 0) return plan;
+  const families = input.kind === 'name_query' ? FIRST_STEP_QUERY_FAMILIES : FIRST_STEP_QUERY_FAMILIES.slice(0, 1);
+  for (const entry of families) {
+    if (plan.length >= max) break;
+    const query = entry.build(value);
+    if (!plan.some((item) => item.query === query)) plan.push({ query, family: entry.family });
+  }
+  for (const alias of observedAliases) {
+    if (plan.length >= max) break;
+    const trimmed = alias.trim();
+    if (trimmed.length < 2 || trimmed.length > 120) continue;
+    const query = `${trimmed} public profile`;
+    if (!plan.some((item) => item.query === query)) plan.push({ query, family: 'alias' });
+  }
+  return plan;
+}
+
+export interface FirstStepFrozenPlan {
+  frozenAt: string;
+  input: FirstStepInput;
+  registryVersion: string;
+  /** `sha256:<hex>` of the bound catalog content; null when no catalog. */
+  contentHash: string | null;
+  policyVersion: string;
+  budget: FirstStepBudgetPolicy;
+  obligations: FirstStepRouteObligation[];
+}
+
+/**
+ * Freeze the initial obligation set before any IO. The initial wave covers the
+ * anchor, technical-work and expression/writing routes that already have
+ * tooling; academic/video routes are declared and stay explicitly deferred
+ * until a real clue or adapter exists — never silently completed. Nothing here
+ * enumerates the whole platform catalog.
+ */
+export function freezeFirstStepObligations(
+  input: FirstStepInput,
+  options: {
+    registryVersion: string;
+    contentHash?: string | null;
+    budget?: FirstStepBudgetPolicy;
+    now?: string;
+    extraRoutes?: FirstStepRouteObligation[];
+  }
+): FirstStepFrozenPlan {
+  const budget = options.budget ?? FIRST_STEP_DEFAULT_BUDGET;
+  const obligations: FirstStepRouteObligation[] = [
+    {
+      routeId: 'web-search',
+      platform: 'web_search',
+      platformLabel: '公开网页检索',
+      materialUse: 'identity_anchor',
+      trigger: 'initial_wave',
+      requires: 'search',
+      source: 'generic',
+      initialState: 'planned',
+      note: '按姓名或实际观察别名做普通网页检索；不从姓名拼用户名。'
+    },
+    {
+      routeId: 'anchor-home',
+      platform: 'personal_site',
+      platformLabel: '个人站 / 机构资料',
+      materialUse: 'identity_anchor',
+      trigger: 'initial_wave',
+      requires: 'profile_read',
+      source: 'generic',
+      initialState: 'planned',
+      note: '读取公开身份所需的最小原文与实际外链。'
+    },
+    {
+      routeId: 'work-github',
+      platform: 'github',
+      platformLabel: 'GitHub / 技术作品',
+      materialUse: 'technical_work',
+      trigger: 'initial_wave',
+      requires: 'search',
+      source: 'generic',
+      initialState: 'planned',
+      note: '从主页或已观察账号线索扩展；仓库与组织不自动成为本人账号。'
+    },
+    {
+      routeId: 'expression',
+      platform: 'x',
+      platformLabel: '公开表达',
+      materialUse: 'expression',
+      trigger: 'initial_wave',
+      requires: 'search',
+      source: 'generic',
+      initialState: 'planned',
+      note: '仅同 handle/头像只产生候选；受限照实显示。'
+    },
+    {
+      routeId: 'writing',
+      platform: 'substack',
+      platformLabel: '文章与通讯',
+      materialUse: 'writing',
+      trigger: 'initial_wave',
+      requires: 'search',
+      source: 'generic',
+      initialState: 'planned',
+      note: '账号、出版物与文章分开；同一平台多个账号都保留。'
+    },
+    {
+      routeId: 'academic',
+      platform: 'google_scholar',
+      platformLabel: '学术记录',
+      materialUse: 'academic',
+      trigger: 'initial_wave',
+      requires: 'search',
+      source: 'generic',
+      initialState: 'deferred',
+      note: '需要平台专属规则；无论文端点验收前按受支持范围如实受限。'
+    },
+    {
+      routeId: 'video-audio',
+      platform: 'youtube',
+      platformLabel: '视频与音频',
+      materialUse: 'video_audio',
+      trigger: 'initial_wave',
+      requires: 'search',
+      source: 'generic',
+      initialState: 'planned',
+      note: '区分本人频道、访谈嘉宾、转载与粉丝频道。'
+    },
+    ...(options.extraRoutes ?? [])
+  ];
+  return {
+    frozenAt: options.now ?? new Date().toISOString(),
+    input,
+    registryVersion: options.registryVersion,
+    contentHash: options.contentHash ?? null,
+    policyVersion: FIRST_STEP_POLICY_VERSION,
+    budget,
+    obligations
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Selection input                                                     */
+/* ------------------------------------------------------------------ */
+
+export type FirstStepAccountDecisionSelection = 'selected' | 'not_selected' | 'only_this_account' | 'unanswered';
+
+export interface FirstStepAccountDecision {
+  accountId: string;
+  /** Intent only; never evidence and never an identity upgrade. */
+  selection: FirstStepAccountDecisionSelection;
+  /** Explicit user statement "不是此人"; distinct from an unchecked box. */
+  excluded: boolean;
+  note?: string | null;
+}
+
+export interface FirstStepSelectionInput {
+  expectedRunRevision: number;
+  expectedScopeVersion: number;
+  discoveryRevision: number;
+  /** Selected person cluster; null = "都不是 / 独立账号范围". */
+  clusterId: string | null;
+  accounts: FirstStepAccountDecision[];
+}
+
+export type FirstStepSelectionValidation =
+  | { ok: true; input: FirstStepSelectionInput }
+  | { ok: false; error: string };
+
+function readInt(raw: unknown, field: string): number | null {
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) return null;
+  void field;
+  return raw;
+}
+
+/**
+ * Strict validation of one batch selection request. Every account must appear
+ * exactly once; mixed "exclude + select" decisions are rejected so a batch can
+ * never half-mean two things.
+ */
+export function validateFirstStepSelectionInput(raw: unknown): FirstStepSelectionValidation {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: '选择内容必须是对象。' };
+  }
+  const body = raw as Record<string, unknown>;
+  const expectedRunRevision = readInt(body.expectedRunRevision, 'expectedRunRevision');
+  const expectedScopeVersion = readInt(body.expectedScopeVersion, 'expectedScopeVersion');
+  const discoveryRevision = readInt(body.discoveryRevision, 'discoveryRevision');
+  if (expectedRunRevision === null || expectedScopeVersion === null || discoveryRevision === null) {
+    return { ok: false, error: '缺少合法的版本字段。' };
+  }
+  if (body.clusterId !== null && typeof body.clusterId !== 'string') {
+    return { ok: false, error: '人物选择无效。' };
+  }
+  // Malformed oversized identity is REJECTED, never silently truncated into a
+  // different cluster id.
+  if (typeof body.clusterId === 'string' && body.clusterId.length > 120) {
+    return { ok: false, error: '人物簇 id 过长或格式无效。' };
+  }
+  const clusterId = typeof body.clusterId === 'string' ? body.clusterId : null;
+  if (!Array.isArray(body.accounts)) return { ok: false, error: '缺少账号选择列表。' };
+  const seen = new Set<string>();
+  const accounts: FirstStepAccountDecision[] = [];
+  for (const item of body.accounts) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      return { ok: false, error: '账号选择项无效。' };
+    }
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.accountId !== 'string' || entry.accountId.length === 0 || entry.accountId.length > 120) {
+      return { ok: false, error: '账号 id 无效。' };
+    }
+    if (seen.has(entry.accountId)) return { ok: false, error: '同一账号不能出现两次。' };
+    seen.add(entry.accountId);
+    const selection = entry.selection;
+    if (
+      selection !== 'selected' &&
+      selection !== 'not_selected' &&
+      selection !== 'only_this_account' &&
+      selection !== 'unanswered'
+    ) {
+      return { ok: false, error: '账号选择状态无效。' };
+    }
+    if (entry.excluded !== undefined && typeof entry.excluded !== 'boolean') {
+      return { ok: false, error: '排除声明无效。' };
+    }
+    const excluded = entry.excluded === true;
+    if (excluded && selection === 'selected') {
+      return { ok: false, error: '排除声明与选择互相冲突。' };
+    }
+    const note = typeof entry.note === 'string' ? entry.note.slice(0, 500) : null;
+    accounts.push({ accountId: entry.accountId, selection, excluded, note });
+  }
+  return {
+    ok: true,
+    input: { expectedRunRevision, expectedScopeVersion, discoveryRevision, clusterId, accounts }
+  };
+}
+
+/**
+ * Per-account scope rule for one decision. Uncertain or disputed accounts can
+ * only be researched under an explicit independent scope (`only_this_account`)
+ * and never join same-person conclusions. The chosen cluster's anchor account
+ * is the person home the user just confirmed, so it may join the person scope
+ * as user intent (identity evidence is still never upgraded). A user selection
+ * never touches identity support.
+ */
+export function validateSelectionDecision(
+  account: Pick<FirstStepAccountView, 'accountId' | 'identity'>,
+  decision: FirstStepAccountDecision,
+  options?: { anchorAccountIds?: ReadonlySet<string> }
+): { ok: true; allowedScope: AllowedScope['state'] } | { ok: false; error: string } {
+  const state = account.identity.state;
+  if (decision.excluded && decision.selection === 'selected') {
+    return { ok: false, error: '排除声明与选择互相冲突。' };
+  }
+  if (decision.selection === 'unanswered' || decision.selection === 'not_selected') {
+    return { ok: true, allowedScope: 'none' };
+  }
+  if (state === 'rejected' || state === 'revoked') {
+    return { ok: false, error: '该账号的归属依据已被否定，不能加入研究范围。' };
+  }
+  if (decision.selection === 'only_this_account') {
+    // Independent account scope: researched alone, never merged into the
+    // person conclusions with the other selected accounts.
+    return { ok: true, allowedScope: 'public_history' };
+  }
+  if (state === 'supported' || options?.anchorAccountIds?.has(account.accountId) === true) {
+    return { ok: true, allowedScope: 'public_history' };
+  }
+  return {
+    ok: false,
+    error: '归属未定的账号只能以独立账号范围（only_this_account）研究，不能并入同一人物结论。'
+  };
+}
+
+/**
+ * Full-state decision batch: every account of the CURRENT discovery revision
+ * must appear exactly once. Omitted accounts can never silently preserve stale
+ * selections or exclusions.
+ */
+export function validateDecisionCompleteness(
+  accounts: ReadonlyArray<Pick<FirstStepAccountView, 'accountId'>>,
+  decisions: readonly FirstStepAccountDecision[]
+): { ok: true } | { ok: false; error: string } {
+  const expected = new Set(accounts.map((account) => account.accountId));
+  const seen = new Set<string>();
+  for (const decision of decisions) {
+    if (!expected.has(decision.accountId)) {
+      return { ok: false, error: `账号 ${decision.accountId} 不属于当前发现结果。` };
+    }
+    if (seen.has(decision.accountId)) {
+      return { ok: false, error: `账号 ${decision.accountId} 重复出现。` };
+    }
+    seen.add(decision.accountId);
+  }
+  for (const accountId of expected) {
+    if (!seen.has(accountId)) {
+      return { ok: false, error: `账号 ${accountId} 缺少明确决定；所有当前账号必须逐个表态。` };
+    }
+  }
+  return { ok: true };
+}
+
+export interface FirstStepClusterChoiceResult {
+  ok: boolean;
+  error?: string;
+  cluster: FirstStepPersonClusterView | null;
+  /** Same-person (cluster-joined) selections. */
+  joinedAccountIds: string[];
+  /** Explicit independent-account scopes, kept isolated from person claims. */
+  independentAccountIds: string[];
+}
+
+/**
+ * Bind the person cluster: a nonexistent cluster is rejected, `selected`
+ * accounts must all belong to the chosen cluster (no same-name cross-cluster
+ * merge), and with `clusterId: null` only explicit independent-account scopes
+ * are allowed. Independent accounts are returned separately so they stay
+ * isolated evidence through Fetch and reporting and are never labeled as the
+ * same person.
+ */
+export function validateClusterChoice(
+  clusters: readonly FirstStepPersonClusterView[],
+  accounts: ReadonlyArray<Pick<FirstStepAccountView, 'accountId'>>,
+  decisions: readonly FirstStepAccountDecision[],
+  clusterId: string | null
+): FirstStepClusterChoiceResult {
+  const accountIds = new Set(accounts.map((account) => account.accountId));
+  const joined = decisions.filter((decision) => decision.selection === 'selected');
+  const independent = decisions.filter((decision) => decision.selection === 'only_this_account');
+  for (const decision of [...joined, ...independent]) {
+    if (!accountIds.has(decision.accountId)) {
+      return { ok: false, error: `账号 ${decision.accountId} 不在当前候选内。`, cluster: null, joinedAccountIds: [], independentAccountIds: [] };
+    }
+  }
+  if (clusterId === null) {
+    if (joined.length > 0) {
+      return {
+        ok: false,
+        error: '没有选择人物簇时只能使用独立账号范围（only_this_account），不能并入同一人物结论。',
+        cluster: null,
+        joinedAccountIds: [],
+        independentAccountIds: []
+      };
+    }
+    return { ok: true, cluster: null, joinedAccountIds: [], independentAccountIds: independent.map((d) => d.accountId) };
+  }
+  const cluster = clusters.find((candidate) => candidate.clusterId === clusterId) ?? null;
+  if (!cluster) {
+    return { ok: false, error: `人物簇 ${clusterId} 不存在，请刷新后重新选择。`, cluster: null, joinedAccountIds: [], independentAccountIds: [] };
+  }
+  const members = new Set(cluster.accountIds);
+  for (const decision of joined) {
+    if (!members.has(decision.accountId)) {
+      return {
+        ok: false,
+        error: `账号 ${decision.accountId} 不属于所选人物簇；不同簇的账号不能因同名合并。`,
+        cluster,
+        joinedAccountIds: [],
+        independentAccountIds: []
+      };
+    }
+  }
+  return {
+    ok: true,
+    cluster,
+    joinedAccountIds: joined.map((d) => d.accountId),
+    independentAccountIds: independent.map((d) => d.accountId)
+  };
+}

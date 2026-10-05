@@ -40,46 +40,46 @@
 
 **Produces:** 上述 shared types；账号保守键、真实证据投影及默认建议规则。
 
-- [ ] 写 `first-step-discovery.test.ts`：主页根路径、About、GitHub、X、YouTube @/channel-ID、Substack 出版物、Mastodon 实例、Scholar user、同平台多账号与不安全 URL。
-- [ ] 运行目标测试观察缺失新契约的失败。
-- [ ] 实现身份/平台归一与证据规则：只有实际来源中的明确、角色正确的关联可支持归属；同名/handle/头像只候选；搜索索引不当原文；同源不算独立证据。
-- [ ] 验证测试通过；原始证据与冲突保留，不靠丢候选通过。
-- [ ] 提交完整共享契约与规则。
+- [x] 写 `first-step-discovery.test.ts`：主页根路径、About、GitHub、X、YouTube @/channel-ID、Substack 出版物、Mastodon 实例、Scholar user、同平台多账号与不安全 URL。
+- [x] 运行目标测试观察缺失新契约的失败。
+- [x] 实现身份/平台归一与证据规则：只有实际来源中的明确、角色正确的关联可支持归属；同名/handle/头像只候选；搜索索引不当原文；同源不算独立证据。
+- [x] 验证测试通过；原始证据与冲突保留，不靠丢候选通过。
+- [x] 共享契约与规则完整落库（提交由父级负责）。
 
 ### Task 2: 可持久化 Search 与实际 Web 接线
 
 **Consumes:** Task 1 投影与验证。
 **Produces:** `discoverFirstStep(context)`；新 production run 的第一步 checkpoint、真实回执、人物簇与逐平台路线状态。
 
-- [ ] 写协调器合成回归：姓名不得因第一条 LinkedIn 就暂停；个人站自链扩展出多个材料类型；一个平台失败不掩盖其它成功；同名簇分开；URL 输入进入范围确认。
-- [ ] 运行回归看到旧单次搜索行为失败。
-- [ ] 实现初始宽召回与自链扩展、受限 Search 模型决策与服务端支撑校验；适用完整目录义务保留，缺适配器/访问/线索明示，不盲扫 4421 条规则。
-- [ ] 接入现有工具预算/尝试账本、取消、重启、来源回执与阶段事件；新生产 run 默认启用，旧 checkpoint 与冻结 replay 保留旧版本语义，旧 paused 可显式 expand 新修订。
-- [ ] 扩展 toolkit 搜索可配置结果数（历史请求默认 5 不变）；Search 仅读取身份所需资料，不启动帖子深读。URL 分类不再依赖旧白名单误丢候选；真实请求失败保留 unknown/blocked。
-- [ ] 运行目标测试、typecheck 并提交。
+- [x] 写协调器合成回归（first-step-search.test.ts）：姓名不得因第一条 LinkedIn 就暂停；个人站自链扩展出多个材料类型；一个平台失败不掩盖其它成功；同名簇分开；URL 输入进入范围确认。
+- [x] 运行回归看到旧单次搜索行为失败。
+- [x] 实现初始宽召回与自链扩展、受限 Search 模型决策与服务端支撑校验；适用完整目录义务保留，缺适配器/访问/线索明示，不盲扫 4421 条规则。
+- [x] 接入现有工具预算/尝试账本、取消、重启、来源回执与阶段事件；新生产 run 默认启用，旧 checkpoint 与冻结 replay 保留旧版本语义，旧 paused 可显式 expand 新修订。
+- [x] 扩展 toolkit 搜索可配置结果数（历史请求默认 5 不变）；Search 仅读取身份所需资料，不启动帖子深读。URL 分类不再依赖旧白名单误丢候选；真实请求失败保留 unknown/blocked。
+- [x] 运行目标测试、typecheck（提交由父级负责）。
 
 ### Task 3: 原子选择与 Fetch 范围约束
 
 **Consumes:** Task 2 的 current discoveryRevision 与真实 CaseStore 账号。
 **Produces:** 版本绑定的批量选择、选定 ScopeVersion 及受范围约束的 Fetch 入口。
 
-- [ ] 写 `first-step-selection.test.ts` 与 `first-step-scope.test.ts`：跨 owner、外来账号、旧 run/scope/discovery 修订、重复/冲突幂等键、零选择、整批回滚、选择不升级支持、排除后零深读。
-- [ ] 运行测试观察旧 resume 单链接无法表达上述事务。
-- [ ] 实现 selection route：同一个数据库事务验证所有版本/账号、调用 CaseStore 范围原子变更、绑定 checkpoint 与 run 状态；提交失败不推进。明确用户排除声明与取消勾选不同。
-- [ ] 实现手工线索/expand 新发现尝试；不能伪装已有回执为新发现。新候选保持 unanswered，新增范围需显式提交。
-- [ ] 每次 Fetch 派发/提交检查当前 ScopeVersion 与权限；未选账号或新关联账号不自动深读/混入人物结论。归属未定的选定账号只走明确独立范围；若现有 Fetch 无法可靠隔离，则明确阻止同人混合并给可执行路径，不能默默当同人。
-- [ ] 验证刷新/重启、取消与迟到结果的失效；更新同一 canonical 导出投影并提交。
+- [x] 写 `first-step-selection.test.ts` 与 `first-step-scope.test.ts`：跨 owner、外来账号、旧 run/scope/discovery 修订、重复/冲突幂等键、零选择、整批回滚、选择不升级支持、排除后零深读。
+- [x] 运行测试观察旧 resume 单链接无法表达上述事务。
+- [x] 实现 selection route：同一个数据库事务验证所有版本/账号、调用 CaseStore 范围原子变更、绑定 checkpoint 与 run 状态；提交失败不推进。明确用户排除声明与取消勾选不同。
+- [x] 实现手工线索/expand 新发现尝试；不能伪装已有回执为新发现。新候选保持 unanswered，新增范围需显式提交。
+- [x] 每次 Fetch 派发/提交检查当前 ScopeVersion 与权限；未选账号或新关联账号不自动深读/混入人物结论。归属未定的选定账号只走明确独立范围；若现有 Fetch 无法可靠隔离，则明确阻止同人混合并给可执行路径，不能默默当同人。
+- [x] 验证刷新/重启、取消与迟到结果的失效（离线测试）。
 
 ### Task 4: 真实页面的视觉与交互
 
 **Consumes:** `GET discovery` 权威投影、Task 3 selection/expand 响应。
 **Produces:** 同一页完整第一步；真实 SSE 状态与可恢复草稿。
 
-- [ ] 写 `first-step-ui.test.ts`：建议不写 userSelection、checkbox 与证据按钮分离、排除撤销不自动选中、同名切换不漏旧范围、SSE 不覆盖草稿、错误与保存中状态、零选择禁用。
-- [ ] 实现真实人物摘要、用途分组账号卡、证据/反证面板、发现状态、次要补线索入口与唯一主按钮。
-- [ ] 复用既有绿色品牌、系统字体、清楚层级与克制动效；360px 单列、桌面两区、200% 缩放、键盘焦点、减少动态效果。移除重复 URL 和与当前阶段无关的报告操作/追问噪声；不改全站无关界面。
-- [ ] 运行 UI 测试、完整 Web test/typecheck/build、静态 design 检查和冻结 replay；只修真实回归，冻结标签不变。
-- [ ] 提交实现与能力/失败边界说明。
+- [x] 写 `first-step-ui.test.ts`（真实 GET/POST 集成 + 草稿/SSE）：建议不写 userSelection、checkbox 与证据按钮分离、排除撤销不自动选中、同名切换不漏旧范围、SSE 不覆盖草稿、错误与保存中状态、零选择禁用。
+- [x] 实现真实人物摘要、用途分组账号卡、证据/反证面板、发现状态、次要补线索入口与唯一主按钮。
+- [x] 复用既有绿色品牌、系统字体、清楚层级与克制动效；360px 单列、桌面两区、200% 缩放、键盘焦点、减少动态效果。移除重复 URL 和与当前阶段无关的报告操作/追问噪声；不改全站无关界面。
+- [x] 运行 UI 测试、完整 Web test/typecheck/build、静态 design 检查和冻结 replay；只修真实回归，冻结标签不变。
+- [x] 实现与能力/失败边界说明（本执行记录）。
 
 ### Task 5: 独立验收、真实 Agent 与运行服务
 
@@ -102,4 +102,6 @@
 
 ## 执行记录
 
+- 2026-10-05（MiMo 实现批）：Tasks 1–4 已实现并离线验证：`shared/first-step-discovery.ts`（分类/保守账号键/证据规则/完整批次与人物簇绑定验证）、`server/research/first-step-discovery.ts`（冻结目录义务、宽召回、真实自链扩展、受限模型角色与服务端核验）、`server/research/first-step-store.ts`（原子版本绑定选择、排除声明、按归属拒绝链接授权的 Fetch 范围守卫）、`server/routes/first-step.ts`、runner/路由接线（新研究默认第一步、旧 paused 显式 expand 生成新修订、终态回写阶段）、`client/first-step.ts`（草稿保留的受控渲染、证据面板、一次提交）+ API/样式。离线验证：754 项测试通过（含 first-step-discovery/selection/scope/search/ui 与 research-api 集成）、typecheck/build/check_design/eval:research 通过，独立合成校验 coordinator 14、classifier 13、selection/scope 6、content-scope 9 全过。真实浏览器/真机验收与真实 Agent 评测属于 Task 5（父级）。
+- 2026-10-05（MiMo 追加修复批）：四项集成 P1 已修：(1) Fetch 阶段所选账号初始读取经动作账本计量（同尝试已完成回执原样重放、未知 inflight 不重放、失败保留为真实缺口）；(2) 第一步 Fetch 只把未决 inflight 当阻断，已结算失败回执是可查缺口，冻结回放/旧控制器门槛不变；(3) 操作员 researchLimits 在发现/预读/控制器全程绑定（checkpoint 不再写零覆盖），预算耗尽一次即停、不重试；(4) followup 必须有已冻结范围的属主父研究，子研究继承实际冻结范围/独立账号切面/父级排除联动，孤儿 followup 标志不能绕过第一步。离线验证：763 项测试 762 过（1 skip），typecheck/build/check_design/eval:research（11/11）通过；六套独立合成校验 52/52 + runner person 8/8；ceiling=1 场景满足 <=1 次真实调用（其余候选数量断言在该受限场景按约定失败）。
 - 2026-10-05：用户已明确授权完整实现和全链路测试，保留既定 Pi/MiMo 执行方式；不再增加同一工作的重复审批。

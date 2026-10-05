@@ -3,12 +3,18 @@ import { createDshPlanner, type ResearchPlanner } from '../research/planner.js';
 import type { ResearchTools } from '../research/tool-contracts.js';
 import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState, NeedsInputError } from '../../shared/types.js';
-import type { ProviderName, RunState } from '../../shared/types.js';
+import type { ProviderName, RunState, ProviderResult } from '../../shared/types.js';
 import { ProviderError } from '../adapters/types.js';
+import { ResearchStop } from '../research/research-store.js';
 import type { HttpTransport, ProviderFactory, ProviderReporter, ResearchProvider } from '../adapters/types.js';
 import type { AppConfig } from '../config.js';
 import { RunTerminalError, Store, nowIso } from '../store.js';
 import type { RunRecord } from '../store.js';
+import { FirstStepStore } from '../research/first-step-store.js';
+import { createFirstStepCheckedSearch, createFirstStepProposalModel, discoverFirstStep } from '../research/first-step-discovery.js';
+import type { FirstStepCheckedSearch } from '../research/first-step-discovery.js';
+import { classifyFirstStepUrl, FIRST_STEP_DEFAULT_BUDGET } from '../../shared/first-step-discovery.js';
+import type { PlatformCatalogSnapshot } from '../../shared/platform-catalog.js';
 
 export interface StartGate {
   allowed: boolean;
@@ -24,6 +30,10 @@ export interface RunnerDeps {
   now?: () => number;
   researchTools?: ResearchTools;
   researchPlanner?: ResearchPlanner;
+  /** First-step persistence; runs with a link use the new first-step flow. */
+  firstStep?: FirstStepStore;
+  /** Bound platform catalog for first-step obligation freezing. */
+  discoveryCatalog?: PlatformCatalogSnapshot | null;
 }
 
 interface ActiveJob {
@@ -118,6 +128,7 @@ export class Runner {
     if (!run) return false;
     const wasActive = !isTerminalState(run.state);
     this.deps.store.requestCancel(runId);
+    this.deps.firstStep?.setPhase(runId, 'cancelled');
     if (wasActive) {
       this.deps.store.addEvent(runId, 'state', { state: 'cancelled' satisfies RunState });
     }
@@ -207,6 +218,14 @@ export class Runner {
     const reporter = this.makeReporter(runId);
     const startedAt = this.now();
     try {
+      // First-step runs (fresh production default) drive discovery / scoped
+      // fetch here; the frozen controller path stays for historical jobs and
+      // the replay baselines.
+      const firstStepLink = initial.provider === 'research' && this.deps.firstStep ? this.deps.firstStep.link(runId) : null;
+      if (firstStepLink && this.deps.firstStep) {
+        await this.executeFirstStep(runId, initial, controller, startedAt);
+        return;
+      }
       const result = initial.provider === 'research' ? await runResearch({
         store: this.deps.store, run: initial, signal: controller.signal,
         tools: this.deps.researchTools ?? { async execute() { throw new ProviderError('provider_unavailable', '研究工具未配置。'); } },
@@ -233,7 +252,260 @@ export class Runner {
           maxBytes: LIMITS.providerMaxBytes
         }
       );
+      this.finishWithResult(runId, initial, result, startedAt);
+    } catch (error) {
+      this.handleFailure(runId, error, controller.signal.aborted);
+    }
+  }
+
+  /**
+   * The first-step job: no selection yet runs the Search discovery and waits
+   * for the one scope confirmation; a submitted selection runs the existing
+   * fetch loop inside the frozen, per-dispatch re-checked scope. Independent
+   * account material stays isolated from same-person claims.
+   */
+  private async executeFirstStep(runId: string, initial: RunRecord, controller: AbortController, startedAt: number): Promise<void> {
+    const firstStep = this.deps.firstStep as FirstStepStore;
+    const binding = firstStep.selectionBinding(runId);
+    const tools = this.deps.researchTools ?? {
+      async execute() {
+        throw new ProviderError('provider_unavailable', '研究工具未配置。');
+      }
+    };
+    if (!binding) {
+      const link = firstStep.link(runId)!;
+      const input = {
+        kind: (initial.seedUrl ? 'homepage_url' : 'name_query') as 'homepage_url' | 'name_query',
+        value: (link.hint ?? initial.seedUrl ?? initial.question).trim(),
+        question: initial.question
+      };
+      const search: FirstStepCheckedSearch = createFirstStepCheckedSearch({
+        tools,
+        store: this.deps.store,
+        runId,
+        attemptId: `input-${String(link.inputRevision)}`,
+        budget: FIRST_STEP_DEFAULT_BUDGET,
+        // The OPERATOR's real ceilings: discovery never raises configured caps.
+        limits: this.deps.config.researchLimits
+      });
+      await discoverFirstStep({
+        store: this.deps.store,
+        firstStep,
+        ownerId: initial.ownerId,
+        runId,
+        input,
+        search,
+        signal: controller.signal,
+        registryVersion: this.deps.discoveryCatalog?.registryVersion ?? 'catalog-unavailable',
+        catalog: this.deps.discoveryCatalog ?? null,
+        hint: link.hint,
+        // The restricted first-step model role runs on the PRODUCT model
+        // provider (same configured DeepSeek credential as research); metered
+        // through the checked ledger and fully server-verified.
+        propose:
+          this.deps.config.deepseekApiKey && this.deps.config.exaApiKey
+            ? createFirstStepProposalModel({
+                transport: this.deps.transport,
+                apiKey: String(this.deps.config.deepseekApiKey),
+                model: this.deps.config.deepseekModel ?? 'deepseek-flash'
+              })
+            : undefined
+      });
+      // Wait for the one scope confirmation; the projection carries the rest.
+      this.deps.store.updateRunIfActive(runId, {
+        state: 'needs_input',
+        revision: (this.deps.store.getRun(runId)?.revision ?? initial.revision) + 1,
+        identity_json: JSON.stringify({
+          displayName: '',
+          handle: null,
+          profileUrl: null,
+          status: 'needs_input',
+          note: '请在第一步确认人物与研究账号范围。',
+          candidates: []
+        }),
+        error_code: null,
+        error_message: null
+      });
+      this.deps.store.addEvent(runId, 'needs_input', { prompt: '请确认人物与研究账号范围。', firstStep: true });
+      this.deps.store.addEvent(runId, 'state', { state: 'needs_input' satisfies RunState });
+      return;
+    }
+    // Scope-limited fetch: every dispatch AND ingestion re-checks the live
+    // scope; excluded/unselected/later-discovered accounts are refused.
+    const guard = firstStep.scopeGuard(initial.ownerId, runId);
+    const independentAccountKeys = new Set(
+      Object.entries(binding.accountKeys)
+        .filter(([, accountId]) => binding.independentAccountIds.includes(accountId))
+        .map(([accountKey]) => accountKey)
+    );
+    const firstStepScope = {
+      independentAccountKeys,
+      accountKeyOf: (url: string): string | null => {
+        const classified = classifyFirstStepUrl(url);
+        return classified.ok ? classified.ref.accountKey : null;
+      }
+    };
+    const guardedTools: ResearchTools = {
+      async execute(action, signal) {
+        guard.assertDispatch(action);
+        const result = await tools.execute(action, signal);
+        guard.assertIngest(result.pages.map((page) => ({ url: page.url, links: page.links })));
+        return result;
+      }
+    };
+    const checkpoint = this.deps.store.research.checkpoint(runId);
+    if (checkpoint) {
+      // Never reintroduce legacy/unsolicited pages into the new model corpus:
+      // only material attributable to a frozen selected account stays.
+      const kept = checkpoint.pages.filter((page) => {
+        const key = firstStepScope.accountKeyOf(page.url);
+        return key !== null && binding.accountKeys[key] !== undefined;
+      });
+      if (kept.length !== checkpoint.pages.length) {
+        checkpoint.notes = [
+          ...new Set([
+            ...(checkpoint.notes ?? []),
+            `${String(checkpoint.pages.length - kept.length)} 个旧发现页面不属于已冻结范围，未带入本次人物结论语料；历史记录仍保留。`
+          ])
+        ];
+      }
+      checkpoint.pages = kept;
+      if (!checkpoint.identity && binding.anchorUrl) {
+        checkpoint.anchorUrl = binding.anchorUrl;
+      }
+      checkpoint.identity = {
+        displayName: binding.displayName ?? binding.anchorUrl ?? '',
+        handle: null,
+        profileUrl: binding.anchorUrl,
+        status: 'resolved',
+        note: '已按用户确认的人物范围绑定；跨平台身份仍按证据逐条判断。',
+        candidates: []
+      };
+      this.deps.store.research.save(runId, checkpoint);
+      // Schedule and ingest the initial eligible material for EVERY selected
+      // account (independent ones stay isolated own-account material) so the
+      // planner starts from the real frozen scope, not only the anchor. Every
+      // real read is METERED through the same action ledger and the operator's
+      // total budget: a same-attempt completed receipt replays its exact saved
+      // output without re-executing, unknown inflight is never replayed, and a
+      // failed read stays an honest gap instead of a silent retry.
+      const fetchLimits = this.deps.config.researchLimits;
+      const seedAttempt = `seed-${String(binding.discoveryRevision)}-${String(binding.scopeVersion)}`;
+      for (const account of binding.accounts) {
+        if (!account.profileUrl) continue;
+        const action: Parameters<ResearchTools['execute']>[0] = (() => {
+          const classified = classifyFirstStepUrl(account.profileUrl);
+          const platform = classified.ok ? classified.ref.platform : null;
+          if (platform === 'github') return { type: 'github_profile', url: account.profileUrl };
+          if (platform === 'x') return { type: 'social_profile', url: account.profileUrl };
+          return { type: 'read', url: account.profileUrl };
+        })();
+        const requestKey = `firststep:fetch:${seedAttempt}:${account.accountId}`;
+        let result: Awaited<ReturnType<ResearchTools['execute']>> | null = null;
+        try {
+          const old = this.deps.store.research.reserve(runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, fetchLimits);
+          if (old) {
+            if (old.state !== 'completed') {
+              // Known settled failure: kept inspectable, never re-executed.
+              checkpoint.unknowns.push(`所选账号初始读取曾失败，保留失败回执不重放：${account.profileUrl}`);
+              continue;
+            }
+            // Same-attempt recovery: reuse the exact saved output, no re-read.
+            result = old.result as Awaited<ReturnType<ResearchTools['execute']>>;
+          } else {
+            try {
+              result = await guardedTools.execute(action, controller.signal);
+              this.deps.store.research.settle(runId, requestKey, result, {
+                estimatedUsd: result.estimatedUsd,
+                credits: result.credits,
+                bytes: result.bytes,
+                unknownCost: result.estimatedUsd === null
+              });
+            } catch (error) {
+              try {
+                this.deps.store.research.settle(runId, requestKey, null, { estimatedUsd: null, unknownCost: true }, 'failed');
+              } catch { /* cancelled/deleted runs refuse late receipts */ }
+              throw error;
+            }
+          }
+        } catch (error) {
+          if (error instanceof ResearchStop && error.code === 'unknown_inflight') {
+            checkpoint.unknowns.push(`所选账号初始读取结果未知（不重放）：${account.profileUrl}`);
+            continue;
+          }
+          if (error instanceof ResearchStop && error.code === 'budget_exhausted') {
+            checkpoint.unknowns.push('操作员总预算上限已到，剩余所选账号初始材料未读取；缺口保留，不自动重试。');
+            break;
+          }
+          if (error instanceof ProviderError) {
+            // A failed initial read is a real gap for this account, not absence.
+            checkpoint.unknowns.push(`所选账号初始材料未读取成功（${error.code}）：${account.profileUrl}；不代表无资料。`);
+            continue;
+          }
+          throw error;
+        }
+        for (const page of result.pages) {
+            const url = page.url;
+            if (checkpoint.pages.some((existing) => existing.url === url)) continue;
+            const sourceKey = `S${String(checkpoint.pages.length + 1)}`;
+            checkpoint.pages.push({
+              sourceKey,
+              url,
+              title: page.title || url,
+              text: page.text,
+              kind: page.kind,
+              publishedAt: page.publishedAt ?? null,
+              author: page.author ?? null,
+              retrievedAt: new Date().toISOString(),
+              account: page.account,
+              links: page.links,
+              limitations: [
+                ...page.limitations,
+                account.independent ? '独立账号范围：该材料只作该账号自身记录，不并入同一人物结论。' : '用户已冻结范围内账号的初始材料。'
+              ],
+              retrieval: action.type === 'read' ? 'read' : 'profile',
+              textTruncated: page.textTruncated ?? false
+            });
+            this.deps.store.addSource(
+              runId,
+              {
+                key: sourceKey,
+                url,
+                title: page.title || url,
+                kind: page.kind,
+                publishedAt: page.publishedAt ?? null,
+                excerpt: page.text,
+                excerptLocator: '公开页面文本',
+                identityLabel: account.independent ? '独立账号范围：尚未证明与其他账号同人' : '用户所选范围内的账号',
+                identityConfirmed: false,
+                fetchStatus: page.text ? 'ok' : 'inaccessible',
+                limits: page.limitations
+              },
+              checkpoint.pages.length - 1
+            );
+          }
+      }
+      this.deps.store.research.save(runId, checkpoint);
+    }
+    const result = await runResearch({
+      store: this.deps.store,
+      run: initial,
+      signal: controller.signal,
+      tools: guardedTools,
+      planner: this.deps.researchPlanner ?? createDshPlanner(this.deps.config.deepseekModel),
+      transport: this.deps.transport,
+      deepseekApiKey: this.deps.config.deepseekApiKey,
+      limits: this.deps.config.researchLimits,
+      socialAvailable: Boolean(this.deps.config.tikhubApiKey),
+      firecrawlAvailable: Boolean(this.deps.config.firecrawlApiKey),
+      firstStepScope
+    });
+    this.finishWithResult(runId, initial, result, startedAt);
+  }
+
+  private finishWithResult(runId: string, initial: RunRecord, result: ProviderResult, startedAt: number): void {
       this.assertWritable(runId);
+      this.deps.firstStep?.setPhase(runId, 'done');
       // The provider result is the single source of truth; realtime source
       // events may have arrived during the run with transient fields.
       this.deps.store.replaceSources(runId, result.sources);
@@ -267,20 +539,19 @@ export class Runner {
       if (changes === 0) throw new RunTerminalError(runId);
       this.deps.store.addEvent(runId, 'answer', { sections: result.answer });
       this.deps.store.addEvent(runId, 'state', { state: result.state, stopReason: result.stopReason });
-    } catch (error) {
-      this.handleFailure(runId, error, controller.signal.aborted);
-    }
   }
 
   private handleFailure(runId: string, error: unknown, aborted: boolean): void {
     const run = this.deps.store.getRun(runId);
     if (!run || isTerminalState(run.state)) return;
     if (run.cancelRequested) {
+      this.deps.firstStep?.setPhase(runId, 'cancelled');
       this.deps.store.updateRun(runId, { state: 'cancelled', stop_reason: 'cancelled', finished_at: nowIso() });
       return;
     }
     if (error instanceof RunTerminalError) return;
     if (error instanceof NeedsInputError) {
+      this.deps.firstStep?.setPhase(runId, 'awaiting_selection');
       this.deps.store.updateRunIfActive(runId, {
         state: 'needs_input',
         revision: run.revision + 1,
@@ -311,6 +582,7 @@ export class Runner {
     const providerError = error instanceof ProviderError ? error : null;
     const code = providerError?.code ?? 'internal_error';
     const message = providerError?.message ?? '研究过程中出现错误。';
+    this.deps.firstStep?.setPhase(runId, 'blocked');
     this.deps.store.updateRunIfActive(runId, {
       state: 'failed',
       error_code: code,

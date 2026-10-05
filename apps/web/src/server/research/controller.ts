@@ -12,13 +12,20 @@ export interface ResearchOptions {
  store:Store;run:RunRecord;tools:ResearchTools;planner:ResearchPlanner;signal:AbortSignal;
  transport?:HttpTransport;deepseekApiKey?:string|null;socialAvailable?:boolean;firecrawlAvailable?:boolean;
  limits?:ResearchBudgetLimits;
+ /** First-step fetch scope: independent-account material never joins person claims. */
+ firstStepScope?:{independentAccountKeys:ReadonlySet<string>;accountKeyOf:(url:string)=>string|null};
 }
 function object(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value);}
 function digest(value:unknown):string{return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);}
 function candidateId(url:string):string{return 'candidate_'+digest(url);}
 /** Keep everything a tool supplied: only control characters are stripped. */
 function retainText(value:unknown):string{return sanitizeText(value,Number.MAX_SAFE_INTEGER);}
-function draft(page:StoredPage,anchor:string|null):SourceDraft{return {key:page.sourceKey,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,excerptLocator:page.retrieval==='search'?'搜索发现材料，尚未回读原文':'公开页面文本',identityLabel:page.url===anchor?'所选公开主页':'来源归属未独立验证',identityConfirmed:page.url===anchor,fetchStatus:page.text?'ok':'inaccessible',limits:[...page.limitations,...page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
+function draft(page:StoredPage,anchor:string|null,scope?:ResearchOptions['firstStepScope']):SourceDraft{
+ const key=scope?.accountKeyOf(page.url)??null;
+ const independent=!!(key&&scope?.independentAccountKeys.has(key));
+ return {key:page.sourceKey,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,excerptLocator:page.retrieval==='search'?'搜索发现材料，尚未回读原文':'公开页面文本',
+ identityLabel:independent?'独立账号范围：尚未证明与其他账号同人':page.url===anchor?'所选公开主页':'来源归属未独立验证',identityConfirmed:page.url===anchor&&!independent,fetchStatus:page.text?'ok':'inaccessible',
+ limits:[...page.limitations,...independent?['独立账号材料：只作该账号自身记录，不并入同一人物结论。']:page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
 
 export async function runResearch(options:ResearchOptions):Promise<ProviderResult>{
  const {store,run,tools,planner}=options;
@@ -71,7 +78,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     clean.links=[...new Set([...existing.links,...clean.links])];clean.limitations=existing.limitations;
    }
    if(existing)checkpoint.pages[checkpoint.pages.indexOf(existing)]=clean;else checkpoint.pages.push(clean);
-   store.addSource(run.id,draft(clean,checkpoint.anchorUrl),checkpoint.pages.indexOf(clean));
+   store.addSource(run.id,draft(clean,checkpoint.anchorUrl,options.firstStepScope),checkpoint.pages.indexOf(clean));
    store.addEvent(run.id,'source',store.getSource(run.id,clean.sourceKey));
   }
   checkpoint.notes=[...new Set([...(checkpoint.notes??[]),...result.limitations.map(v=>sanitizeText(v,500))])];
@@ -136,7 +143,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    ...scope.unresolved.length?[`还有 ${scope.unresolved.length} 项未解决记录（unresolved）；存在明确未解决项时不能称全平台或全部历史研究完成。`]:[]];
   const observations=claims.map(c=>({statement:c.statement,kind:c.kind,sourceKeys:[c.sourceKey],limitations:['来源原文摘录；身份归属与独立事实核实另行判断。']}));
   const budget=store.research.budget(run.id,limits);
-  return {state,identity:checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates},sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl)),observations,
+  return {state,identity:checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates},sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl,options.firstStepScope)),observations,
    answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
  };
  const verify=async():Promise<ProviderResult>=>{
@@ -181,7 +188,12 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  };
  try{
   active();
-  if(store.research.receipts(run.id).some(r=>r.state!=='completed'))return finish('unknown_inflight','partial');
+  // First-step fetch separates KNOWN settled discovery failures (inspectable
+  // gaps) from unresolved inflight actions: only unknown inflight blocks, and
+  // it is never replayed. Legacy/direct controller replay keeps the historical
+  // any-state-not-completed gate verbatim.
+  const blockingReceipts=store.research.receipts(run.id).filter(r=>options.firstStepScope?r.state==='inflight':r.state!=='completed');
+  if(blockingReceipts.length)return finish('unknown_inflight','partial');
   // A follow-up can reuse only the same owner's currently active evidence.
   if(!store.research.checkpoint(run.id)&&run.followup&&run.parentRunId){
    const parent=store.getRunForOwner(run.parentRunId,run.ownerId);
@@ -241,6 +253,16 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      const facet=raw.facet;
      if(facet!==undefined&&!RESEARCH_FACETS.some(f=>f.id===facet))throw new ResearchStop('invalid_evidence');
      return {sourceKey:raw.sourceKey,quote:raw.quote,statement,kind:kind as ResearchClaim['kind'],section:section as ResearchClaim['section'],...(facet?{facet:facet as ResearchFacet}:{})};
+    }).filter(claim=>{
+     // Independent first-step account material is retained as sources but can
+     // never become a claim about the selected person.
+     const page=activePages.find(p=>p.sourceKey===claim.sourceKey);
+     const key=page?(options.firstStepScope?.accountKeyOf(page.url)??null):null;
+     if(key&&options.firstStepScope?.independentAccountKeys.has(key)){
+      checkpoint.notes=[...new Set([...(checkpoint.notes??[]),`独立账号材料（未并入人物结论）：${claim.quote}`])];
+      return false;
+     }
+     return true;
     });
     checkpoint.claims=[];checkpoint.pendingClaims=claims;checkpoint.steps++;
     checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...Array.isArray(decision.unknowns)?decision.unknowns.filter((v):v is string=>typeof v==='string').map(v=>sanitizeText(v,600)):[]])];

@@ -10,6 +10,8 @@ import type { ExportFormat, ResumeInput } from './api.js';
 import { createAuthController, renderUserNav, showToast } from './auth.js';
 import { createCitationReturn } from './citation-return.js';
 import { byId, clear, make, setText, show } from './dom.js';
+import { createFirstStepPanel } from './first-step.js';
+import type { FirstStepPanel } from './first-step.js';
 import { createHomeMotion } from './home-motion.js';
 import { createLocalSearch } from './local-search.js';
 import type { LocalSearchItem } from './local-search.js';
@@ -132,6 +134,7 @@ const els = {
   toggleInspector: byId<HTMLButtonElement>('toggle-inspector'),
   reportQuestion: byId('report-question'),
   needsPanel: byId<HTMLElement>('needs-input-panel'),
+  firstStepPanel: byId<HTMLElement>('first-step-panel'),
   needsPrompt: byId('needs-input-prompt'),
   resumeSeed: byId<HTMLInputElement>('resume-seed'),
   resumeError: byId('resume-error'),
@@ -627,7 +630,7 @@ function openStream(runId: string, since: number, epoch: number): void {
     state.streamState = 'open';
     state.reconnectAttempts = 0;
   };
-  for (const type of ['state', 'stage', 'source', 'observation', 'answer', 'needs_input', 'error', 'interrupted', 'revision', 'identity', 'person', 'usage']) {
+  for (const type of ['state', 'stage', 'source', 'observation', 'answer', 'needs_input', 'error', 'interrupted', 'revision', 'identity', 'person', 'usage', 'first_step_discovery', 'first_step_selection', 'first_step_ready']) {
     source.addEventListener(type, (event) => {
       if (state.runEpoch !== epoch || state.stream !== source) return;
       const message = event as MessageEvent<string>;
@@ -692,6 +695,13 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
   }
   const runId = state.run.runId;
   switch (type) {
+    case 'first_step_discovery':
+    case 'first_step_ready':
+    case 'first_step_selection':
+      // The authoritative projection changed: re-read it. The local user draft
+      // is preserved inside the panel and never overwritten by these pushes.
+      syncFirstStep(runId);
+      break;
     case 'stage':
       state.stages = stagesFromEvents(state.events);
       renderActivityPanel();
@@ -932,10 +942,47 @@ function parseCandidates(raw: unknown): IdentityCandidate[] {
   return raw.filter((item): item is IdentityCandidate => Boolean(item && typeof item === 'object' && typeof item.label === 'string' && typeof item.detail === 'string'));
 }
 
+let firstStepPanel: FirstStepPanel | null = null;
+let firstStepRunId: string | null = null;
+
+function syncFirstStep(runId: string): void {
+  if (!firstStepPanel || firstStepRunId !== runId) {
+    firstStepPanel?.destroy();
+    firstStepRunId = runId;
+    firstStepPanel = createFirstStepPanel({
+      api,
+      container: els.firstStepPanel,
+      runId,
+      onAfterSubmit: () => {
+        void selectRun(runId);
+      }
+    });
+  }
+  void firstStepPanel.refresh();
+}
+
+function teardownFirstStep(): void {
+  if (firstStepPanel) {
+    firstStepPanel.destroy();
+    firstStepPanel = null;
+    firstStepRunId = null;
+    els.firstStepPanel.hidden = true;
+  }
+}
+
 function renderNeedsPanel(): void {
   const run = state.run;
   const needs = Boolean(run && run.state === 'needs_input');
-  show(els.needsPanel, needs);
+  // First-step runs render the full discovery/selection experience from the
+  // authoritative projection (legacy paused jobs are handled inside it too).
+  const firstStep = Boolean(needs && run && run.provider === 'research');
+  show(els.needsPanel, needs && !firstStep);
+  show(els.firstStepPanel, firstStep);
+  if (firstStep && run) {
+    syncFirstStep(run.runId);
+  } else {
+    teardownFirstStep();
+  }
   clear(els.candidates);
   if (needs && run) {
     setText(els.needsPrompt, run.identity.note ?? '补充一个公开主页，让我们确认你想了解的人。');

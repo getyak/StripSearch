@@ -18,12 +18,14 @@ import {
 import { registerRunRoutes } from './routes/runs.js';
 import { registerReviewRoutes } from './routes/review.js';
 import { registerDiscoveryRoutes } from './routes/discovery.js';
+import { registerFirstStepRoutes } from './routes/first-step.js';
 import type { Runner } from './services/runner.js';
 import type { DiscoveryRunner } from './services/discovery-runner.js';
 import type { PlatformRegistry } from '../shared/platform-discovery.js';
 import type { PlatformCatalogSnapshot } from '../shared/platform-catalog.js';
 import type { ReviewStore } from './review-store.js';
 import type { DiscoveryStore } from './discovery-store.js';
+import type { FirstStepStore } from './research/first-step-store.js';
 import type { Store } from './store.js';
 
 export interface AppDeps {
@@ -31,6 +33,7 @@ export interface AppDeps {
   store: Store;
   reviewStore: ReviewStore;
   discoveryStore: DiscoveryStore;
+  firstStep?: FirstStepStore;
   discoveryRunner: DiscoveryRunner;
   discoveryRegistry: PlatformRegistry;
   /** Versioned catalog surface for /api/discovery/registry; null omits it. */
@@ -91,9 +94,19 @@ export function createApp(deps: AppDeps): Express {
     store: deps.store,
     runner: deps.runner,
     auth: deps.auth,
+    firstStep: deps.firstStep ?? null,
     exaConfigured: Boolean(deps.config.exaApiKey),
     researchConfigured: Boolean(deps.config.deepseekApiKey && deps.config.exaApiKey)
   });
+  if (deps.firstStep) {
+    registerFirstStepRoutes(apiRouter, {
+      store: deps.store,
+      firstStep: deps.firstStep,
+      runner: deps.runner,
+      auth: deps.auth,
+      researchConfigured: Boolean(deps.config.deepseekApiKey && deps.config.exaApiKey)
+    });
+  }
   registerReviewRoutes(apiRouter, { reviewStore: deps.reviewStore });
   registerDiscoveryRoutes(apiRouter, {
     store: deps.discoveryStore,

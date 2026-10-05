@@ -1,6 +1,6 @@
 import type { HttpTransport } from '../adapters/types.js';
 export type ResearchToolAction =
- | { type: 'search'; query: string }
+ | { type: 'search'; query: string; numResults?: number }
  | { type: 'read' | 'firecrawl' | 'social_profile' | 'social_posts' | 'github_profile'; url: string };
 export interface ResearchAccount { platform: 'github' | 'x'; handle: string; id: string; profileUrl: string }
 export interface ResearchPage {

@@ -52,6 +52,37 @@ export type ExportFormat = 'markdown' | 'json' | 'html' | 'pdf';
 
 export type ResumeInput = { seedUrl: string } | { candidateId: string; expectedRevision: number };
 
+export interface FirstStepSelectionPayload {
+  expectedRunRevision: number;
+  expectedScopeVersion: number;
+  discoveryRevision: number;
+  clusterId: string | null;
+  accounts: Array<{ accountId: string; selection: 'selected' | 'not_selected' | 'only_this_account' | 'unanswered'; excluded: boolean; note?: string | null }>;
+}
+
+export interface FirstStepDiscoveryResponse {
+  mode: 'first_step' | 'legacy';
+  view?: import('../shared/first-step-discovery.js').FirstStepDiscoveryView;
+  runRevision?: number;
+  candidates?: Array<{ label: string; detail: string; candidateId?: string; profileUrl?: string }>;
+  prompt?: string | null;
+  canExpand?: boolean;
+}
+
+export interface FirstStepSelectionResponse {
+  selection: {
+    runRevision: number;
+    scopeVersion: number;
+    discoveryRevision: number;
+    clusterId: string | null;
+    selectedAccountIds: string[];
+    independentAccountIds: string[];
+    excludedAccountIds: string[];
+    idempotent: boolean;
+  };
+  view?: import('../shared/first-step-discovery.js').FirstStepDiscoveryView;
+}
+
 export interface HealthResponse {
   status: string;
   app: string;
@@ -213,6 +244,36 @@ export class ApiClient {
 
   async deleteRun(id: string): Promise<void> {
     await this.request(`/api/runs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /** Authoritative first-step discovery projection (or legacy candidates). */
+  async getFirstStepDiscovery(id: string): Promise<FirstStepDiscoveryResponse> {
+    return this.request<FirstStepDiscoveryResponse>(`/api/runs/${encodeURIComponent(id)}/first-step/discovery`);
+  }
+
+  /** One atomic, version-bound account selection. */
+  async submitFirstStepSelection(
+    id: string,
+    payload: FirstStepSelectionPayload,
+    idempotencyKey: string
+  ): Promise<FirstStepSelectionResponse> {
+    return this.request<FirstStepSelectionResponse>(`/api/runs/${encodeURIComponent(id)}/first-step/selection`, {
+      method: 'POST',
+      headers: { 'idempotency-key': idempotencyKey },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  /** Explicit new discovery attempt (manual clue or legacy continue). */
+  async expandFirstStep(
+    id: string,
+    body: { hint?: string; url?: string },
+    idempotencyKey: string
+  ): Promise<{ queued: boolean; idempotent?: boolean }> {
+    return this.request<{ queued: boolean; idempotent?: boolean }>(
+      `/api/runs/${encodeURIComponent(id)}/first-step/expand`,
+      { method: 'POST', headers: { 'idempotency-key': idempotencyKey }, body: JSON.stringify(body) }
+    );
   }
 
   async exportRun(id: string, format: 'markdown' | 'json'): Promise<string> {

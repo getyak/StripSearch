@@ -547,4 +547,55 @@ CREATE TABLE IF NOT EXISTS research_case_completion_assessments (
 );
 CREATE INDEX IF NOT EXISTS research_case_completion_assessments_case
   ON research_case_completion_assessments(case_id, created_at, id);
+
+-- First step (2026-10-05): run -> case link, immutable discovery revisions,
+-- one atomic account selection and explicit user exclusion statements.
+CREATE TABLE IF NOT EXISTS first_step_links (
+  run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  input_revision INTEGER NOT NULL DEFAULT 1,
+  discovery_revision INTEGER NOT NULL DEFAULT 0,
+  selection_revision INTEGER NOT NULL DEFAULT 0,
+  phase TEXT NOT NULL DEFAULT 'freezing',
+  hint TEXT NOT NULL DEFAULT '',
+  selection_scope_version INTEGER,
+  selection_discovery_revision INTEGER,
+  selected_json TEXT NOT NULL DEFAULT '[]',
+  excluded_json TEXT NOT NULL DEFAULT '[]',
+  submitted_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS first_step_discoveries (
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  discovery_revision INTEGER NOT NULL,
+  input_json TEXT NOT NULL,
+  plan_json TEXT NOT NULL,
+  view_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (run_id, discovery_revision)
+);
+
+CREATE TABLE IF NOT EXISTS first_step_selections (
+  owner_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (owner_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS first_step_exclusions (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  case_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  statement TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS first_step_exclusions_account
+  ON first_step_exclusions(run_id, account_id, recorded_at);
 `;

@@ -22,6 +22,21 @@ export function inspectWindow(page:{sourceKey:string;url:string;text:string},off
  return {sourceKey:page.sourceKey,url:page.url,offset:start,length:text.length,textLength,text};
 }
 export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis'; facet?: ResearchFacet; verified?: boolean }
+/** Frozen first-step selection binding; fetch work may only read these accounts. */
+export interface FirstStepBinding {
+ caseId: string; discoveryRevision: number; scopeVersion: number;
+ /** Bound person cluster; null = independent-only scope (never a same-person claim). */
+ clusterId: string | null;
+ /** Observed person display name (never a raw cluster key) for reports. */
+ displayName: string | null;
+ /** Anchor of the bound scope, ALWAYS one of the selected accounts. */
+ anchorUrl: string | null;
+ selectedAccountIds: string[]; independentAccountIds: string[];
+ /** accountKey -> accountId for the accounts frozen into this scope. */
+ accountKeys: Record<string,string>;
+ /** Per-account frozen scope for the Fetch planner; honest and explicit. */
+ accounts: Array<{ accountId: string; accountKey: string; profileUrl: string; allowedScope: 'profile_only' | 'public_history'; independent: boolean; accessCoverage: string }>;
+}
 export interface StoredPage extends ResearchPage { sourceKey: string; discoveredFrom?: string[]; inheritedFrom?: {runId: string; sourceKey: string} }
 export interface ResearchCheckpoint {
  phase: string; steps: number; startedAt: number; elapsedMs: number;
@@ -31,12 +46,14 @@ export interface ResearchCheckpoint {
  catalog?: {offset:number;linkOffset:number;unknownOffset:number};
  localWindows?:string[];
  anchorUrl: string | null; identity: IdentityDraft | null; candidates: IdentityCandidate[];
+ /** Present only for first-step runs; frozen at selection submission. */
+ firstStep?: FirstStepBinding;
  notes?:string[];
  coverageGaps?:string[];
  pages: StoredPage[]; claims: ResearchClaim[]; pendingClaims?: ResearchClaim[]; unknowns: string[]; stopReason: string | null;
 }
 export interface ActionUsage { inputTokens?: number; outputTokens?: number; estimatedUsd?: number | null; credits?: number | null; bytes?: number; unknownCost?: boolean }
-export interface ActionReceipt { key: string; kind:'tool'|'model'; state:'inflight'|'completed'|'failed'; request:unknown; result:unknown; usage:ActionUsage|null; reservedInput:number; reservedOutput:number }
+export interface ActionReceipt { key: string; kind:'tool'|'model'; state:'inflight'|'completed'|'failed'; request:unknown; result:unknown; usage:ActionUsage|null; reservedInput:number; reservedOutput:number; createdAt:string }
 export class ResearchStop extends Error { constructor(readonly code:string){super(code);this.name='ResearchStop';} }
 
 export class ResearchStore {
@@ -54,8 +71,8 @@ export class ResearchStore {
   this.db.prepare('INSERT INTO research_checkpoints(run_id,data_json,updated_at) VALUES(?,?,?) ON CONFLICT(run_id) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at').run(runId,JSON.stringify(checkpoint),new Date().toISOString());
  }
  receipts(runId:string):ActionReceipt[] {
-  const rows=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<{action_key:string;kind:'tool'|'model';state:'inflight'|'completed'|'failed';request_json:string;result_json:string|null;usage_json:string|null;reserved_input:number;reserved_output:number}>;
-  return rows.map(r=>({key:r.action_key,kind:r.kind,state:r.state,request:JSON.parse(r.request_json),result:r.result_json?JSON.parse(r.result_json):null,usage:r.usage_json?JSON.parse(r.usage_json):null,reservedInput:r.reserved_input,reservedOutput:r.reserved_output}));
+  const rows=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<{action_key:string;kind:'tool'|'model';state:'inflight'|'completed'|'failed';request_json:string;result_json:string|null;usage_json:string|null;reserved_input:number;reserved_output:number;created_at:string}>;
+  return rows.map(r=>({key:r.action_key,kind:r.kind,state:r.state,request:JSON.parse(r.request_json),result:r.result_json?JSON.parse(r.result_json):null,usage:r.usage_json?JSON.parse(r.usage_json):null,reservedInput:r.reserved_input,reservedOutput:r.reserved_output,createdAt:r.created_at}));
  }
  receipt(runId:string,key:string):ActionReceipt|undefined{return this.receipts(runId).find(row=>row.key===key);}
  budget(runId:string,limits:ResearchBudgetLimits=RESEARCH_LIMITS):ResearchBudget {
