@@ -1016,6 +1016,11 @@ export class FirstStepStore {
       }
       const link = this.attachRun(run, run.question);
       if (hint && hint.trim().length > 0) this.setHint(runId, hint.trim());
+      else if (existingLink) {
+        // An explicit new discovery without a new clue still owns a fresh
+        // attempt; replaying the previous request keys cannot refresh sources.
+        this.db.prepare('UPDATE first_step_links SET input_revision = input_revision + 1, updated_at = ? WHERE run_id = ?').run(nowIso(), runId);
+      }
       this.setPhase(runId, 'freezing');
       const runRevision = run.revision + 1;
       this.store.updateRun(runId, {
