@@ -1102,3 +1102,5 @@ body[data-view="home"] .footer-inner a:not(.button) { color: var(--forest-mid); 
 @media (prefers-reduced-motion: reduce) {
   .first-step * { transition: none !important; animation: none !important; }
 }
+
+.first-step-original pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; font-size: .8rem; }

@@ -54,3 +54,15 @@ test('catalog selection is clamped when active sources shrink after revocation',
  const checkpoint={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:null,identity:null,candidates:[],pages:[page],claims:[],unknowns:[],stopReason:null,catalog:{offset:90,linkOffset:0,unknownOffset:0}};
  const data=JSON.parse(buildResearchPrompt({question:'fixture',checkpoint,remainingTools:null,remainingModels:null}));assert.equal(data.sourceCatalog.offset,0);assert.equal(data.sources[0].sourceKey,'S1');assert.equal(checkpoint.catalog.offset,90);
 });
+
+
+test('scoped HTML previews skip styling and navigation while retaining exact original offsets', async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');
+ const text='<html><head><style>'+ 'x'.repeat(12000)+'</style></head><body><nav>'+ 'navigation '.repeat(90)+'</nav><p>Lin Zhou creates public compiler lessons and publishes dated release notes so others can inspect the work.</p></body></html>';
+ const page={sourceKey:'S1',url:'https://fixture-linzhou.org/',title:'Lin Zhou',text,kind:'profile' as const,publishedAt:null,links:[],limitations:[]};
+ const checkpoint={phase:'planning',steps:1,startedAt:0,elapsedMs:0,anchorUrl:page.url,identity:null,candidates:[],pages:[page],claims:[],unknowns:[],stopReason:null,firstStep:{caseId:'case',scopeVersion:1,discoveryRevision:1,selectedAccountIds:[],independentAccountIds:[],clusterId:'cluster',displayName:'Lin Zhou',anchorUrl:page.url,accountKeys:{},accounts:[]}};
+ const data=JSON.parse(buildResearchPrompt({question:'Lin Zhou',checkpoint,remainingTools:5,remainingModels:5}));
+ assert.match(data.sources[0].preview,/Lin Zhou creates/);
+ assert.equal(data.sources[0].preview,text.slice(data.sources[0].window.offset,data.sources[0].window.offset+600));
+ assert.ok(data.sources[0].window.offset>12000);assert.equal(page.text,text);
+});

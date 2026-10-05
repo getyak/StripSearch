@@ -108,6 +108,16 @@ function excerptText(quote: string): string {
   ).replace(/\s+/g, ' ').trim();
 }
 
+/** Readable presentation plus an inspectable immutable literal excerpt. */
+function appendEvidenceQuote(container:HTMLElement,quote:string):void {
+ container.appendChild(make('blockquote',{text:excerptText(quote)}));
+ if (/<[^>]*>|&(?:[a-z]+|#x?[0-9a-f]+);/i.test(quote)) {
+  const original=make('details',{className:'first-step-original'});
+  original.appendChild(make('summary',{text:'查看原始摘录（含标记）'}));
+  original.appendChild(make('pre',{text:quote}));container.appendChild(original);
+ }
+}
+
 /** Relevance chooses a visual recommendation only; it never proves identity. */
 function clusterFitsInput(cluster: FirstStepPersonClusterView, current: FirstStepDiscoveryView): boolean {
   if (current.input.kind === 'homepage_url') {
@@ -225,8 +235,11 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       // Grounded concise descriptor: plain statement text with its real source
       // label — never a raw URL dump, and never discarded just because the
       // source URL exists beside the summary.
-      const excerpt = cluster.anchorBasis?.quote ?? cluster.leads.find(lead => lead.quote)?.quote;
-      const excerptSource = cluster.anchorBasis?.sourceUrl ?? cluster.leads.find(lead => lead.quote)?.sourceUrl;
+      // Prefer the longest readable author excerpt already backed by a source;
+      // keep full linkage evidence in the adjacent inspector.
+      const previewLead = [...cluster.leads].filter(lead => lead.quote).sort((a,b)=>Number(/\bI (?:create|build|write|research|teach|lead|founded)\b/i.test(excerptText(b.quote!)))*1000+Math.min(excerptText(b.quote!).length,240)-Number(/\bI (?:create|build|write|research|teach|lead|founded)\b/i.test(excerptText(a.quote!)))*1000-Math.min(excerptText(a.quote!).length,240))[0];
+      const excerpt = previewLead?.quote ?? cluster.anchorBasis?.quote;
+      const excerptSource = previewLead?.sourceUrl ?? cluster.anchorBasis?.sourceUrl;
       if (excerpt) {
         button.appendChild(make('small', { className: 'first-step-lead', text: `原文摘录：“${excerptText(excerpt)}”` }));
         if (excerptSource) button.appendChild(make('small', { className: 'first-step-lead-source', text: `来源：${shortUrl(excerptSource)}` }));
@@ -244,13 +257,13 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       if (cluster.anchorBasis) {
         const block = make('div', { className: 'first-step-evidence-item' });
         block.appendChild(make('p', { text: `${cluster.anchorBasis.label}（${shortUrl(cluster.anchorBasis.sourceUrl)}）` }));
-        if (cluster.anchorBasis.quote) block.appendChild(make('blockquote', { text: cluster.anchorBasis.quote }));
+        if (cluster.anchorBasis.quote) appendEvidenceQuote(block, cluster.anchorBasis.quote);
         basisList.appendChild(block);
       }
       for (const lead of cluster.leads) {
         const block = make('div', { className: 'first-step-evidence-item' });
         block.appendChild(make('p', { text: `${lead.statement}（来源：${shortUrl(lead.sourceUrl ?? null)}）` }));
-        if (lead.quote) block.appendChild(make('blockquote', { text: lead.quote }));
+        if (lead.quote) appendEvidenceQuote(block, lead.quote);
         basisList.appendChild(block);
       }
       if (!cluster.anchorBasis && cluster.leads.length === 0) {
@@ -571,14 +584,14 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     for (const item of account.identity.evidence) {
       const block = make('div', { className: 'first-step-evidence-item' });
       block.appendChild(make('p', { text: `${item.sourceTitle}（${shortUrl(item.sourceUrl)}）· ${item.role === 'identity_support' ? '归属依据' : '反证'}` }));
-      if (item.quote) block.appendChild(make('blockquote', { text: item.quote }));
+      if (item.quote) appendEvidenceQuote(block, item.quote);
       block.appendChild(make('small', { className: 'first-step-limit', text: item.limitation }));
       evidenceList.appendChild(block);
     }
     for (const item of account.identity.counterevidence) {
       const block = make('div', { className: 'first-step-evidence-item counter' });
       block.appendChild(make('p', { text: `反证：${item.sourceTitle}（${shortUrl(item.sourceUrl)}）` }));
-      if (item.quote) block.appendChild(make('blockquote', { text: item.quote }));
+      if (item.quote) appendEvidenceQuote(block, item.quote);
       block.appendChild(make('small', { className: 'first-step-limit', text: item.limitation }));
       evidenceList.appendChild(block);
     }

@@ -1,3 +1,4 @@
+import { parseFragment, type DefaultTreeAdapterTypes as Tree } from 'parse5';
 import { runDshDecision, type DshDecisionOptions } from './dsh-decision.js';
 import type { ResearchCheckpoint, ResearchClaim } from './research-store.js';
 import type { HttpTransport } from '../adapters/types.js';
@@ -9,6 +10,27 @@ import { RESEARCH_FACETS } from '../../shared/research-depth.js';
 /** Short planning previews and quote-centered verify windows, never full texts. */
 export const SOURCE_PREVIEW_CHARS = 600;
 const CONTEXT_PAD = 400;
+const originalPreviewOffsets=new WeakMap<object,number>();
+/** Find readable ORIGINAL text, without rewriting evidence or executing HTML. */
+function originalPreviewOffset(page:ResearchCheckpoint['pages'][number]):number {
+ const cached=originalPreviewOffsets.get(page);if(cached!==undefined)return cached;
+ let offset=0;
+ if(/<(?:html|body|p|div)\b/i.test(page.text)){
+  const root=parseFragment(page.text,{sourceCodeLocationInfo:true});
+  const visit=(node:Tree.Node,hidden:boolean):number|null=>{
+   const excluded=hidden||('tagName' in node&&['script','style','nav','footer','header','noscript','template'].includes(node.tagName));
+   if(excluded)return null;
+   if(node.nodeName==='#text'&&'value' in node&&node.value.trim().length>=70&&node.sourceCodeLocation){
+    return node.sourceCodeLocation.startOffset+Math.max(0,node.value.search(/\S/u));
+   }
+   if('childNodes' in node)for(const child of node.childNodes){const found=visit(child,false);if(found!==null)return found;}
+   return null;
+  };
+  offset=visit(root,false)??0;
+ }
+ originalPreviewOffsets.set(page,offset);return offset;
+}
+
 // Metadata previews bound one model context; original values remain in the corpus.
 function metadataPreview(value:string|null|undefined,limit:number):string|null|undefined{return value?.slice(0,limit)??value;}
 function metadataWindow(page:{author?:string|null;publishedAt:string|null;retrievedAt?:string|null}){return {author:page.author?.length??0,publishedAt:page.publishedAt?.length??0,retrievedAt:page.retrievedAt?.length??0,excerpt:true};}
@@ -70,7 +92,7 @@ export function buildResearchPrompt(input:PlannerInput):string {
      note:'研究只限这些已选账号；独立账号材料只作该账号自身记录，不并入同一人物结论；未选/排除/后来发现的账号不能读取。只请求 sources.links 中实际观察到的地址，不得根据名称拼接或猜测网址。链接目录已按冻结范围筛选，最终仍由实时权限守卫判断。优先 inspect 已存原文以提炼有依据的结论；范围外线索记录为缺口，继续整理已选资料。' 
    }}:{}),
    sourceCatalog:{...catalog,length:windowPages.length,total:input.checkpoint.pages.length,windowSize:12},
-   sources:windowPages.map(p=>({sourceKey:p.sourceKey,url:p.url,title:p.title,kind:p.kind,author:metadataPreview(p.author,1000),publishedAt:metadataPreview(p.publishedAt,100),retrievedAt:metadataPreview(p.retrievedAt,100),metadataWindow:metadataWindow(p),retrieval:p.retrieval,links:scopedLinks(p).slice(catalog.linkOffset,catalog.linkOffset+20),linksLength:scopedLinks(p).length,...(binding?{outOfScopeLinksCount:p.links.length-scopedLinks(p).length}: {}),linkOffset:catalog.linkOffset,limits:p.limitations.slice(0,10),textLength:p.text.length,preview:p.text.slice(0,SOURCE_PREVIEW_CHARS),window:{offset:0,length:Math.min(SOURCE_PREVIEW_CHARS,p.text.length)}})),
+   sources:windowPages.map(p=>({sourceKey:p.sourceKey,url:p.url,title:p.title,kind:p.kind,author:metadataPreview(p.author,1000),publishedAt:metadataPreview(p.publishedAt,100),retrievedAt:metadataPreview(p.retrievedAt,100),metadataWindow:metadataWindow(p),retrieval:p.retrieval,links:scopedLinks(p).slice(catalog.linkOffset,catalog.linkOffset+20),linksLength:scopedLinks(p).length,...(binding?{outOfScopeLinksCount:p.links.length-scopedLinks(p).length}: {}),linkOffset:catalog.linkOffset,limits:p.limitations.slice(0,10),textLength:p.text.length,preview:p.text.slice(binding?originalPreviewOffset(p):0,(binding?originalPreviewOffset(p):0)+SOURCE_PREVIEW_CHARS),window:{offset:binding?originalPreviewOffset(p):0,length:Math.min(SOURCE_PREVIEW_CHARS,p.text.length-(binding?originalPreviewOffset(p):0))}})),
    ...(inspect?{inspect:{...inspect,excerpt:true,windowNote:'selected excerpt window of the stored source; the full text remains stored; this window is not source completeness'}}:{}),
    unknowns:input.checkpoint.unknowns.slice(catalog.unknownOffset,catalog.unknownOffset+30),unknownsTotal:input.checkpoint.unknowns.length,budget:{remainingTools:input.remainingTools,remainingModels:input.remainingModels}
   });
