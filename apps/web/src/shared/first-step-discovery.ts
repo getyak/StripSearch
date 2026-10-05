@@ -41,7 +41,7 @@ export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
  * query slots cover actual empty-route fallback or observed alias expansion.
  * Up to two identity reads are reserved for leads found by that later wave.
  */
-export const FIRST_STEP_POLICY_VERSION = 'first-step/v5';
+export const FIRST_STEP_POLICY_VERSION = 'first-step/v6';
 
 /* ------------------------------------------------------------------ */
 /* Input                                                               */

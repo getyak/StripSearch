@@ -433,6 +433,39 @@ for(const heading of ["My colleague's account",'Not my account; impersonator'])t
   } finally {h.db.close();}
 });
 
+test('unread native variants receive actual verification before matching website titles', async () => {
+  const canonical='https://github.com/FixtureAuthor', variant='https://github.com/fixtureauthor';
+  const noise=['https://fixture-directory.dev/','https://fixture-news.dev/','https://fixture-events.dev/'];
+  const policy={maxSearchQueries:1,maxSearchResults:12,maxProfileReads:2,maxModelCalls:0,policyVersion:'first-step/v6'};
+  const h=harness({kind:'name_query',value:'Fixture Author',question:null},{
+    search:()=>[...noise.map(url=>page(url,'Indexed matching title.')),page(canonical,'Indexed native profile.'),page(variant,'Indexed native variant.',{title:'Unknown native variant'})],
+    read:url=>[page(canonical,'Original native response.',{aliasProof:{kind:'native_profile',platform:'github',nativeId:'123456',requestedUrl:url,returnedUrl:canonical}})],budget:policy
+  });h.ctx.budget=policy;
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.deepEqual(h.reads,[canonical,variant]);
+    assert.equal(view.accounts.filter(account=>account.platform==='github').length,1);
+    assert.equal(view.accounts.find(account=>account.profileUrl===canonical)!.identity.state,'proposed');
+    assert.equal(view.accounts.find(account=>account.profileUrl===canonical)!.defaultSuggestion.suggested,false);
+    assert.ok(view.accounts.filter(account=>account.profileUrl !== null && noise.includes(account.profileUrl)).every(account=>account.userSelection.state==='unanswered'));
+  } finally {h.db.close();}
+});
+
+test('a name-matching native profile precedes the long tail of matching site titles without gaining ownership', async () => {
+  const native='https://github.com/fixture-author';
+  const noise=['https://fixture-directory.dev/','https://fixture-news.dev/','https://fixture-events.dev/'];
+  const policy={maxSearchQueries:1,maxSearchResults:12,maxProfileReads:2,maxModelCalls:0,policyVersion:'first-step/v6'};
+  const h=harness({kind:'name_query',value:'Fixture Author',question:null},{
+    search:()=>[...noise.map(url=>page(url,'Indexed matching title.')),page(native,'Indexed native profile.')],
+    read:url=>[page(url,'Original response without an ownership statement.')],budget:policy
+  });h.ctx.budget=policy;
+  try {
+    const view=await discoverFirstStep(h.ctx);assert.equal(h.reads[0],native);assert.equal(h.reads.length,2);
+    assert.equal(view.accounts.find(account=>account.profileUrl===native)!.identity.state,'proposed');
+    assert.equal(view.accounts.find(account=>account.profileUrl===native)!.defaultSuggestion.suggested,false);
+  } finally {h.db.close();}
+});
+
  test('the frozen read budget reserves capacity for a native variant first observed in the later alias search', async () => {
   const canonical='https://github.com/FixtureAuthor', variant='https://github.com/fixtureauthor';
   const noise=['https://github.com/other-fixture-a','https://github.com/other-fixture-b','https://github.com/other-fixture-c'];

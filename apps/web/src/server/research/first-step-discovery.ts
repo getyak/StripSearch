@@ -1096,10 +1096,18 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         return entry.ref.entry === 'profile' && (a.hostname === `www.${b.hostname}` || b.hostname === `www.${a.hostname}`) && a.pathname === b.pathname && a.search === b.search;
       });
       if (nativeVariant || hostVariant) return -200;
+      // Two actually observed native URL variants need real responses before
+      // unrelated sites consume the budget. Similar spelling only schedules
+      // IO: adapter-attested IDs still decide whether projection may merge.
+      const unresolvedNativePair = namespace !== null && [...candidateRefs.values()].some(other =>
+        other.accountKey !== ref.accountKey && nativeNamespace(other) === namespace);
+      if (unresolvedNativePair) return -150 - ((indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? 25 : 0);
     }
     const relevance = (indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? -100 : 0;
     if (ref.platform === 'personal_site' || ref.platform === 'linktree') return relevance;
-    if (ref.platform === 'github' || ref.platform === 'x') return relevance + 1;
+    // Native name-matching profiles can reveal the author's actual home and
+    // stable account ID; they precede a long tail of matching website titles.
+    if (ref.platform === 'github' || ref.platform === 'x') return relevance === -100 ? -125 : 1;
     return relevance + 2;
   };
   const readQueue: FirstStepAccountRef[] = [...candidateRefs.values()]
