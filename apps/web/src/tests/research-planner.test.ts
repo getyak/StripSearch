@@ -66,3 +66,16 @@ test('scoped HTML previews skip styling and navigation while retaining exact ori
  assert.equal(data.sources[0].preview,text.slice(data.sources[0].window.offset,data.sources[0].window.offset+600));
  assert.ok(data.sources[0].window.offset>12000);assert.equal(page.text,text);
 });
+
+test('a timeline cannot push other selected accounts out of default context and explicit catalog still pages exactly',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');const {classifyFirstStepUrl}=await import('../shared/first-step-discovery.js');
+ const urls=['https://fixture-context-author.org/','https://github.com/fixture-context-author','https://x.com/fixturewriter'];
+ const pages=urls.map((url,i)=>({sourceKey:`S${i+1}`,url,title:'Original',text:`Exact original ${i}`,kind:'profile' as const,publishedAt:null,links:[],limitations:[],retrieval:'read' as const}));
+ for(let i=4;i<104;i++)pages.push({...pages[2]!,sourceKey:`S${i}`,url:`https://x.com/fixturewriter/status/${i}`,text:`Exact post ${i}`});
+ const accountKeys=Object.fromEntries(urls.map((url,i)=>{const c=classifyFirstStepUrl(url);assert.ok(c.ok);return [c.ref.accountKey,`acc${i}`];}));
+ const checkpoint={phase:'planning',steps:2,startedAt:0,elapsedMs:0,anchorUrl:urls[0]!,identity:null,candidates:[],pages,claims:[],unknowns:[],stopReason:null,firstStep:{caseId:'case',scopeVersion:1,discoveryRevision:1,selectedAccountIds:[],independentAccountIds:[],clusterId:'cluster',displayName:'Fixture',anchorUrl:urls[0]!,accountKeys,accounts:[]}};
+ const original=JSON.stringify(checkpoint);const data=JSON.parse(buildResearchPrompt({question:'Fixture',checkpoint,remainingTools:8,remainingModels:8}));
+ assert.equal(data.sources.length,12);assert.ok(urls.every(url=>data.sources.some((p:{url:string})=>p.url===url)));
+ assert.equal(data.sourceCatalog.mode,'selected_accounts_and_recent');assert.equal(data.sourceCatalog.offset,null);assert.deepEqual(data.sourceCatalog.sourceKeys,data.sources.map((p:{sourceKey:string})=>p.sourceKey));assert.equal(JSON.stringify(checkpoint),original);
+ const requested=JSON.parse(buildResearchPrompt({question:'Fixture',checkpoint:{...checkpoint,catalog:{offset:50,linkOffset:0,unknownOffset:0}},remainingTools:8,remainingModels:8}));assert.equal(requested.sources[0].sourceKey,pages[50]!.sourceKey);assert.equal(requested.sourceCatalog.offset,50);assert.equal(requested.sourceCatalog.mode,undefined);
+});

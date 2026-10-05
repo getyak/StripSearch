@@ -54,7 +54,18 @@ export function researchDecisionSchema(mode?:'plan'|'verify'):Record<string,unkn
 export function buildResearchPrompt(input:PlannerInput):string {
  const requestedCatalog=input.checkpoint.catalog??{offset:Math.max(0,input.checkpoint.pages.length-12),linkOffset:0,unknownOffset:0};
  const catalog={...requestedCatalog,offset:Math.min(requestedCatalog.offset,Math.max(0,input.checkpoint.pages.length-1))};
- const windowPages=input.checkpoint.pages.slice(catalog.offset,catalog.offset+12);
+ let windowPages=input.checkpoint.pages.slice(catalog.offset,catalog.offset+12);
+ const representative=!!input.checkpoint.firstStep&&!input.checkpoint.catalog;
+ if(representative){
+  const selectedKeys=new Set(Object.keys(input.checkpoint.firstStep!.accountKeys));const covered=new Set<string>();const chosen:typeof windowPages=[];
+  for(const page of input.checkpoint.pages){
+   if(page.retrieval!=='read'&&page.retrieval!=='profile')continue;
+   const ref=classifyFirstStepUrl(page.url);if(!ref.ok||!selectedKeys.has(ref.ref.accountKey)||covered.has(ref.ref.accountKey))continue;
+   chosen.push(page);covered.add(ref.ref.accountKey);if(chosen.length===12)break;
+  }
+  for(const page of [...input.checkpoint.pages].reverse()){if(chosen.length===12)break;if(!chosen.includes(page))chosen.push(page);}
+  windowPages=chosen;
+ }
  const selected=input.checkpoint.pages.find(p=>p.sourceKey===input.checkpoint.inspect?.sourceKey);
  const inspect=selected&&input.checkpoint.inspect?inspectWindow(selected,input.checkpoint.inspect.offset):undefined;
  const binding=input.checkpoint.firstStep;
@@ -95,7 +106,7 @@ export function buildResearchPrompt(input:PlannerInput):string {
      accounts:input.checkpoint.firstStep.accounts.map(a=>({accountId:a.accountId,profileUrl:a.profileUrl,allowedScope:a.allowedScope,independent:a.independent,accessCoverage:a.accessCoverage})),
      note:'研究只限这些已选账号；独立账号材料只作该账号自身记录，不并入同一人物结论；未选/排除/后来发现的账号不能读取。只请求 sources.links 中实际观察到的地址，不得根据名称拼接或猜测网址。链接目录已按冻结范围筛选，最终仍由实时权限守卫判断。优先 inspect 已存原文以提炼有依据的结论；范围外线索记录为缺口，继续整理已选资料。' 
    }}:{}),
-   sourceCatalog:{...catalog,length:windowPages.length,total:input.checkpoint.pages.length,windowSize:12},
+   sourceCatalog:{...catalog,length:windowPages.length,total:input.checkpoint.pages.length,windowSize:12,...(representative?{mode:'selected_accounts_and_recent',sourceKeys:windowPages.map(p=>p.sourceKey),offset:null}:{})},
    sources:windowPages.map(p=>({sourceKey:p.sourceKey,url:p.url,title:p.title,kind:p.kind,author:metadataPreview(p.author,1000),publishedAt:metadataPreview(p.publishedAt,100),retrievedAt:metadataPreview(p.retrievedAt,100),metadataWindow:metadataWindow(p),retrieval:p.retrieval,links:scopedLinks(p).slice(catalog.linkOffset,catalog.linkOffset+20),linksLength:scopedLinks(p).length,...(binding?{outOfScopeLinksCount:p.links.length-scopedLinks(p).length}: {}),linkOffset:catalog.linkOffset,limits:p.limitations.slice(0,10),textLength:p.text.length,preview:p.text.slice(binding?originalPreviewOffset(p):0,(binding?originalPreviewOffset(p):0)+SOURCE_PREVIEW_CHARS),window:{offset:binding?originalPreviewOffset(p):0,length:Math.min(SOURCE_PREVIEW_CHARS,p.text.length-(binding?originalPreviewOffset(p):0))}})),
    ...(inspect?{inspect:{...inspect,excerpt:true,windowNote:'selected excerpt window of the stored source; the full text remains stored; this window is not source completeness'}}:{}),
    unknowns:input.checkpoint.unknowns.slice(catalog.unknownOffset,catalog.unknownOffset+30),unknownsTotal:input.checkpoint.unknowns.length,budget:{remainingTools:input.remainingTools,remainingModels:input.remainingModels}
