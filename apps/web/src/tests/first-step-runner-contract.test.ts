@@ -176,7 +176,9 @@ test('a reserved prior model receipt at cap 1 keeps discovered results and appen
 
   // Discovered results are preserved.
   assert.ok(view.accounts.some((account) => account.profileUrl === HOME_URL), 'the discovered homepage account survives');
-  assert.ok(view.accounts.some((account) => account.profileUrl === GITHUB_URL), 'the discovered account link survives');
+  assert.ok(view.relatedLeads.some((lead) => lead.url === GITHUB_URL), 'the index-only account link survives as an unconfirmed material lead');
+  assert.equal(view.accounts.some((account) => account.profileUrl === GITHUB_URL), false, 'an index outlink does not become a selectable account without its own eligibility');
+  assert.ok(f.store.research.receipts(f.run.id).some(receipt => JSON.stringify(receipt.result).includes(GITHUB_URL)), 'the original indexed link remains in the actual receipt');
 
   // No extra model dispatch or reservation beyond the one prior receipt.
   const modelReceipts = f.store.research.receipts(f.run.id).filter((receipt) => receipt.kind === 'model');
