@@ -604,7 +604,9 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
       const first = raw.split('/')[0] ?? '';
       const handle = first.startsWith('@') ? first.slice(1) : first;
       const isProfile = /^[A-Za-z0-9_.]{1,64}$/.test(handle) && !RESERVED_FIRST_SEGMENTS.has(first.toLowerCase());
-      const accountUrl = isProfile ? `https://www.${known === 'instagram' ? 'instagram.com' : 'threads.net'}/@${handle}` : href;
+      const accountUrl = isProfile
+        ? known === 'instagram' ? `https://www.instagram.com/${handle}` : `https://www.threads.net/@${handle}`
+        : href;
       return {
         ok: true,
         ref: refOf(known, isProfile && segments.length <= 1 ? accountUrl : href, {
@@ -618,16 +620,14 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
     }
     case 'facebook': {
       const first = segments[0] ?? '';
-      const id = canonical.searchParams.get('id');
-      const isProfile = first !== '' && !RESERVED_FIRST_SEGMENTS.has(first.toLowerCase()) && /^[A-Za-z0-9_.-]{1,80}$/.test(first);
-      const accountUrl = isProfile
-        ? `https://www.facebook.com/${first}`
-        : id && /^[0-9]+$/.test(id)
-          ? `https://www.facebook.com/profile.php?id=${id}`
-          : href;
+      const suppliedId = canonical.searchParams.get('id');
+      const id = canonical.pathname === '/profile.php' && suppliedId && /^[0-9]+$/.test(suppliedId) ? suppliedId : null;
+      const isProfile = first !== '' && first.toLowerCase() !== 'profile.php' && !RESERVED_FIRST_SEGMENTS.has(first.toLowerCase()) && /^[A-Za-z0-9_.-]{1,80}$/.test(first);
+      const accountUrl = id ? `https://www.facebook.com/profile.php?id=${id}`
+        : isProfile ? `https://www.facebook.com/${first}` : href;
       return {
         ok: true,
-        ref: refOf('facebook', isProfile && segments.length <= 1 ? accountUrl : href, {
+        ref: refOf('facebook', id || (isProfile && segments.length <= 1) ? accountUrl : href, {
           accountUrl,
           handle: isProfile ? first : id ?? null,
           materialUse: 'expression',
