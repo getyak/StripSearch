@@ -252,6 +252,23 @@ test('literal name matches lead the visible choices while unrelated page titles 
   } finally {panel.destroy();fixture.db.close();container.remove();}
 });
 
+test('actually read homepage profile links stay visible without ownership or automatic selection',async()=>{
+ const fixture=seedFirstStep({accounts:[{url:'https://github.com/linzhou'},{url:'https://x.com/linzhou'},{url:'https://github.com/morganchen'}]});
+ fixture.republish(view=>({...view,input:{...view.input,kind:'name_query',value:'Lin Zhou'},clusters:[cluster('primary','Lin Zhou',view.accounts[0]!.accountId,[view.accounts[0]!.accountId])],
+  accounts:view.accounts.map((account,index)=>index===1?{...account,profileLinkSources:[{accountId:view.accounts[0]!.accountId,sourceUrl:'https://github.com/linzhou',targetUrl:'https://x.com/linzhou'}]}:account)}));
+ const container=env.document.createElement('div');env.document.body.appendChild(container);const posted:FirstStepSelectionPayload[]=[];
+ const panel=createFirstStepPanel({api:panelApi(fixture,posted),container,runId:fixture.run.id});
+ try{
+  await panel.refresh();container.querySelector<HTMLButtonElement>('button.first-step-cluster')!.click();
+  const linked=container.querySelector<HTMLElement>('.first-step-profile-links')!;assert.ok(linked);assert.match(linked.textContent??'',/链接本身不能证明归属/);
+  const checkbox=linked.querySelector<HTMLInputElement>('input[type="checkbox"]')!;assert.equal(checkbox.checked,false);assert.equal(panel.selectedCount(),0);
+  checkbox.click();assert.equal(panel.selectedCount(),1);assert.equal(fixture.firstStep.selectionBinding(fixture.run.id),null);
+  container.querySelector<HTMLButtonElement>('.first-step-primary')!.click();await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(posted[0]!.accounts.find(a=>a.accountId===fixture.store.cases.listAccounts(fixture.run.ownerId,fixture.caseId)[1]!.accountId)!.selection,'only_this_account');
+  assert.ok(posted[0]!.accounts.every(a=>a.selection!=='selected'));assert.equal(container.querySelector('details.first-step-related')!.querySelectorAll('.first-step-card').length,1);
+ }finally{panel.destroy();fixture.db.close();container.remove();}
+});
+
  test('observed name-matching profiles stay visible as unchecked independent accounts, with unrelated leads collapsed',async()=>{
   const fixture=seedFirstStep({accounts:[{url:'https://github.com/linzhou'},{url:'https://x.com/linzhou'},{url:'https://github.com/morganchen'}]});
   fixture.republish(view=>({...view,input:{...view.input,kind:'name_query',value:'Lin Zhou'},clusters:[

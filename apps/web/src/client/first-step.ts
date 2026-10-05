@@ -312,12 +312,20 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     // they never prove that these profiles belong to the chosen person.
     const namedAccounts=view.accounts.filter(account=>!inMain(account)&&namedLabels.has(account.accountId)&&account.requiresIndependentScope&&account.identity.state!=='rejected'&&account.identity.counterevidence.length===0);
     const namedIds=new Set(namedAccounts.map(account=>account.accountId));
-    const secondaryAccounts = view.accounts.filter((account) => !inMain(account)&&!namedIds.has(account.accountId));
+    const linkedLeads=view.accounts.filter(account=>!inMain(account)&&!namedIds.has(account.accountId)&&account.requiresIndependentScope&&account.identity.state!=='rejected'&&!account.identity.nativeIdConflict&&account.identity.counterevidence.length===0&&
+      chosen!==null&&(account.profileLinkSources??[]).some(source=>chosen.accountIds.includes(source.accountId)));
+    const linkedLeadIds=new Set(linkedLeads.map(account=>account.accountId));
+    const secondaryAccounts = view.accounts.filter((account) => !inMain(account)&&!namedIds.has(account.accountId)&&!linkedLeadIds.has(account.accountId));
     const cardsBox = make('section', { className: 'first-step-accounts', attrs: { 'aria-label': '公开账号候选' } });
     if (mainAccounts.length === 0 && view.clusters.length > 0) {
       cardsBox.appendChild(make('p', { className: 'muted', text: '请先确认目标人物；这个人的公开账号会显示在这里。' }));
     }
     cardsBox.appendChild(renderGroups(mainAccounts));
+    if(linkedLeads.length>0){
+      const linked=make('section',{className:'first-step-profile-links first-step-name-matches',attrs:{'aria-label':'该主页发现的账号，归属待核对'}});
+      linked.append(make('h3',{text:`该主页发现的账号 · 归属待核对（${String(linkedLeads.length)}）`}),make('p',{className:'muted',text:'这些账号入口出现在已读主页的外链中，链接本身不能证明归属。默认不选；勾选后仅研究该账号，不并入人物身份结论。'}),renderGroups(linkedLeads));
+      cardsBox.appendChild(linked);
+    }
     if (namedAccounts.length>0) {
       const named=make('section',{className:'first-step-name-matches',attrs:{'aria-label':'同名公开主页，分别核对'}});
       named.append(make('h3',{text:`同名公开主页 · 分别核对（${String(namedAccounts.length)}）`}),make('p',{className:'muted',text:'这些主页的实际标题也匹配你输入的姓名，可能属于同名的人。默认不选；勾选后仅以独立账号范围研究，不并入此人的身份结论。'}),renderGroups(namedAccounts,namedLabels));

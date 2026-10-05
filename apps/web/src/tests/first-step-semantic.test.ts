@@ -809,6 +809,19 @@ test('later original ownership evidence replaces an earlier index-only basis lab
   } finally { h.db.close(); }
 });
 
+test('indexed outbound posts retain their original URLs without proposing the quoted third-party author', async () => {
+  const posts=['https://x.com/fixture_third_party/status/12345','https://x.com/Fixture_Third_Party/status/67890'];
+  const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{
+    search:()=>[page(home,'Mira Kepler index.',{links:posts})],read:()=>[]
+  });
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.equal(view.accounts.some(account=>account.platform==='x'),false,'a nested index link supplies no person-account eligibility');
+    for(const url of posts){assert.ok(view.relatedLeads.some(lead=>lead.url===url));assert.equal(h.reads.includes(url),false);}
+    assert.ok(view.accounts.every(account=>!account.defaultSuggestion.suggested && account.userSelection.state==='unanswered'));
+  } finally {h.db.close();}
+});
+
  test('an indexed handle and URL case conflict is retained as a lead without inventing an alias', async () => {
   const exact = 'https://www.instagram.com/mira_kepler';
   const variant = 'https://www.instagram.com/Mira_Kepler';

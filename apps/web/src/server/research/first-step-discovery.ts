@@ -875,8 +875,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         const names=ctx.input.value.split(/\s*[\/／]\s*/).map(name=>name.trim().toLowerCase()).filter(Boolean);
         if(names.some(name=>page.title.toLowerCase().includes(name))){
          for(const link of page.links){
-          const classifiedLink=classifyFirstStepUrl(link);
-          const linked=register(link, {candidate: classifiedLink.ok && classifiedLink.ref.entry === 'page' && classifiedLink.ref.attributable});if(!linked)continue;
+          // Even an attributable post in an index's outbound list can be a
+          // quoted third party. Preserve its literal receipt as material;
+          // only direct results or actually read contexts propose accounts.
+          const linked=register(link, {candidate: false});if(!linked)continue;
           // An index's link list is observed discovery metadata, never an
           // authorial claim, identity support or fetch authorization. An
           // unverified outbound link inherits NO name relevance from its
@@ -1101,7 +1103,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       // IO: adapter-attested IDs still decide whether projection may merge.
       const unresolvedNativePair = namespace !== null && [...candidateRefs.values()].some(other =>
         other.accountKey !== ref.accountKey && nativeNamespace(other) === namespace);
-      if (unresolvedNativePair) return -150 - ((indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? 25 : 0);
+      const pairMatchesInput = namespace !== null && [...candidateRefs.values()].some(other =>
+        nativeNamespace(other) === namespace && (indexedTitles.get(other.accountKey) ?? []).some(matchesInput));
+      if (unresolvedNativePair && pairMatchesInput) return -150 - ((indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? 25 : 0);
     }
     const relevance = (indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? -100 : 0;
     if (ref.platform === 'personal_site' || ref.platform === 'linktree') return relevance;
@@ -1403,7 +1407,13 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       researchSummary: RESEARCH_SUMMARIES[ref.materialUse],
       accessLabel: accessReadable ? '原文可读' : '仅索引可见',
       defaultSuggestion: suggestion,
-      requiresIndependentScope: Boolean(conflict)||identityState !== 'supported'
+      requiresIndependentScope: Boolean(conflict)||identityState !== 'supported',
+      profileLinkSources: applicable.filter(observation => {
+        if (observation.retrieval === 'indexed' || observation.linkRole === 'explicit_denial' || observation.fromAccountKey === null) return false;
+        const target = classifyFirstStepUrl(observation.targetUrl);
+        return target.ok && target.ref.entry === 'profile' && candidateRefs.has(resolveKey(observation.fromAccountKey)) &&
+          observed.some(entry => entry.page.url === observation.sourceUrl && entry.ref.entry === 'profile');
+      }).map(observation => ({accountId:firstStepAccountId(caseId,resolveKey(observation.fromAccountKey!)),sourceUrl:observation.sourceUrl,targetUrl:observation.targetUrl}))
     });
   }
 

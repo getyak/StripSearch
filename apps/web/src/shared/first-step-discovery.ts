@@ -41,7 +41,7 @@ export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
  * query slots cover actual empty-route fallback or observed alias expansion.
  * Up to two identity reads are reserved for leads found by that later wave.
  */
-export const FIRST_STEP_POLICY_VERSION = 'first-step/v6';
+export const FIRST_STEP_POLICY_VERSION = 'first-step/v7';
 
 /* ------------------------------------------------------------------ */
 /* Input                                                               */
@@ -1391,6 +1391,8 @@ export interface FirstStepAccountView {
   defaultSuggestion: FirstStepSuggestion;
   /** True for accounts kept out of same-person conclusions. */
   requiresIndependentScope: boolean;
+  /** Actually read profile-to-profile links; discovery provenance, never ownership. */
+  profileLinkSources?: Array<{ accountId: string; sourceUrl: string; targetUrl: string }>;
 }
 
 export interface FirstStepPersonAtomView {

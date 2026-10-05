@@ -188,6 +188,7 @@ test('colleague links stay candidates and can never suggest the same person', as
     assert.ok(wrong, 'the colleague candidate is preserved');
     assert.equal(wrong!.defaultSuggestion.suggested, false);
     assert.notEqual(wrong!.identity.state, 'supported');
+    assert.ok(wrong!.profileLinkSources?.some(source=>source.sourceUrl===homepage&&source.targetUrl===other), 'actual homepage profile links retain separate discovery provenance');
     // Ordinary mention never attaches another person's account to the cluster.
     const cluster = view.clusters[0];
     assert.ok(cluster);
@@ -554,15 +555,13 @@ test('operator tool-call ceilings bind first-step discovery and fetch budgets', 
 });
 
 
-test('actual index-returned account links become candidates without becoming ownership evidence',async()=>{
+test('actual index-returned content links remain related material until their original context is read',async()=>{
  const url='https://x.com/fixture_writer/status/123456';
  const h=harness({kind:'name_query',value:'Lin Zhou',question:null},async()=>result([page('https://news-fixture.org/story','Lin Zhou compiler interview',[url])]),async()=>{throw new ProviderError('provider_unavailable','Synthetic inaccessible original');});
  try {
   const view=await discoverFirstStep(h.ctx);
-  const account=view.accounts.find(a=>a.profileUrl==='https://x.com/fixture_writer');
-  assert.ok(account,'the actual observed content URL yields its documented account home');
-  assert.equal(account.defaultSuggestion.suggested,false);assert.notEqual(account.identity.state,'supported');
-  assert.equal(account.identity.evidence.length,0);
+  assert.equal(view.accounts.some(a=>a.profileUrl==='https://x.com/fixture_writer'),false);
+  assert.ok(view.relatedLeads.some(lead=>lead.url===url),'the literal content link remains inspectable without proposing a third-party author');
  }finally{h.db.close();}
 });
 

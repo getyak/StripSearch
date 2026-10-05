@@ -451,6 +451,22 @@ test('unread native variants receive actual verification before matching website
   } finally {h.db.close();}
 });
 
+test('unrelated native variant pairs cannot displace a matching profile and homepage from a small read budget', async () => {
+  const native='https://github.com/fixture-author',home='https://fixture-author.dev/';
+  const noise=Array.from({length:6},(_,i)=>[`https://github.com/Noise${i}`,`https://github.com/noise${i}`]).flat();
+  const policy={maxSearchQueries:2,maxSearchResults:12,maxProfileReads:2,maxModelCalls:0,policyVersion:'first-step/v7'};
+  let calls=0;
+  const h=harness({kind:'name_query',value:'Fixture Author',question:null},{
+    search:()=>++calls===1?noise.map(url=>page(url,'Index noise.',{title:'Unrelated organization'})):[page(native,'Indexed name.'),page(home,'Indexed name.')],
+    read:url=>[page(url,'Original response without ownership.')],budget:policy
+  });h.ctx.budget=policy;
+  try {
+    const view=await discoverFirstStep(h.ctx);assert.deepEqual(h.reads,[native,home]);
+    assert.equal(view.accounts.filter(account=>noise.includes(account.profileUrl??'')).length,12,'unread observed variants stay distinct without an alias proof');
+    assert.ok(view.accounts.every(account=>!account.defaultSuggestion.suggested && account.userSelection.state==='unanswered'));
+  } finally {h.db.close();}
+});
+
 test('a name-matching native profile precedes the long tail of matching site titles without gaining ownership', async () => {
   const native='https://github.com/fixture-author';
   const noise=['https://fixture-directory.dev/','https://fixture-news.dev/','https://fixture-events.dev/'];
