@@ -393,3 +393,34 @@ test('repeated malformed plans stop after three corrections even with no global 
  assert.equal(plans,3);assert.equal(run.stopReason,'invalid_decision');assert.equal(run.state,'partial');assert.equal(f.store.listObservations(f.run.id).length,0);
  assert.equal(f.store.research.checkpoint(f.run.id)?.planValidationFailures,3);assert.equal(f.store.research.budget(f.run.id).toolCalls,2);
 });
+
+test('a later unknown inspect reference refuses the entire proposal before a permitted paid read', async (t) => {
+  const f = fixture();
+  t.after(() => f.close());
+  select(f);
+  const { calls, tools } = recordingTools();
+  let planCalls = 0;
+  let feedback = '';
+  const planner: ResearchPlanner = {
+    async decide(input) {
+      if (input.mode === 'verify') return { supported: [0], rejected: [] };
+      planCalls++;
+      if (planCalls === 1) return { action: 'batch', actions: [
+        { action: 'read', url: CONTENT_URL },
+        { action: 'inspect', sourceKey: 'S-synthetic-missing', offset: 0 }
+      ] };
+      feedback = input.checkpoint.planFeedback ?? '';
+      return { action: 'finish', claims: [{ sourceKey: sourceKeyFor(input, HOME_URL), quote: HOME_TEXT, statement: CLAIM, kind: 'page_statement' }] };
+    }
+  };
+  const runner = runnerFor(f, tools, planner);
+  t.after(() => runner.stopAll());
+  const run = await runToTerminal(f, runner);
+  assert.equal(run.errorCode, null);
+  assert.equal(planCalls, 2);
+  assert.match(feedback, /invalid_decision/);
+  assert.equal(calls.filter(action => action.type !== 'search' && action.url === CONTENT_URL).length, 0);
+  assert.equal(f.store.research.receipts(run.id).some(receipt => JSON.stringify(receipt.request).includes(CONTENT_URL)), false);
+  assert.equal(f.store.buildCanonicalView(run).sources.some(source => source.url === CONTENT_URL), false);
+  assert.equal(f.store.buildCanonicalView(run).observations.length, 1);
+});

@@ -351,6 +351,11 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     throw new ResearchStop('invalid_decision');
    });
    for(const step of planned){
+    if(step.kind==='inspect'){
+     if(!checkpoint.pages.some(page=>page.sourceKey===step.sourceKey))throw new ResearchStop('invalid_decision');
+     if(!stillActivePages().some(page=>page.sourceKey===step.sourceKey))throw new ResearchStop('source_revoked');
+     continue;
+    }
     if(step.kind!=='tool')continue;
     const action=step.action;
     if(action.type==='search'){if(!action.query.trim()||action.query.length>600)throw new ResearchStop('invalid_decision');}
