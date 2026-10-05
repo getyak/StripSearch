@@ -187,15 +187,48 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       });
       button.append(
         make('strong', { text: cluster.displayName }),
-        make('span', { className: 'first-step-cluster-anchor', text: shortUrl(cluster.anchorUrl) || cluster.anchorLabel })
+        make('span', { className: 'first-step-cluster-anchor', text: shortUrl(cluster.anchorUrl) || cluster.anchorLabel }),
+        make('span', {
+          className: `first-step-cluster-linkage${cluster.linkage === 'unconfirmed' ? ' uncertain' : ''}`,
+          text: cluster.linkage === 'unconfirmed' ? '未确认候选 · 同名不合并' : '有公开原文链接依据'
+        })
       );
-      for (const lead of cluster.leads.filter(lead => !/https?:\/\//i.test(lead.statement)).slice(0, 2)) {
-        button.appendChild(make('small', { text: lead.statement }));
+      // Grounded concise descriptor: plain statement text with its real source
+      // label — never a raw URL dump, and never discarded just because the
+      // source URL exists beside the summary.
+      for (const lead of cluster.leads.slice(0, 2)) {
+        button.appendChild(make('small', { className: 'first-step-lead', text: lead.statement }));
+        if (lead.sourceUrl) {
+          button.appendChild(make('small', { className: 'first-step-lead-source', text: `来源：${shortUrl(lead.sourceUrl ?? null)}` }));
+        }
       }
       if (cluster.conflicts.length > 0) {
         button.appendChild(make('small', { className: 'first-step-conflict', text: cluster.conflicts.join('；') }));
       }
       clusterBox.appendChild(button);
+      // Inspectable linkage basis and descriptor sources: exact spans of the
+      // retained originals, rendered as escaped plain text (source HTML never
+      // executes) while the original stays inspectable.
+      const basis = make('details', { className: 'first-step-cluster-basis', attrs: { 'data-detail-key': `basis-${cluster.clusterId}` } });
+      basis.appendChild(make('summary', { text: `辨识依据与出处（${cluster.displayName}）`, attrs: { 'data-focus-key': `basis-${cluster.clusterId}` } }));
+      const basisList = make('div', {});
+      if (cluster.anchorBasis) {
+        const block = make('div', { className: 'first-step-evidence-item' });
+        block.appendChild(make('p', { text: `${cluster.anchorBasis.label}（${shortUrl(cluster.anchorBasis.sourceUrl)}）` }));
+        if (cluster.anchorBasis.quote) block.appendChild(make('blockquote', { text: cluster.anchorBasis.quote }));
+        basisList.appendChild(block);
+      }
+      for (const lead of cluster.leads) {
+        const block = make('div', { className: 'first-step-evidence-item' });
+        block.appendChild(make('p', { text: `${lead.statement}（来源：${shortUrl(lead.sourceUrl ?? null)}）` }));
+        if (lead.quote) block.appendChild(make('blockquote', { text: lead.quote }));
+        basisList.appendChild(block);
+      }
+      if (!cluster.anchorBasis && cluster.leads.length === 0) {
+        basisList.appendChild(make('p', { className: 'muted', text: '暂无可展示的原文依据；这只是候选线索。' }));
+      }
+      basis.appendChild(basisList);
+      clusterBox.appendChild(basis);
     }
     if (view.clusters.length === 0) {
       clusterBox.appendChild(make('p', { className: 'muted', text: '暂未辨识出可确认的人物；可以补充一个公开主页或区分线索。' }));
@@ -220,17 +253,48 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     }
     root.appendChild(statusBox);
 
-    // Account cards grouped by research purpose.
+    // Account cards: the chosen person's accounts are the main choices;
+    // unconfirmed/unrelated leads live in a clearly labeled COLLAPSED secondary
+    // area. Nothing here ever widens the submitted scope automatically.
+    const chosen = clusterId === null ? null : (view.clusters.find((item) => item.clusterId === clusterId) ?? null);
+    const inMain = (account: FirstStepAccountView): boolean =>
+      chosen !== null
+        ? chosen.accountIds.includes(account.accountId)
+        : account.identity.state === 'supported' || account.defaultSuggestion.suggested;
+    const mainAccounts = view.accounts.filter(inMain);
+    const secondaryAccounts = view.accounts.filter((account) => !inMain(account));
     const cardsBox = make('section', { className: 'first-step-accounts', attrs: { 'aria-label': '公开账号候选' } });
-    for (const category of CATEGORY_ORDER) {
-      const accounts = view.accounts.filter((account) => account.category === category);
-      if (accounts.length === 0) continue;
-      const group = make('div', { className: 'first-step-group' });
-      group.appendChild(make('h3', { text: `${CATEGORY_LABELS[category]}（${String(accounts.length)}）` }));
-      const cards = make('div', { className: 'first-step-cards' });
-      for (const account of accounts) cards.appendChild(renderCard(account));
-      group.appendChild(cards);
-      cardsBox.appendChild(group);
+    if (mainAccounts.length === 0 && view.clusters.length > 0) {
+      cardsBox.appendChild(make('p', { className: 'muted', text: '请先确认目标人物；这个人的公开账号会显示在这里。' }));
+    }
+    cardsBox.appendChild(renderGroups(mainAccounts));
+    if (secondaryAccounts.length > 0 || (view.relatedLeads ?? []).length > 0) {
+      const secondary = make('details', { className: 'first-step-related', attrs: { 'data-detail-key': 'related-leads' } });
+      secondary.appendChild(
+        make('summary', { text: `其它线索（未确认 / 不并入人物结论）（${String(secondaryAccounts.length + (view.relatedLeads ?? []).length)}）` })
+      );
+      secondary.appendChild(
+        make('p', { className: 'muted', text: '保留的真实线索；默认不勾选、不并入人物结论，可单独以独立账号范围研究。' })
+      );
+      secondary.appendChild(renderGroups(secondaryAccounts));
+      if ((view.relatedLeads ?? []).length > 0) {
+        const materials = make('div', { className: 'first-step-materials' });
+        materials.appendChild(make('h4', { text: '材料链接（不是账号入口）' }));
+        const list = make('ul', {});
+        for (const lead of (view.relatedLeads ?? []).slice(0, 24)) {
+          list.appendChild(
+            make('li', {
+              children: [
+                make('span', { text: `${lead.title ? `${lead.title} · ` : ''}${shortUrl(lead.url)}` }),
+                make('small', { className: 'first-step-limit', text: lead.note })
+              ]
+            })
+          );
+        }
+        materials.appendChild(list);
+        secondary.appendChild(materials);
+      }
+      cardsBox.appendChild(secondary);
     }
     root.appendChild(cardsBox);
 
@@ -315,6 +379,30 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       replacement?.focus({preventScroll:true});
     }
     if (scroller && scrollTop !== undefined) scroller.scrollTop = scrollTop;
+  };
+
+  /** Compact categorized card groups: a presentation window, never a 90-card wall. */
+  const renderGroups = (accounts: FirstStepAccountView[]): HTMLElement => {
+    const wrap = make('div', { className: 'first-step-groups' });
+    for (const category of CATEGORY_ORDER) {
+      const groupAccounts = accounts.filter((account) => account.category === category);
+      if (groupAccounts.length === 0) continue;
+      const group = make('div', { className: 'first-step-group' });
+      group.appendChild(make('h3', { text: `${CATEGORY_LABELS[category]}（${String(groupAccounts.length)}）` }));
+      const cards = make('div', { className: 'first-step-cards' });
+      for (const account of groupAccounts.slice(0, 6)) cards.appendChild(renderCard(account));
+      group.appendChild(cards);
+      if (groupAccounts.length > 6) {
+        const more = make('details', { className: 'first-step-more', attrs: { 'data-detail-key': `more-${category}` } });
+        more.appendChild(make('summary', { text: `展开其余 ${String(groupAccounts.length - 6)} 个` }));
+        const extraCards = make('div', { className: 'first-step-cards' });
+        for (const account of groupAccounts.slice(6)) extraCards.appendChild(renderCard(account));
+        more.appendChild(extraCards);
+        group.appendChild(more);
+      }
+      wrap.appendChild(group);
+    }
+    return wrap;
   };
 
   const renderCard = (account: FirstStepAccountView): HTMLElement => {

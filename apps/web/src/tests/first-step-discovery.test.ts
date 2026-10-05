@@ -375,10 +375,16 @@ test('initial obligations are frozen before IO and never enumerate the whole cat
     { registryVersion: 'registry-test/v1', now: '2026-10-05T00:00:00.000Z' }
   );
   assert.equal(plan.frozenAt, '2026-10-05T00:00:00.000Z');
-  assert.equal(plan.policyVersion, 'first-step/v1');
+  assert.equal(plan.policyVersion, 'first-step/v2');
   const triggers = new Set(plan.obligations.map((o) => o.trigger));
   assert.ok(triggers.has('initial_wave'));
   assert.ok(plan.obligations.length >= 5 && plan.obligations.length <= 12, 'a bounded initial wave, not 4421 rules');
+  // Generic v2 budget: at most 8 queries / 12 results / 16 identity reads /
+  // 2 model calls; operator limits always dominate these defaults.
+  assert.equal(plan.budget.maxSearchQueries, 8);
+  assert.equal(plan.budget.maxSearchResults, 12);
+  assert.equal(plan.budget.maxProfileReads, 16);
+  assert.equal(plan.budget.maxModelCalls, 2);
   const platforms = new Set(plan.obligations.map((o) => o.platform));
   assert.ok(platforms.has('web_search'));
   assert.ok(platforms.has('github'));

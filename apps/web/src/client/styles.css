@@ -1066,6 +1066,18 @@ body[data-view="home"] .footer-inner a:not(.button) { color: var(--forest-mid); 
 .first-step-evidence-item.counter { border-left: 3px solid var(--danger); }
 .first-step-evidence-item blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid var(--accent); overflow-wrap: anywhere; }
 .first-step-limit { color: var(--warning); font-size: 13px; }
+.first-step-cluster-linkage { justify-self: start; border-radius: 5px; padding: 3px 7px; font-size: 12px; background: var(--surface-2); color: var(--success); }
+.first-step-cluster-linkage.uncertain { color: var(--warning); }
+.first-step-cluster .first-step-lead { display: block; color: var(--fg); }
+.first-step-cluster .first-step-lead-source { display: block; color: var(--muted) !important; font-size: 12px; }
+.first-step-cluster-basis { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 0 18px 10px; font-size: 13px; }
+.first-step-cluster-basis summary { cursor: pointer; color: var(--accent); min-height: 44px; align-content: center; }
+.first-step-related { border: 1px dashed var(--border); border-radius: 12px; padding: 0 18px 12px; margin-top: 18px; font-size: 13px; }
+.first-step-related > summary { cursor: pointer; color: var(--muted); font-weight: 650; min-height: 44px; align-content: center; }
+.first-step-materials h4 { margin: 12px 0 6px; font-size: 13px; }
+.first-step-materials ul { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
+.first-step-more summary { cursor: pointer; color: var(--accent); min-height: 44px; align-content: center; }
+.first-step-groups { display: grid; gap: 4px; }
 .first-step-secondary { font-size: 14px; color: var(--muted); margin-bottom: 16px; }
 .first-step-secondary summary { cursor: pointer; min-height: 44px; align-content: center; }
 .first-step-secondary input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 8px 0; background: var(--surface); color: var(--fg); font: inherit; }

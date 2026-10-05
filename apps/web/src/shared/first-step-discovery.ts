@@ -33,7 +33,14 @@ import type { DiscoveredAccountIdentity } from './discovery-plan.js';
 
 export const FIRST_STEP_SCHEMA_VERSION = 'stripsearch/first-step-discovery/v1';
 export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
-export const FIRST_STEP_POLICY_VERSION = 'first-step/v1';
+/**
+ * Policy v2 (2026-10-05 repair batch): generic default of at most 8 search
+ * queries, 12 results per query, 16 identity-profile reads and 2 restricted
+ * model calls per discovery attempt. Operator limits always dominate these
+ * defaults; the six initial query families stay frozen and the remaining
+ * query slots are reserved for ACTUAL observed alias/coverage expansion.
+ */
+export const FIRST_STEP_POLICY_VERSION = 'first-step/v2';
 
 /* ------------------------------------------------------------------ */
 /* Input                                                               */
@@ -133,6 +140,15 @@ export interface FirstStepAccountRef {
   accountKind: FirstStepAccountKind;
   /** `profile` is an account/home entry; `page` is a content page of an account. */
   entry: 'profile' | 'page';
+  /**
+   * Whether this page's account/home entry is DOCUMENTED: the platform URL
+   * rule derives a distinct account home (a repo -> its owner profile), or the
+   * page itself is an account/home entry. Unattributed generic content pages
+   * (a third-party news article, a platform login/search/watch/playlist root)
+   * are never accounts by assumption: they stay material receipts until an
+   * actual observed self-authorial site section documents the account home.
+   */
+  attributable: boolean;
 }
 
 export type FirstStepUrlClassification =
@@ -317,6 +333,12 @@ function refOf(
     materialUse: FirstStepMaterialUse;
     accountKind?: FirstStepAccountKind;
     entry: 'profile' | 'page';
+    /**
+     * Override for content pages whose account home is NOT documented by the
+     * platform URL rule (generic third-party subpages, platform navigation
+     * roots). Defaults to "account/home entry or documented canonicalization".
+     */
+    attributable?: boolean;
   }
 ): FirstStepAccountRef {
   const handle = parts.handle ?? null;
@@ -324,6 +346,7 @@ function refOf(
   const stableId = parts.stableId ?? null;
   const accountUrl = parts.accountUrl ?? pageUrl;
   const accountKind = parts.accountKind ?? 'unknown';
+  const attributable = parts.attributable ?? (parts.entry === 'profile' || accountUrl !== pageUrl);
   return {
     platform,
     platformLabel: PLATFORM_LABELS[platform],
@@ -335,7 +358,8 @@ function refOf(
     accountKey: firstStepAccountKey({ platform, instance, accountKind, handle, accountUrl }),
     materialUse: parts.materialUse,
     accountKind,
-    entry: parts.entry
+    entry: parts.entry,
+    attributable
   };
 }
 
@@ -347,7 +371,12 @@ function refOf(
  */
 const X_RESERVED_SEGMENTS = new Set(['home', 'explore', 'search', 'notifications', 'messages', 'settings', 'i', 'intent', 'login', 'signup', 'share', 'compose']);
 const YOUTUBE_CHANNEL_TABS = new Set(['', 'videos', 'shorts', 'streams', 'playlists', 'community', 'about', 'featured', 'channels', 'search']);
-const RESERVED_FIRST_SEGMENTS = new Set(['p', 'pin', 'reel', 'tv', 'stories', 'explore', 'accounts', 'pages', 'groups', 'watch', 'marketplace', 'events', 'photo', 'photo.php', 'story.php', 'user', 'users', 'search', 'settings', 'about', 'help', 'login', 'signup', 'tag', 'tags', 'topics', 'r', 'u']);
+/**
+ * Platform navigation/login/search/settings/watch/playlist roots are never
+ * account handles: they stay material receipts even when their URL shape
+ * could otherwise look like a profile segment.
+ */
+const RESERVED_FIRST_SEGMENTS = new Set(['p', 'pin', 'reel', 'tv', 'stories', 'explore', 'accounts', 'pages', 'groups', 'watch', 'marketplace', 'events', 'photo', 'photo.php', 'story.php', 'user', 'users', 'search', 'settings', 'about', 'help', 'login', 'signup', 'tag', 'tags', 'topics', 'r', 'u', 'notifications', 'features', 'pricing', 'trending', 'collections', 'sponsors', 'codespaces', 'account', 'new', 'messages', 'compose', 'results', 'questions', 'q', 'video', 'playlist', 'feed', 'intent', 'share', 'i', 'home', 'pulls', 'issues', 'discussions', 'orgs', 'enterprises', 'apps', 'stars', 'dashboard', 'session', 'password', 'auth', 'oauth']);
 
 export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
   if (typeof raw !== 'string' || raw.length === 0 || raw.length > 2048) {
@@ -407,6 +436,27 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
     };
   }
 
+  // Custom Medium publications and Bearblog subdomains are publication-shaped
+  // hosts (not Mastodon instances): the host root is the documented account/
+  // publication home and its subpages are attributable content of that home.
+  const customHostLabel = host.split('.')[0] ?? '';
+  const isCustomMedium = host.endsWith('.medium.com') && host !== 'www.medium.com' && customHostLabel.length > 0;
+  const isBearblog = (host.endsWith('.bear.blog') || host.endsWith('.bearblog.dev')) && customHostLabel.length > 0;
+  if (!known && (isCustomMedium || isBearblog)) {
+    const accountUrl = `https://${host}/`;
+    return {
+      ok: true,
+      ref: refOf(isCustomMedium ? 'medium' : 'rss_blog', segments.length === 0 ? accountUrl : href, {
+        accountUrl,
+        handle: customHostLabel,
+        instance: host,
+        materialUse: 'writing',
+        accountKind: 'publication',
+        entry: segments.length === 0 ? 'profile' : 'page'
+      })
+    };
+  }
+
   // Fediverse instance profiles: only the /@user convention on a non-catalog
   // host is instance-scoped. Arbitrary /users or /u paths are never guessed
   // into Mastodon accounts.
@@ -431,7 +481,7 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
   switch (known) {
     case 'github': {
       const handle = segments[0] ?? '';
-      if (!/^[A-Za-z0-9-]{1,39}$/.test(handle)) {
+      if (!/^[A-Za-z0-9-]{1,39}$/.test(handle) || RESERVED_FIRST_SEGMENTS.has(handle.toLowerCase())) {
         return { ok: true, ref: refOf('github', href, { materialUse: 'technical_work', entry: 'page' }) };
       }
       const accountUrl = `https://github.com/${handle}`;
@@ -824,7 +874,7 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
     case 'tiktok':
     case 'jike': {
       const handle = segments[0] ?? '';
-      const isProfile = handle !== '' && !['questions', 'q', 'tags', 'users', 'search', 'video', 'explore'].includes(handle);
+      const isProfile = handle !== '' && !RESERVED_FIRST_SEGMENTS.has(handle.toLowerCase()) && !['questions', 'q', 'tags', 'users', 'search', 'video', 'explore'].includes(handle);
       return {
         ok: true,
         ref: refOf(known, href, {
@@ -850,20 +900,26 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
     const home = relative === '' || /^(?:index\.(?:html?|php)|about|bio)$/i.test(relative);
     return { ok: true, ref: refOf('personal_site', home ? accountUrl : href, {
       accountUrl, handle: namespace.split('/').at(-1)!.replace(/^~/, ''), instance: host,
-      materialUse: home ? 'identity_anchor' : 'related_material', accountKind: 'unknown', entry: home ? 'profile' : 'page'
+      materialUse: home ? 'identity_anchor' : 'related_material', accountKind: 'unknown', entry: home ? 'profile' : 'page', attributable: true
     }) };
   }
 
-  // Generic public web: a site root or About/Bio/Profile page is an identity
-  // anchor candidate; other pages are related material of the same site. All
-  // generic site pages share the site's conservative account key (one
-  // platformId per referent), so attributable site content can expand inside
-  // the site's own scope while other sites' content never does.
+  // Generic public web: a site root, About/Bio/Profile/Home page or blog root
+  // is a personal/publication candidate; other pages are content of the same
+  // site. Generic content pages are NOT attributable to a whole-domain
+  // personal account by assumption (a third-party news subpage stays a
+  // material receipt) — only publication-shaped hosts (blog subdomains) and
+  // actually observed self-authorial site sections document the account home.
   const lowerPath = path.toLowerCase();
-  const isAbout = /^\/(about|bio|profile|about\/me)?$/i.test(lowerPath) && segments.length <= 1;
+  const isAbout = /^\/(about|bio|profile|home|about\/me)?$/i.test(lowerPath) && segments.length <= 1;
   const isRoot = segments.length === 0;
-  const materialUse: FirstStepMaterialUse = isRoot || isAbout ? 'identity_anchor' : 'related_material';
-  const siteUrl = `https://${host}/`;
+  const isBlogRoot = segments.length === 1 && ['blog', 'weblog', 'journal', 'essays', 'notes', 'writing', 'posts'].includes(lowerPath.slice(1));
+  const publicationShapedHost = /^(?:blog|blogs)\./.test(host);
+  const isHomeEntry = isRoot || isAbout || isBlogRoot;
+  const blogSection = ['blog', 'weblog', 'journal', 'essays', 'notes', 'writing', 'posts'].includes(segments[0]?.toLowerCase() ?? '') ? segments[0]! : null;
+  const blogLike = blogSection !== null || publicationShapedHost;
+  const materialUse: FirstStepMaterialUse = isHomeEntry ? (blogLike ? 'writing' : 'identity_anchor') : 'related_material';
+  const siteUrl = `https://${host}/${blogSection === null ? '' : `${blogSection}/`}`;
   return {
     ok: true,
     ref: refOf('personal_site', href, {
@@ -871,8 +927,9 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
       handle: host,
       instance: host,
       materialUse,
-      accountKind: 'unknown',
-      entry: isRoot || isAbout ? 'profile' : 'page'
+      accountKind: blogLike ? 'publication' : 'unknown',
+      entry: isHomeEntry ? 'profile' : 'page',
+      attributable: isHomeEntry || publicationShapedHost || blogSection !== null
     })
   };
 }
@@ -955,6 +1012,14 @@ export type FirstStepLinkContextClass = 'ownership' | 'third_party' | 'unknown';
 
 const THIRD_PARTY_MARKERS = /recommend|colleague|friend|朋友|推荐|同事|他们|她们|团队成员|staff|粉丝|fan\b|转载|转发|interview|采访|嘉宾|guest|mentions|cited|inspired by|\bhe\b|\bshe\b|\bhis\b|\bher\b|\btheir\b|他|她/i;
 const OWNERSHIP_MARKERS = /\bmy\b|\bmine\b|\bi am\b|\bi'm\b|\bme\b|follow me|contact me|find me|\baccounts?\b|\bprofiles?\b|我的|我是|我在|关注我|联系我|账号|主页/i;
+/** Prompt-injection / instruction-shaped text never becomes a person
+ * descriptor or an action; source text is untrusted data. */
+const INSTRUCTION_TEXT_MARKERS = /ignore (?:all |previous |above )*(?:instructions?|prompts?|rules?)|you are (?:now )?(?:a|an)\b|as an ai\b|system prompt|system message|<script|javascript:|忽略(?:此前|以上|先前)?(?:的)?(?:指令|指示|提示)|你现在是|系统提示|请(?:把|将).{0,24}(?:标记|确认|选择|提交)|please (?:mark|confirm|select|submit|treat)/i;
+
+/** True when text looks like instruction-shaped content (injection guard). */
+export function isUntrustedInstructionText(text: string | null): boolean {
+  return typeof text === 'string' && text.trim().length >= 2 && INSTRUCTION_TEXT_MARKERS.test(text);
+}
 
 /**
  * Context classification for one observed link span. Ownership roles require
@@ -973,15 +1038,69 @@ export function classifyLinkContext(quote: string | null): FirstStepLinkContextC
  * Role of one observed link, anchored to the observed extraction context and
  * the observed source page. `link_only`/unknown context stays a candidate;
  * ordinary mentions never become ownership even on a profile page.
+ *
+ * Semantic ownership guard (same rules for extracted link contexts and for
+ * restricted model proposals — no model bypass):
+ * - Extraction surfaces `third_party` and `unknown` never grant ownership.
+ * - `native_profile_field` from a verified native account is an explicit own
+ *   website.
+ * - HTML relative/encoded hrefs bind through the extractor record; the href
+ *   never has to be visible in the rendered quote and quotes are never
+ *   synthesized. The conservative fixture fallback needs an exact-target,
+ *   role-correct quote.
+ * - Feed/timeline/platform content pages and other authors' first person are
+ *   restricted even when the quote says "my"; on platform pages only an
+ *   identified profile website/contact/self section may grant linkage.
+ * - Colleague references, employers, recommendation sections and third-party
+ *   prose never support the homepage owner's account.
  */
 export function linkRoleFromContext(input: {
   quote: string | null;
+  /** Target URL this context binds; required for the quote fallback path. */
+  targetUrl?: string | null;
+  /** Extraction binding/surface of the retained original, when observed. */
+  binding?: 'html_anchor' | 'markdown_link' | 'native_profile_field' | null;
+  surface?: 'authorial' | 'profile_field' | 'third_party' | 'unknown' | null;
   sourceIsOwnProfilePage: boolean;
   sourceIsDirectory: boolean;
+  /** The adapter verified this native account; its website field is self-supplied. */
+  sourceIsNativeAccount?: boolean;
+  /** Feed/timeline/multi-author/platform content page: prose never grants ownership. */
+  sourceIsRestrictedSurface?: boolean;
+  /** Known social/platform page: only an identified website/contact/self section links. */
+  sourceIsSocialPlatform?: boolean;
 }): { role: FirstStepLinkRole; retrieval: 'read' | 'link_only' } {
-  const context = classifyLinkContext(input.quote);
+  const quote = input.quote;
+  if (typeof quote !== 'string' || quote.trim().length < 2) return { role: 'unknown_role', retrieval: 'link_only' };
+  // Ownership of a work does not establish ownership of its hosting account.
+  const target = classifyFirstStepUrl(input.targetUrl);
+  if (target.ok && target.ref.entry !== 'profile') return { role: 'unknown_role', retrieval: 'link_only' };
+  // The observed extraction context decides first; a claimed role or quote
+  // marker can never override a third-party/unknown surface.
+  if (input.surface === 'third_party') return { role: 'prose_mention', retrieval: 'read' };
+  if (input.binding === 'native_profile_field' && input.surface === 'profile_field' && input.sourceIsNativeAccount === true) {
+    return { role: 'self_account_section', retrieval: 'read' };
+  }
+  if (input.surface === 'unknown') return { role: 'unknown_role', retrieval: 'link_only' };
+  // Conservative fixture fallback (no extraction context): only an exact
+  // target-bound, role-correct quote is ever considered.
+  if (input.surface === null || input.surface === undefined) {
+    const target = (input.targetUrl ?? '').replace(/\/+$/, '');
+    if (target.length === 0 || !quote.includes(target) && !quote.includes(input.targetUrl ?? '')) {
+      return { role: 'unknown_role', retrieval: 'link_only' };
+    }
+  }
+  const context = classifyLinkContext(quote);
   if (context === 'third_party') return { role: 'prose_mention', retrieval: 'read' };
   if (context === 'unknown') return { role: 'unknown_role', retrieval: 'link_only' };
+  // Restricted surfaces (feeds, timelines, platform content pages) never
+  // grant ownership from prose, even first person.
+  if (input.sourceIsRestrictedSurface === true) return { role: 'unknown_role', retrieval: 'link_only' };
+  // A multi-author platform page only links through an identified profile
+  // website/contact/self section — never arbitrary first-person prose.
+  if (input.sourceIsSocialPlatform === true && !input.sourceIsDirectory && input.surface !== 'profile_field') {
+    return { role: 'unknown_role', retrieval: 'link_only' };
+  }
   if (input.sourceIsDirectory) return { role: 'explicit_directory', retrieval: 'read' };
   if (input.sourceIsOwnProfilePage) return { role: 'self_account_section', retrieval: 'read' };
   return { role: 'unknown_role', retrieval: 'link_only' };
@@ -1251,7 +1370,12 @@ export interface FirstStepAccountView {
 
 export interface FirstStepPersonAtomView {
   atomId: string;
+  /** Concise grounded descriptor text; never a raw URL dump. */
   statement: string;
+  /** Exact source span backing this descriptor; inspectable, never executed. */
+  quote?: string | null;
+  /** Real source URL of the quote; kept out of the statement text. */
+  sourceUrl?: string | null;
   /** Evidence ids with role identity_support or factual provenance slots. */
   evidenceIds: string[];
 }
@@ -1261,9 +1385,33 @@ export interface FirstStepPersonClusterView {
   displayName: string;
   anchorUrl: string | null;
   anchorLabel: string;
+  /** The cluster's own anchor account id (inspectable), never a global set. */
+  anchorAccountId?: string | null;
+  /**
+   * `linked` = at least one valid original linkage connects this cluster;
+   * `unconfirmed` = a single unlinked lead (e.g. a same-name hit) that never
+   * masquerades as a confident person. Same-name candidates stay distinct.
+   */
+  linkage?: 'linked' | 'unconfirmed';
+  /** Inspectable linkage basis of the anchor (real span + source), or null. */
+  anchorBasis?: { label: string; quote: string | null; sourceUrl: string | null } | null;
   leads: FirstStepPersonAtomView[];
   conflicts: string[];
   accountIds: string[];
+}
+
+/**
+ * A real observed tool result link / material receipt that is NOT a person
+ * account entry (platform navigation/login/search/watch/playlist roots,
+ * unattributed third-party articles). Kept available as a related lead; it
+ * never becomes a selectable person account card.
+ */
+export interface FirstStepRelatedLeadView {
+  url: string;
+  title: string | null;
+  reason: 'navigation' | 'content_page';
+  note: string;
+  observedAt: string;
 }
 
 export type FirstStepRouteState =
@@ -1346,6 +1494,8 @@ export interface FirstStepDiscoveryView {
   input: FirstStepInput;
   clusters: FirstStepPersonClusterView[];
   accounts: FirstStepAccountView[];
+  /** Non-account tool result links kept available; never selectable accounts. */
+  relatedLeads: FirstStepRelatedLeadView[];
   routes: FirstStepRouteStatusView[];
   gaps: string[];
   receipts: FirstStepReceiptView[];
@@ -1387,9 +1537,9 @@ export interface FirstStepBudgetPolicy {
 }
 
 export const FIRST_STEP_DEFAULT_BUDGET: FirstStepBudgetPolicy = {
-  maxSearchQueries: 6,
+  maxSearchQueries: 8,
   maxSearchResults: 12,
-  maxProfileReads: 8,
+  maxProfileReads: 16,
   maxModelCalls: 2,
   policyVersion: FIRST_STEP_POLICY_VERSION
 };
@@ -1406,8 +1556,9 @@ export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: 'home' | 'work' 
 
 /**
  * Frozen query plan: deliberate coverage per family first, then ACTUAL
- * observed alias expansion with the remaining budget. No guessed usernames,
- * no human-gold seeding.
+ * observed alias/coverage expansion with the reserved remaining budget (the
+ * generic v2 default reserves its last two queries for this). No guessed
+ * usernames, no fabricated aliases, no human-gold seeding.
  */
 export function firstStepQueryPlan(
   input: FirstStepInput,
@@ -1425,12 +1576,16 @@ export function firstStepQueryPlan(
     const query = entry.build(value);
     if (!plan.some((item) => item.query === query)) plan.push({ query, family: entry.family });
   }
+  let aliasSlots = 0;
   for (const alias of observedAliases) {
-    if (plan.length >= max) break;
+    if (plan.length >= max || aliasSlots >= 2) break;
     const trimmed = alias.trim();
     if (trimmed.length < 2 || trimmed.length > 120) continue;
     const query = `${trimmed} public profile`;
-    if (!plan.some((item) => item.query === query)) plan.push({ query, family: 'alias' });
+    if (!plan.some((item) => item.query === query)) {
+      plan.push({ query, family: 'alias' });
+      aliasSlots++;
+    }
   }
   return plan;
 }

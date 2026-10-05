@@ -50,6 +50,7 @@ import {
   freezeFirstStepObligations,
   classifyLinkContext,
   isExplicitDenialQuote,
+  isUntrustedInstructionText,
   linkRoleFromContext,
   type FirstStepAccountRef,
   type FirstStepAccountView,
@@ -62,6 +63,7 @@ import {
   type FirstStepMaterialUse,
   type FirstStepPersonClusterView,
   type FirstStepReceiptView,
+  type FirstStepRelatedLeadView,
   type FirstStepRetrieval,
   type FirstStepRouteObligation,
   type FirstStepRouteState,
@@ -218,6 +220,16 @@ export interface FirstStepModelProposal {
   quote: string | null;
   /** Claimed receipt id; the server rejects fabricated receipts. */
   requestKey: string | null;
+  /** Server-derived role after the semantic ownership guard; never model-claimed. */
+  verifiedRole?: FirstStepModelProposalRole;
+}
+
+/** Extractor-record link context of one actually read page (untrusted data). */
+export interface FirstStepObservedLinkContext {
+  url: string;
+  quote: string;
+  binding?: 'html_anchor' | 'markdown_link' | 'native_profile_field' | null;
+  surface?: 'authorial' | 'profile_field' | 'third_party' | 'unknown' | null;
 }
 
 /** A source-grounded short person descriptor proposed by the restricted model. */
@@ -354,13 +366,43 @@ function comparableUrl(raw: string): string {
 const READ_RECEIPT_TYPES = new Set(['read', 'github_profile', 'social_profile', 'firecrawl']);
 
 /**
+ * Source-surface flags derived from the ACTUAL source URL classification.
+ * Feed/timeline/platform content pages restrict prose ownership; generic
+ * personal-site home/About entries are the owner's own surface.
+ */
+function sourceFlags(sourceUrl: string): {
+  sourceIsOwnProfilePage: boolean;
+  sourceIsDirectory: boolean;
+  sourceIsRestrictedSurface: boolean;
+  sourceIsSocialPlatform: boolean;
+} {
+  const classified = classifyFirstStepUrl(sourceUrl);
+  if (!classified.ok) {
+    return { sourceIsOwnProfilePage: false, sourceIsDirectory: false, sourceIsRestrictedSurface: true, sourceIsSocialPlatform: true };
+  }
+  const ref = classified.ref;
+  const social = ref.platform !== 'personal_site' && ref.platform !== 'rss_blog' && ref.platform !== 'web_page';
+  return {
+    sourceIsOwnProfilePage: ref.entry === 'profile',
+    sourceIsDirectory: ref.platform === 'linktree',
+    // Multi-author activity/timeline content never links a homepage owner even
+    // when the quote says "my".
+    sourceIsRestrictedSurface: social && ref.entry !== 'profile',
+    sourceIsSocialPlatform: social
+  };
+}
+
+/**
  * A restricted model may propose attributions, but every proposal is bound to
  * the ACTUAL source its receipt read: the receipt's request URL must be the
  * claimed source, the exact non-empty span must exist in that source's stored
- * text, the target href must actually be present there, and the claimed role
- * must match the observed context. A search receipt can never become original
- * read evidence, and model-invented roles/relations are rejected loudly with
- * their reasons preserved. Nothing here creates identity support by itself.
+ * text, the target href must actually be present there (visible text OR the
+ * extractor record of an HTML relative/encoded href binding), and the claimed
+ * role must pass the SAME semantic ownership guard as extracted link contexts
+ * — source, target, surface AND ownership semantics, no model bypass. A search
+ * receipt can never become original read evidence, and model-invented
+ * roles/relations are rejected loudly with their reasons preserved. Nothing
+ * here creates identity support by itself.
  */
 export function verifyFirstStepModelProposals(
   proposals: readonly FirstStepModelProposal[],
@@ -370,6 +412,8 @@ export function verifyFirstStepModelProposals(
     readTexts: ReadonlyMap<string, string>;
     /** page URL -> hrefs actually extracted from that page (optional). */
     readLinks?: ReadonlyMap<string, readonly string[]>;
+    /** page URL -> extractor-record link contexts of that page (optional). */
+    readContexts?: ReadonlyMap<string, readonly FirstStepObservedLinkContext[]>;
   }
 ): FirstStepModelVerification {
   const accepted: FirstStepModelProposal[] = [];
@@ -398,7 +442,7 @@ export function verifyFirstStepModelProposals(
     }
     // The receipt must belong to the claimed source: same request URL.
     if (receipt.request.url !== undefined && comparableUrl(receipt.request.url) !== comparableUrl(proposal.fromUrl)) {
-      reject('提议引用的回执属于其他来源页面。');
+      reject('提议引用的请求回执属于其他来源页面。');
       continue;
     }
     const text = observed.readTexts.get(proposal.fromUrl);
@@ -410,15 +454,34 @@ export function verifyFirstStepModelProposals(
       reject('提议的摘录不是已读原文中的非空精确片段。');
       continue;
     }
+    // Instruction-shaped text is untrusted data: it never becomes a person
+    // descriptor or an attribution action.
+    if (isUntrustedInstructionText(proposal.quote)) {
+      reject('摘录为指令样式文本，不作为归属动作。');
+      continue;
+    }
     // The target href must actually be present in that source (text or the
     // page's extracted hrefs) AND the quote must bind to the SAME target: an
     // ownership quote for one account can never authorize a different link
-    // elsewhere on the same page.
+    // elsewhere on the same page. HTML relative/encoded hrefs bind through the
+    // extractor record; the href never has to be visible in the rendered quote
+    // and quotes are never synthesized.
     const linked = observed.readLinks?.get(proposal.fromUrl) ?? [];
     const targetComparable = comparableUrl(proposal.targetUrl);
+    const contexts = (observed.readContexts?.get(proposal.fromUrl) ?? []).filter(
+      (context) => comparableUrl(context.url) === targetComparable
+    );
+    const boundContext =
+      contexts.find((context) => proposal.quote === context.quote) ??
+      contexts.find((context) => context.quote.includes(proposal.quote as string)) ??
+      null;
     const quoteBindsTarget =
-      proposal.quote.includes(proposal.targetUrl) || proposal.quote.includes(targetComparable) || proposal.quote.includes(proposal.targetUrl.replace(/\/+$/, ''));
-    const targetPresent = text.includes(proposal.targetUrl) || linked.some((href) => comparableUrl(href) === targetComparable);
+      boundContext !== null ||
+      proposal.quote.includes(proposal.targetUrl) ||
+      proposal.quote.includes(targetComparable) ||
+      proposal.quote.includes(proposal.targetUrl.replace(/\/+$/, ''));
+    const targetPresent =
+      text.includes(proposal.targetUrl) || linked.some((href) => comparableUrl(href) === targetComparable) || contexts.length > 0;
     if (!targetPresent) {
       reject('提议的关系在该来源中没有实际观察到（目标链接不在原文/出链中）。');
       continue;
@@ -427,24 +490,39 @@ export function verifyFirstStepModelProposals(
       reject('提议的摘录没有绑定同一目标；不能用其他出链的片段授权该账号。');
       continue;
     }
-    // Role correctness against the OBSERVED context; a claimed role alone can
-    // never establish ownership.
-    const ownershipRole =
-      proposal.linkRole === 'self_account_section' ||
-      proposal.linkRole === 'explicit_directory' ||
-      proposal.linkRole === 'explicit_claim';
-    const context = classifyLinkContext(proposal.quote);
-    if (ownershipRole && context !== 'ownership') {
-      reject('提议的角色缺少原文中的归属上下文；普通提及不能建立归属。');
-      continue;
-    }
     // A denial needs explicit actual negative association with the target;
     // ordinary mentions can never become identity_counterevidence/rejected.
-    if (proposal.linkRole === 'explicit_denial' && !isExplicitDenialQuote(proposal.quote, proposal.targetUrl)) {
-      reject('普通提及不能当作明确否认；否认必须有实际负向声明文本。');
+    if (proposal.linkRole === 'explicit_denial') {
+      if (!isExplicitDenialQuote(proposal.quote, proposal.targetUrl)) {
+        reject('普通提及不能当作明确否认；否认必须有实际负向声明文本。');
+        continue;
+      }
+      accepted.push({ ...proposal, verifiedRole: 'explicit_denial' });
       continue;
     }
-    accepted.push(proposal);
+    if (proposal.linkRole === 'prose_mention') {
+      accepted.push({ ...proposal, verifiedRole: 'prose_mention' });
+      continue;
+    }
+    // Ownership claims pass the SAME semantic ownership guard as extracted
+    // link contexts: source, target, surface AND ownership semantics.
+    const flags = sourceFlags(proposal.fromUrl);
+    const role = linkRoleFromContext({
+      quote: proposal.quote,
+      targetUrl: proposal.targetUrl,
+      binding: boundContext?.binding ?? null,
+      surface: boundContext?.surface ?? null,
+      sourceIsOwnProfilePage: flags.sourceIsOwnProfilePage,
+      sourceIsDirectory: flags.sourceIsDirectory,
+      sourceIsNativeAccount: boundContext?.binding === 'native_profile_field',
+      sourceIsRestrictedSurface: flags.sourceIsRestrictedSurface,
+      sourceIsSocialPlatform: flags.sourceIsSocialPlatform
+    });
+    if (role.role !== 'self_account_section' && role.role !== 'explicit_directory') {
+      reject('提议的角色缺少原文中的归属上下文或属于受限页面；普通提及/他人自述不能建立归属。');
+      continue;
+    }
+    accepted.push({ ...proposal, verifiedRole: role.role });
   }
   return { accepted, rejected };
 }
@@ -550,18 +628,73 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   stage('finding_home', '查找公开主页与身份线索');
 
   const observed: ObservedPage[] = [];
-  const indexedRefs = new Map<string, FirstStepAccountRef>();
+  const candidateRefs = new Map<string, FirstStepAccountRef>();
+  const relatedLeads = new Map<string, FirstStepRelatedLeadView>();
   const linkObservations: FirstStepLinkObservation[] = [];
+  const observationIds = new Set<string>();
   const gaps: string[] = [];
-  const failures: Array<{ target: string; state: FirstStepRouteState; detail: string }> = [];
+  const failures: Array<{ kind: 'search' | 'read'; target: string; platform: string | null; state: FirstStepRouteState; detail: string }> = [];
+  let budgetExhausted = false;
   let requestIndex = 0;
   const requestKey = (kind: string): string => `firststep:${attemptId}:${kind}:${String(++requestIndex)}`;
 
-  const classifyInto = (url: string): FirstStepAccountRef | null => {
+  /** Non-account tool result links stay available as honest related leads. */
+  const keepMaterialLead = (ref: FirstStepAccountRef): void => {
+    if (relatedLeads.has(ref.profileUrl)) return;
+    const platformRoot = ref.platform !== 'personal_site' && ref.platform !== 'rss_blog' && ref.platform !== 'web_page';
+    const navigation = platformRoot && ref.entry === 'page' && ref.accountUrl === ref.profileUrl;
+    relatedLeads.set(ref.profileUrl, {
+      url: ref.profileUrl,
+      title: null,
+      reason: navigation ? 'navigation' : 'content_page',
+      note: navigation
+        ? '平台导航/登录/搜索/播放列表等页面，从来不是公开账号入口；仅保留真实链接回执。'
+        : '未观察到归属依据的第三方内容页，不能按域名推定为本人账号；仅保留真实链接回执。',
+      observedAt: now()
+    });
+  };
+
+  /**
+   * Account projection prefers real account/home entries. A content page of a
+   * DOCUMENTED account home canonicalizes to that home (no separate cards, the
+   * profile entry wins even when the content link arrives first); platform
+   * navigation/login/search/watch/playlist roots and unattributed third-party
+   * subpages never become selectable person accounts. Explicit URL input is
+   * always retained as an observed lead.
+   */
+  const register = (url: string, options?: { explicit?: boolean }): FirstStepAccountRef | null => {
     const classified = classifyFirstStepUrl(url);
     if (!classified.ok) return null;
-    if (!indexedRefs.has(classified.ref.accountKey)) indexedRefs.set(classified.ref.accountKey, classified.ref);
-    return classified.ref;
+    const ref = classified.ref;
+    if (ref.entry === 'profile') {
+      const existing = candidateRefs.get(ref.accountKey);
+      // Prefer the actual account/home entry (profile URL == documented home):
+      // a derived home page (About) never displaces the home entry itself.
+      const isHomeEntry = ref.profileUrl === ref.accountUrl;
+      const existingIsHomeEntry = existing !== undefined && existing.entry === 'profile' && existing.profileUrl === existing.accountUrl;
+      if (!existing || existing.entry !== 'profile' || (isHomeEntry && !existingIsHomeEntry)) candidateRefs.set(ref.accountKey, ref);
+      return ref;
+    }
+    if (ref.attributable) {
+      const home = classifyFirstStepUrl(ref.accountUrl);
+      if (home.ok && home.ref.entry === 'profile') {
+        if (!candidateRefs.has(home.ref.accountKey)) candidateRefs.set(home.ref.accountKey, home.ref);
+        return home.ref;
+      }
+      return ref;
+    }
+    if (options?.explicit) {
+      candidateRefs.set(ref.accountKey, ref);
+      return ref;
+    }
+    keepMaterialLead(ref);
+    return ref;
+  };
+
+  const pushObservation = (observation: FirstStepLinkObservation): void => {
+    if (observationIds.has(observation.observationId)) return;
+    observationIds.add(observation.observationId);
+    linkObservations.push(observation);
   };
 
   const searchOnce = async (query: string): Promise<'ok' | 'failed' | 'budget'> => {
@@ -570,9 +703,11 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       const result = await ctx.search.search(requestKey('search'), query, budget.maxSearchResults, ctx.signal);
       active();
       for (const page of result.pages) {
-        const ref = classifyInto(page.url);
+        const ref = register(page.url);
         if (!ref) continue;
-        linkObservations.push({
+        const classified = classifyFirstStepUrl(page.url);
+        if (!classified.ok) continue;
+        pushObservation({
           observationId: `obs_indexed_${digest(page.url)}`,
           sourceId: `search:${digest(query)}`,
           sourceRevision: 1,
@@ -580,7 +715,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           sourceContentHash: null,
           sourceRetrievedAt: null,
           fromAccountKey: null,
-          targetAccountKey: ref.accountKey,
+          targetAccountKey: classified.ref.accountKey,
           targetUrl: page.url,
           linkRole: 'prose_mention',
           direction: 'outbound',
@@ -593,18 +728,19 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       return 'ok';
     } catch (error) {
       if (error instanceof ResearchStop && error.code === 'budget_exhausted') {
+        budgetExhausted = true;
         gaps.push('操作员总预算上限已到，剩余检索路线未请求；缺口保留，不自动重试。');
         return 'budget';
       }
       if (isLivenessFailure(error, ctx.signal)) throw error;
       const failure = mapProviderFailure(error);
-      failures.push({ target: query, state: failure.state, detail: failure.message });
+      failures.push({ kind: 'search', target: query, platform: null, state: failure.state, detail: failure.message });
       gaps.push(`检索路线未成功（${failure.state}）：${query}；不代表无资料。`);
       return 'failed';
     }
   };
 
-  const readOnce = async (ref: FirstStepAccountRef): Promise<'ok' | 'failed' | 'budget'> => {
+  const readOnce = async (ref: FirstStepAccountRef): Promise<'ok' | 'failed' | 'budget' | 'missing'> => {
     active();
     const action: ResearchToolAction =
       ref.platform === 'github'
@@ -615,53 +751,97 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     try {
       const result = await ctx.search.readIdentity(requestKey('profile'), action, ctx.signal);
       active();
+      let ingested = 0;
       for (const page of result.pages) {
         const classified = classifyFirstStepUrl(page.url);
         if (!classified.ok) continue;
+        ingested++;
+        const source = classified.ref;
         // The read page itself is an observed lead (explicit URL input is
         // always retained); it gets no read permission by itself.
-        indexedRefs.set(classified.ref.accountKey, classified.ref);
-        observed.push({ page, ref: classified.ref, retrieval: 'read' });
-        for (const target of page.links) {
+        register(page.url);
+        observed.push({ page, ref: source, retrieval: 'read' });
+        const flags = sourceFlags(page.url);
+        // Consume the ACTUAL extractor-record link contexts: exact spans of
+        // the retained original with their href binding and surface. Quotes
+        // are never synthesized and the href never has to be visible in the
+        // rendered span (HTML relative/encoded hrefs bind via the record).
+        const contexts = page.linkContexts ?? [];
+        const byTarget = new Map<string, (typeof contexts)[number]>();
+        for (const context of contexts) {
+          if (typeof context.quote !== 'string' || context.quote.trim().length < 2 || !page.text.includes(context.quote)) {
+            gaps.push(`链接上下文摘录不在已读原文中，已忽略：${page.url}`);
+            continue;
+          }
+          if (!byTarget.has(context.url)) byTarget.set(context.url, context);
+        }
+        // Provider extras without a context stay link_only leads: never exact
+        // original evidence.
+        const targets = [...new Set([...byTarget.keys(), ...page.links])];
+        for (const target of targets) {
           const targetClassified = classifyFirstStepUrl(target);
           if (!targetClassified.ok) continue;
           const targetRef = targetClassified.ref;
-          if (targetRef.accountKey === classified.ref.accountKey) continue;
-          const quoted = quoteAround(page.text, target);
+          register(target);
+          if (targetRef.accountKey === source.accountKey) continue;
+          const context = byTarget.get(target) ?? null;
+          const fallback = context === null ? quoteAround(page.text, target) : null;
+          const quote = context !== null ? context.quote : fallback?.quote ?? null;
+          const locator = context !== null ? context.locator : fallback?.locator ?? '页面出链提取（正文无对应片段）';
           const role = linkRoleFromContext({
-            quote: quoted.quote,
-            sourceIsOwnProfilePage: classified.ref.entry === 'profile' || page.kind === 'profile',
-            sourceIsDirectory: classified.ref.platform === 'linktree'
+            quote,
+            targetUrl: target,
+            binding: context?.binding ?? null,
+            surface: context?.surface ?? null,
+            sourceIsOwnProfilePage: source.entry === 'profile' || page.kind === 'profile',
+            sourceIsDirectory: source.platform === 'linktree',
+            sourceIsNativeAccount: context?.binding === 'native_profile_field' && (page.retrieval === 'profile' || page.account !== undefined),
+            sourceIsRestrictedSurface: flags.sourceIsRestrictedSurface,
+            sourceIsSocialPlatform: flags.sourceIsSocialPlatform
           });
-          linkObservations.push({
+          pushObservation({
             observationId: `obs_${digest(`${page.url}|${target}`)}`,
             sourceId: `page:${digest(page.url)}`,
             sourceRevision: 1,
             sourceUrl: page.url,
             sourceContentHash: createHash('sha256').update(page.text).digest('hex'),
             sourceRetrievedAt: page.retrievedAt ?? null,
-            fromAccountKey: classified.ref.accountKey,
+            fromAccountKey: source.accountKey,
             targetAccountKey: targetRef.accountKey,
             targetUrl: target,
             linkRole: role.role,
             direction: 'outbound',
-            retrieval: role.retrieval === 'read' && quoted.quote ? 'read' : 'link_only',
-            quote: role.retrieval === 'read' ? quoted.quote : null,
-            locator: quoted.locator,
+            retrieval: role.retrieval === 'read' && quote ? 'read' : 'link_only',
+            quote: role.retrieval === 'read' ? quote : null,
+            locator,
             observedAt: now()
           });
-          indexedRefs.set(targetRef.accountKey, targetRef);
+          // An observed self-authorial site section documents its site's
+          // account home (eligibility only; never identity support by itself).
+          // Third-party news subpages without such context stay material.
+          if (
+            source.entry === 'page' &&
+            !source.attributable &&
+            source.platform === 'personal_site' &&
+            context !== null &&
+            (context.surface === 'authorial' || context.surface === 'profile_field') &&
+            classifyLinkContext(context.quote) === 'ownership' &&
+            targetRef.entry === 'profile'
+          ) {
+            register(source.accountUrl);
+          }
         }
       }
-      return 'ok';
+      return ingested > 0 ? 'ok' : 'missing';
     } catch (error) {
       if (error instanceof ResearchStop && error.code === 'budget_exhausted') {
+        budgetExhausted = true;
         gaps.push('操作员总预算上限已到，剩余主页未读取；缺口保留，不自动重试。');
         return 'budget';
       }
       if (isLivenessFailure(error, ctx.signal)) throw error;
       const failure = mapProviderFailure(error);
-      failures.push({ target: ref.profileUrl, state: failure.state, detail: failure.message });
+      failures.push({ kind: 'read', target: ref.profileUrl, platform: ref.platform, state: failure.state, detail: failure.message });
       gaps.push(`身份读取路线未成功（${failure.state}）：${ref.profileUrl}；不代表无此账号。`);
       return 'failed';
     }
@@ -671,8 +851,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    observed lead — it gets no read permission by itself.
   const explicitAnchor = ctx.input.kind === 'homepage_url' ? classifyFirstStepUrl(ctx.input.value) : null;
   const anchorsRead: FirstStepAccountRef[] = [];
+  const readKeys = new Set<string>();
   if (explicitAnchor && explicitAnchor.ok) {
-    indexedRefs.set(explicitAnchor.ref.accountKey, explicitAnchor.ref);
+    register(ctx.input.value, { explicit: true });
+    readKeys.add(explicitAnchor.ref.accountKey);
     await readOnce(explicitAnchor.ref);
     anchorsRead.push(explicitAnchor.ref);
   }
@@ -684,22 +866,58 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     if ((await searchOnce(item.query)) === 'budget') break;
   }
 
-  // 3. Anchor + minimal identity reads of candidate identity anchors.
+  // 3. Minimal identity reads BEFORE the explicit selection, prioritizing
+  //    actual personal home/About/link-directory entries and native GitHub/X
+  //    anchors over noisy social feeds — and DYNAMICALLY reading actually
+  //    self-linked profiles while reads remain (never only the initial static
+  //    array). Account reads are deduplicated and a failed/missing read is
+  //    never counted as anchor evidence.
   stage('expanding_accounts', '读取公开身份资料与实际外链');
-  const anchorCandidates = [...indexedRefs.values()].filter(
-    (ref) => ref.entry === 'profile' && (ref.materialUse === 'identity_anchor' || ref.accountKind === 'person') && !anchorsRead.some((other) => other.accountKey === ref.accountKey)
-  );
-  for (const ref of anchorCandidates.slice(0, Math.max(0, budget.maxProfileReads))) {
-    if ((await readOnce(ref)) === 'budget') break;
-    anchorsRead.push(ref);
+  const priorityOf = (ref: FirstStepAccountRef): number => {
+    if (ref.platform === 'personal_site' || ref.platform === 'linktree') return 0;
+    if (ref.platform === 'github' || ref.platform === 'x') return 1;
+    return 2;
+  };
+  const readQueue: FirstStepAccountRef[] = [...candidateRefs.values()]
+    .filter(
+      (ref) =>
+        ref.entry === 'profile' &&
+        (ref.materialUse === 'identity_anchor' || ref.accountKind === 'person') &&
+        !readKeys.has(ref.accountKey)
+    )
+    .sort((a, b) => priorityOf(a) - priorityOf(b));
+  const enqueueRead = (ref: FirstStepAccountRef): void => {
+    if (ref.entry !== 'profile' || readKeys.has(ref.accountKey) || readQueue.some((other) => other.accountKey === ref.accountKey)) return;
+    readQueue.push(ref);
+  };
+  while (readQueue.length > 0 && readKeys.size < Math.max(0, budget.maxProfileReads)) {
+    const next = readQueue.shift()!;
+    if (readKeys.has(next.accountKey)) continue;
+    readKeys.add(next.accountKey);
+    const before = linkObservations.length;
+    const outcome = await readOnce(next);
+    if (outcome === 'budget') break;
+    if (outcome === 'ok') anchorsRead.push(next);
+    if (outcome === 'missing') {
+      // A failed/missing read is never counted as actual anchor evidence.
+      gaps.push(`读取未返回可用页面内容：${next.profileUrl}；保持未回读状态，不作归属依据。`);
+    }
+    // Actually self-linked profiles expand the read set while reads remain.
+    for (const observation of linkObservations.slice(before)) {
+      if (observation.linkRole !== 'self_account_section' && observation.linkRole !== 'explicit_directory') continue;
+      const target = classifyFirstStepUrl(observation.targetUrl);
+      if (target.ok) enqueueRead(target.ref);
+    }
   }
 
-  // 4. Actual observed alias expansion with the remaining budget: aliases come
-  //    from read pages only (titles/handles actually observed).
+  // 4. Actual observed alias/coverage expansion with the reserved remaining
+  //    query slots: aliases come from read pages only (titles/handles actually
+  //    observed) — never fabricated usernames, and instruction-shaped text is
+  //    never followed as an action.
   const observedAliases = observed
     .map((entry) => entry.page.title)
     .concat(observed.map((entry) => entry.ref.handle ?? ''))
-    .filter((alias): alias is string => typeof alias === 'string' && alias.trim().length >= 2);
+    .filter((alias): alias is string => typeof alias === 'string' && alias.trim().length >= 2 && !isUntrustedInstructionText(alias));
   const expanded = firstStepQueryPlan(ctx.input, budget, [...new Set(observedAliases)]);
   for (const item of expanded.slice(queryPlan.length)) {
     if ((await searchOnce(item.query)) === 'budget') break;
@@ -717,6 +935,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     }
     const readTexts = new Map(observed.map((entry) => [entry.page.url, entry.page.text]));
     const readLinks = new Map(observed.map((entry) => [entry.page.url, entry.page.links as readonly string[]]));
+    const readContexts = new Map(observed.map((entry) => [entry.page.url, (entry.page.linkContexts ?? []) as readonly FirstStepObservedLinkContext[]]));
     let proposals: FirstStepModelProposal[] = [];
     let leads: FirstStepModelLead[] = [];
     try {
@@ -748,21 +967,28 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     active();
     // Source-grounded person descriptors: each keeps its exact quote and real
     // source so the summary is inspectable and never a fabricated biography.
+    // The statement is concise text (no raw URL dump); the source stays a
+    // separate inspectable field. Instruction-shaped text is untrusted data
+    // and never becomes a person description.
     for (const lead of leads) {
       const text = observed.find((entry) => entry.page.url === lead.fromUrl)?.page.text;
       if (text === undefined || !text.includes(lead.quote) || lead.quote.trim().length < 2) {
         gaps.push(`模型人物概括被拒（摘录不在已读原文中）：${lead.fromUrl}`);
         continue;
       }
+      if (isUntrustedInstructionText(lead.quote) || isUntrustedInstructionText(lead.statement)) {
+        gaps.push(`模型人物概括被拒（指令样式文本不作人物描述）：${lead.fromUrl}`);
+        continue;
+      }
       const from = observed.find((entry) => entry.page.url === lead.fromUrl);
       modelLeads.push({
         anchorKey: from?.ref.accountKey ?? null,
-        statement: `（模型基于原文的概括，待核对）${lead.statement}｜原文：“${lead.quote}”（${lead.fromUrl}）`,
+        statement: `原文自述（待核对）：${lead.quote}`,
         quote: lead.quote,
         sourceUrl: lead.fromUrl
       });
     }
-    const verified = verifyFirstStepModelProposals(proposals, { receipts, readTexts, readLinks });
+    const verified = verifyFirstStepModelProposals(proposals, { receipts, readTexts, readLinks, readContexts });
     for (const rejection of verified.rejected) {
       gaps.push(`模型提议被拒（${rejection.reason}）：${rejection.proposal.targetUrl}`);
     }
@@ -770,7 +996,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       const from = observed.find((entry) => entry.page.url === proposal.fromUrl);
       const targetClassified = classifyFirstStepUrl(proposal.targetUrl);
       if (!from || !targetClassified.ok) continue;
-      linkObservations.push({
+      pushObservation({
         observationId: `obs_model_${digest(proposal)}`,
         sourceId: `page:${digest(from.page.url)}`,
         sourceRevision: 1,
@@ -780,7 +1006,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         fromAccountKey: from.ref.accountKey,
         targetAccountKey: targetClassified.ref.accountKey,
         targetUrl: proposal.targetUrl,
-        linkRole: proposal.linkRole === 'explicit_denial' ? 'explicit_denial' : proposal.linkRole === 'prose_mention' ? 'prose_mention' : proposal.linkRole,
+        // The role is the SERVER-guarded role; a model claim never bypasses
+        // the semantic ownership guard.
+        linkRole: proposal.verifiedRole ?? proposal.linkRole,
         direction: 'outbound',
         retrieval: 'read',
         quote: proposal.quote,
@@ -794,7 +1022,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    observations with actual quotes become evidence), then project views
   //    from the PERSISTED facets — nothing recorded, nothing suggested.
   stage('verifying_attribution', '整理归属依据与候选账号');
-  const accountRefs = [...indexedRefs.values()];
+  const accountRefs = [...candidateRefs.values()];
   const accountViews: FirstStepAccountView[] = [];
   for (const ref of accountRefs) {
     active();
@@ -921,9 +1149,21 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       obligation.source === 'catalog'
         ? accountViews.filter((account) => account.platform === obligation.platform)
         : accountViews.filter((account) => account.materialUse === obligation.materialUse);
-    const relatedFailure = failures.find((failure) => failure.target.includes(obligation.platform) || (obligation.routeId === 'web-search' && failure.target === ctx.input.value));
+    const relatedFailure = failures.find((failure) =>
+      obligation.routeId === 'web-search'
+        ? failure.kind === 'search'
+        : failure.kind === 'read' && failure.platform === obligation.platform
+    );
     const state: FirstStepRouteState =
-      relatedFailure !== undefined ? relatedFailure.state : matching.length > 0 ? 'found' : obligation.initialState === 'planned' ? 'no_clue' : obligation.initialState;
+      relatedFailure !== undefined
+        ? relatedFailure.state
+        : matching.length > 0
+          ? 'found'
+          : obligation.initialState === 'planned'
+            ? budgetExhausted
+              ? 'skipped_budget'
+              : 'no_clue'
+            : obligation.initialState;
     return {
       routeId: obligation.routeId,
       platform: obligation.platform,
@@ -935,12 +1175,28 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           ? `真实失败回执（${relatedFailure.state}）：${relatedFailure.detail}`
           : matching.length > 0
             ? `本次检索得到 ${String(matching.length)} 个候选；覆盖完整性未验证。`
-            : obligation.source === 'catalog'
-              ? `目录义务（${ctx.catalog?.registryVersion ?? plan.registryVersion}）：本次未观察到真实线索，保持 ${obligation.initialState === 'planned' ? 'no_clue' : obligation.initialState}。`
-              : '本次输入未观察到该路线的真实线索；不代表没有此类账号。',
-      receiptKeys: ctx.search.receipts().map((receipt) => receipt.requestKey)
+            : state === 'skipped_budget'
+              ? '本次预算/次数上限已到，该路线未请求；保持 skipped_budget，不代表已完成或无账号。'
+              : obligation.source === 'catalog'
+                ? `目录义务（${ctx.catalog?.registryVersion ?? plan.registryVersion}）：本次未观察到真实线索，保持 ${obligation.initialState === 'planned' ? 'no_clue' : obligation.initialState}。`
+                : '本次输入未观察到该路线的真实线索；不代表没有此类账号。',
+      receiptKeys: ctx.search.receipts().filter((receipt) => {
+        if (obligation.routeId === 'web-search') return receipt.kind === 'search';
+        if (receipt.kind === 'model') return false;
+        const raw = ctx.store.research.receipt(ctx.runId, receipt.requestKey)?.result as ResearchToolResult | null;
+        const urls = [...(receipt.kind === 'profile_read' ? [receipt.target] : []), ...(raw?.pages ?? []).map(page => page.url)];
+        return urls.some(url => {
+          const classified = classifyFirstStepUrl(url);
+          return classified.ok && (obligation.source === 'catalog'
+            ? classified.ref.platform === obligation.platform
+            : classified.ref.materialUse === obligation.materialUse);
+        }) || linkObservations.some(observation => observation.sourceId === receipt.requestKey && matching.some(account => account.accountKey === observation.targetAccountKey));
+      }).map(receipt => receipt.requestKey)
     };
   });
+  if (budgetExhausted) {
+    gaps.push('本次发现受冻结预算/次数限制，部分路线未请求（见 skipped_budget 路线状态）；不静默抬高总数。');
+  }
   if (accountViews.some((account) => account.accessLabel === '仅索引可见')) {
     gaps.push('部分候选只有搜索索引材料、未回读原文；只能当线索，不作身份依据。');
   }
@@ -964,6 +1220,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     input: ctx.input,
     clusters,
     accounts: accountViews,
+    relatedLeads: [...relatedLeads.values()],
     routes,
     gaps,
     receipts,
@@ -1027,8 +1284,10 @@ function buildClusters(input: {
   const anchorKeyOf = new Map<string, string>();
   for (const anchor of input.anchors) anchorKeyOf.set(anchor.accountKey, anchor.accountKey);
 
-  // Anchor-to-anchor support unions the anchors of ONE person (several linked
-  // anchors never become several bogus people).
+  // Valid original linkage unions the anchors of ONE person: direct support
+  // edges only (including reverse profile-field website links), never the same
+  // name or handle, and never through a shared third account. Several
+  // connected anchors are one cluster, not several bogus people.
   const parent = new Map<string, string>();
   const find = (key: string): string => {
     let root = key;
@@ -1042,9 +1301,9 @@ function buildClusters(input: {
   };
   for (const key of anchorKeys) parent.set(key, key);
   for (const observation of supporting) {
-    if (anchorKeys.has(observation.fromAccountKey ?? '') && anchorKeys.has(observation.targetAccountKey)) {
-      union(observation.fromAccountKey!, observation.targetAccountKey);
-    }
+    const from = observation.fromAccountKey ?? '';
+    const to = observation.targetAccountKey;
+    if (anchorKeys.has(from) && anchorKeys.has(to)) union(from, to);
   }
 
   // A non-anchor account supported from several UNRELATED anchor clusters is
@@ -1052,7 +1311,7 @@ function buildClusters(input: {
   const supportingAnchorsFor = new Map<string, Set<string>>();
   for (const observation of supporting) {
     const from = observation.fromAccountKey;
-    if (!from || !anchorKeys.has(from)) continue;
+    if (!from || !anchorKeys.has(from) || anchorKeys.has(observation.targetAccountKey)) continue;
     const set = supportingAnchorsFor.get(observation.targetAccountKey) ?? new Set<string>();
     set.add(find(from));
     supportingAnchorsFor.set(observation.targetAccountKey, set);
@@ -1064,9 +1323,11 @@ function buildClusters(input: {
     const root = find(anchor.accountKey);
     const clusterId = personClusterId(root);
     if (clusters.some((cluster) => cluster.clusterId === clusterId)) continue;
+    // Every connected anchor and every account supported from this single
+    // component belongs to the cluster; nothing else joins.
     const members: FirstStepAccountView[] = [];
     for (const account of input.accountViews) {
-      if (account.accountKey === anchor.accountKey && find(account.accountKey) === root) {
+      if (anchorKeys.has(account.accountKey) && find(account.accountKey) === root) {
         members.push(account);
         continue;
       }
@@ -1081,13 +1342,40 @@ function buildClusters(input: {
       if (supporters.has(root)) members.push(account);
     }
     if (!members.some((member) => member.accountKey === anchor.accountKey)) continue;
+    const anchorAccount = input.accountViews.find((account) => account.accountKey === anchor.accountKey) ?? null;
     const anchorPage = input.observed.find((entry) => entry.ref.accountKey === anchor.accountKey);
+    // The anchor's linkage basis is an actual read span with a real source —
+    // inspectable, never "globally all-proposed".
+    const basisObservation =
+      supporting.find(
+        (observation) =>
+          (observation.targetAccountKey === anchor.accountKey || observation.fromAccountKey === anchor.accountKey) &&
+          typeof observation.quote === 'string' &&
+          observation.quote.trim().length >= 2
+      ) ?? null;
+    const linked =
+      members.length > 1 ||
+      supporting.some((observation) => observation.fromAccountKey === anchor.accountKey || observation.targetAccountKey === anchor.accountKey);
+    const anchorBasis =
+      basisObservation === null
+        ? null
+        : {
+            label: '公开原文中的明确链接',
+            quote: basisObservation.quote,
+            sourceUrl: basisObservation.sourceUrl
+          };
+    const title = anchorPage?.page.title?.trim() ?? '';
+    // A grounded concise display name; instruction-shaped titles are untrusted
+    // data and never become a person name.
+    const displayName = title.length > 0 && !isUntrustedInstructionText(title) ? title : anchor.handle ?? anchor.platformLabel;
     const leads: FirstStepPersonClusterView['leads'] = [];
     for (const member of members) {
       for (const item of member.identity.evidence) {
         leads.push({
           atomId: `lead_${item.evidenceId}`,
-          statement: `${member.platformLabel}${member.handle ? ` @${member.handle}` : ''}：${item.quote ?? item.label}`,
+          statement: `${member.platformLabel}${member.handle ? ` @${member.handle}` : ''}：${item.label}`,
+          quote: item.quote,
+          sourceUrl: item.sourceUrl,
           evidenceIds: [item.evidenceId]
         });
       }
@@ -1097,14 +1385,19 @@ function buildClusters(input: {
       leads.push({
         atomId: `lead_model_${createHash('sha256').update(`${lead.sourceUrl}|${lead.quote}`).digest('hex').slice(0, 12)}`,
         statement: lead.statement,
+        quote: lead.quote,
+        sourceUrl: lead.sourceUrl,
         evidenceIds: []
       });
     }
     clusters.push({
       clusterId,
-      displayName: anchorPage?.page.title?.trim() || anchor.handle || anchor.platformLabel,
+      displayName,
       anchorUrl: anchor.profileUrl,
       anchorLabel: `${anchor.platformLabel}${anchor.handle ? ` · ${anchor.handle}` : ''}`,
+      anchorAccountId: anchorAccount?.accountId ?? null,
+      linkage: linked ? 'linked' : 'unconfirmed',
+      anchorBasis,
       leads,
       conflicts: members.flatMap((member) => member.identity.conflicts),
       accountIds: members.map((member) => member.accountId)

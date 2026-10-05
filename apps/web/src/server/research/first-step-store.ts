@@ -234,8 +234,8 @@ export class FirstStepStore {
         input: { kind: 'name_query', value: '' },
         registryVersion: 'unknown',
         contentHash: null,
-        policyVersion: 'first-step/v1',
-        budget: { maxSearchQueries: 0, maxSearchResults: 0, maxProfileReads: 0, maxModelCalls: 0, policyVersion: 'first-step/v1' },
+        policyVersion: 'first-step/v2',
+        budget: { maxSearchQueries: 0, maxSearchResults: 0, maxProfileReads: 0, maxModelCalls: 0, policyVersion: 'first-step/v2' },
         obligations: []
       }),
       view: parseJson<FirstStepDiscoveryView>(row.view_json, null as unknown as FirstStepDiscoveryView),
@@ -549,13 +549,14 @@ export class FirstStepStore {
       inputRevision: link.inputRevision,
       registryVersion: 'unknown',
       catalogHash: null,
-      policyVersion: 'first-step/v1',
+      policyVersion: 'first-step/v2',
       phase: link.phase,
       stopReason: null,
       readyForChoice: false,
       input: { kind: 'name_query', value: '' },
       clusters: [],
       accounts: [],
+      relatedLeads: [],
       routes: [],
       gaps: [],
       receipts: [],
@@ -697,15 +698,19 @@ export class FirstStepStore {
         throw new FirstStepSelectionError('empty_selection', '没有选择任何账号：请至少选择一个研究账号，或改用“都不是”。');
       }
       const changes: ScopeAccountChange[] = [];
-      // The chosen cluster's anchor is the person home the user just confirmed:
-      // it may join the person scope as intent (identity evidence is never
-      // upgraded). Every other uncertain account stays independent-scope only.
-      const anchorAccountIds = new Set(
+      // The chosen cluster's own anchor is the person home the user just
+      // confirmed: it may join the person scope as intent (identity evidence
+      // is never upgraded) with its inspectable linkage basis. This exception
+      // binds the cluster's OWN anchor account — never a globally proposed
+      // anchor set. Every other uncertain account stays independent-scope only.
+      const anchorAccountIds = new Set<string>(
         clusterChoice.cluster === null
           ? []
-          : [...known.values()]
-              .filter((account) => account.profileUrl === clusterChoice.cluster!.anchorUrl)
-              .map((account) => account.accountId)
+          : clusterChoice.cluster.anchorAccountId
+            ? [clusterChoice.cluster.anchorAccountId]
+            : [...known.values()]
+                .filter((account) => account.profileUrl === clusterChoice.cluster!.anchorUrl)
+                .map((account) => account.accountId)
       );
       for (const decision of chosen) {
         const account = known.get(decision.accountId)!;
