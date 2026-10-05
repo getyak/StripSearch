@@ -609,7 +609,7 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
           })
         };
       }
-      return { ok: true, ref: refOf('substack', href, { handle: segments[0] ?? null, materialUse: 'writing', entry: segments.length > 0 ? 'page' : 'profile' }) };
+      return { ok: true, ref: refOf('substack', href, { handle: null, materialUse: 'writing', entry: 'page', attributable: false }) };
     }
     case 'medium': {
       const at = canonical.pathname.match(/^\/@([A-Za-z0-9_.-]{1,64})(?:\/(.*))?$/);
@@ -626,7 +626,7 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
           })
         };
       }
-      return { ok: true, ref: refOf('medium', href, { handle: segments[0] ?? null, materialUse: 'writing', entry: segments.length > 0 ? 'page' : 'profile' }) };
+      return { ok: true, ref: refOf('medium', href, { handle: null, materialUse: 'writing', entry: 'page', attributable: false }) };
     }
     case 'bluesky': {
       // bsky.app profiles live at /profile/<handle|did>; bluesky.app is only a

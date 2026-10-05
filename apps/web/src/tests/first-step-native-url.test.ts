@@ -19,3 +19,15 @@ test('Facebook numeric native IDs stay distinct and only profile.php binds that 
   assert.equal(ref('https://www.facebook.com/photo.php?id=10000123').entry, 'page');
   assert.equal(ref('https://www.facebook.com/profile.php?id=invalid').entry, 'page');
 });
+
+
+test('publication platform landing pages and tracking parameters never become an author account', () => {
+  for (const url of ['https://substack.com/', 'https://substack.com/?utm_content=synthetic-author', 'https://medium.com/', 'https://medium.com/topics/science']) {
+    const classified = ref(url);
+    assert.equal(classified.entry, 'page');
+    assert.equal(classified.attributable, false);
+    assert.equal(classified.handle, null);
+  }
+  assert.equal(ref('https://substack.com/@synthetic-author').entry, 'profile');
+  assert.equal(ref('https://medium.com/@synthetic-author').entry, 'profile');
+});
