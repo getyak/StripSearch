@@ -528,7 +528,7 @@ test('the stylesheet keeps motion restrained and reduced-motion safe', () => {
   assert.match(css, /scroll-behavior: auto/);
   assert.match(css, /\.search-result\b/, 'search results are styled');
   assert.match(css, /\.return-citation\b/, 'the return action is styled');
-  assert.match(css, /--paper-bg/, 'homepage keeps the paper/forest direction A system');
+  assert.match(css, /body\[data-view="home"\]/, 'homepage theme remains scoped to the home view');
   assert.doesNotMatch(css, /campaign/, 'the abandoned campaign styling is gone');
 });
 
