@@ -16,7 +16,7 @@ export interface ResearchOptions {
  transport?:HttpTransport;deepseekApiKey?:string|null;socialAvailable?:boolean;firecrawlAvailable?:boolean;
  limits?:ResearchBudgetLimits;
  /** First-step fetch scope: independent-account material never joins person claims. */
- firstStepScope?:{independentAccountKeys:ReadonlySet<string>;accountKeyOf:(url:string)=>string|null};
+ firstStepScope?:{selectedAccountKeys?:ReadonlySet<string>;independentAccountKeys:ReadonlySet<string>;accountKeyOf:(url:string)=>string|null};
 }
 function object(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value);}
 interface RefusalRecord { dispatched:boolean; usage?:ActionUsage }
@@ -46,9 +46,10 @@ function retainText(value:unknown):string{return sanitizeText(value,Number.MAX_S
 function draft(page:StoredPage,anchor:string|null,scope?:ResearchOptions['firstStepScope']):SourceDraft{
  const key=scope?.accountKeyOf(page.url)??null;
  const independent=!!(key&&scope?.independentAccountKeys.has(key));
+ const selected=!!(key&&scope?.selectedAccountKeys?.has(key));
  return {key:page.sourceKey,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,excerptLocator:page.retrieval==='search'?'搜索发现材料，尚未回读原文':'公开页面文本',
- identityLabel:independent?'独立账号范围：尚未证明与其他账号同人':page.url===anchor?'所选公开主页':'来源归属未独立验证',identityConfirmed:page.url===anchor&&!independent,fetchStatus:page.text?'ok':'inaccessible',
- limits:[...page.limitations,...independent?['独立账号材料：只作该账号自身记录，不并入同一人物结论。']:page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
+ identityLabel:independent?'独立账号范围：尚未证明与其他账号同人':page.url===anchor?'所选公开主页':selected?'已选人物账号范围；归属依据见第一步':'来源归属未独立验证',identityConfirmed:page.url===anchor&&!independent,fetchStatus:page.text?'ok':'inaccessible',
+ limits:[...page.limitations,...independent?['独立账号材料：只作该账号自身记录，不并入同一人物结论。']:page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:selected?['来自已确认研究范围的账号；账号自述不等于内容已独立证实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
 function stillActivePagesOf(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint):StoredPage[]{
  return checkpoint.pages.filter(page=>store.isResearchSourceActive(run.id,page.sourceKey,run.ownerId));
 }

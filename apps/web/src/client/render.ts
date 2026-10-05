@@ -13,6 +13,7 @@ import type {
   SourceKind
 } from '../shared/types.js';
 import { byId, clear, formatDate, formatDateTime, hostnameOf, make } from './dom.js';
+import { readableSourceText } from './source-text.js';
 
 export type SourceFilter = 'all' | 'profile' | 'work' | 'third_party' | 'excluded';
 
@@ -155,7 +156,10 @@ export function renderReport(
     incomplete.appendChild(make('p', { text: retained.length > 0
       ? `已保留 ${retained.length} 个来源，但这次研究未形成有依据的结论。可以先查看已取得的材料。`
       : '这次研究尚未取得足够的公开材料。可以从更多菜单重试，或新建研究补充一个公开主页。' }));
-    if (view.limitations.length > 0) incomplete.appendChild(make('p', { className: 'limit-note', text: view.limitations.join('；') }));
+    if (view.limitations.length > 0) {
+      const gaps=make('details',{className:'report-incomplete-gaps'});gaps.appendChild(make('summary',{text:`查看未完成原因与限制（${view.limitations.length}）`}));
+      const list=make('ul',{});for(const gap of view.limitations)list.appendChild(make('li',{text:gap}));gaps.appendChild(list);incomplete.appendChild(gaps);
+    }
     for (const source of retained.slice(0, 6)) incomplete.appendChild(citationButton(source.sourceKey, `retained-${source.sourceKey}`, source.title, handlers));
     container.appendChild(incomplete);
   }
@@ -352,7 +356,10 @@ export function renderSourceDetail(
   if (source.excerpt) {
     const quote = make('div', { className: 'source-quote' });
     quote.appendChild(make('span', { className: 'source-label', text: source.excerptLocator ?? '原文摘录' }));
-    quote.appendChild(make('p', { text: source.excerpt }));
+    quote.appendChild(make('p', { text: readableSourceText(source.excerpt) }));
+    if (/<[^>]*>|&(?:[a-z]+|#x?[0-9a-f]+);/i.test(source.excerpt)) {
+      const original=make('details',{className:'source-original'});original.appendChild(make('summary',{text:'查看原始文本（含标记）'}));original.appendChild(make('pre',{text:source.excerpt}));quote.appendChild(original);
+    }
     container.appendChild(quote);
   } else {
     container.appendChild(make('p', { className: 'source-placeholder', text: '这份来源没有可用于展示的短摘录。' }));
@@ -369,7 +376,7 @@ export function renderSourceDetail(
   list.appendChild(detailRow('发表时间', formatDate(source.publishedAt)));
   list.appendChild(detailRow('获取时间', formatDateTime(source.retrievedAt)));
   list.appendChild(
-    detailRow('身份归属', source.identityConfirmed ? '已确认（种子账号）' : '未确认，不合并同名')
+    detailRow('身份归属', source.identityConfirmed ? '已确认（种子账号）' : source.identityLabel || '未确认，不合并同名')
   );
   list.appendChild(
     detailRow(

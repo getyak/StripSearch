@@ -1,3 +1,4 @@
+import { readableSourceText } from './source-text.js';
 /**
  * First-step controlled renderer (2026-10-05 design): evidence-aware person
  * clusters, per-account research cards and ONE atomic scope confirmation.
@@ -99,14 +100,7 @@ function shortUrl(url: string | null): string {
 }
 
 /** Presentation-only excerpt; retained evidence below keeps the exact original. */
-function excerptText(quote: string): string {
-  return quote.replace(/<[^>]*>/g, ' ').replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (match, value: string) => {
-    const code = value[0]?.toLowerCase() === 'x' ? Number.parseInt(value.slice(1), 16) : Number.parseInt(value, 10);
-    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
-  }).replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (_match, entity: string) =>
-    ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }[entity] ?? '')
-  ).replace(/\s+/g, ' ').trim();
-}
+const excerptText=readableSourceText;
 
 /** Readable presentation plus an inspectable immutable literal excerpt. */
 function appendEvidenceQuote(container:HTMLElement,quote:string):void {

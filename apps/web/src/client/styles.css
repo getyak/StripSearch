@@ -1104,3 +1104,8 @@ body[data-view="home"] .footer-inner a:not(.button) { color: var(--forest-mid); 
 }
 
 .first-step-original pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; font-size: .8rem; }
+
+.source-original { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.source-original pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; line-height: 1.6; }
+.report-incomplete-gaps { margin-block: 18px; color: var(--muted); }
+.report-incomplete-gaps li { margin-block: 10px; overflow-wrap: anywhere; }

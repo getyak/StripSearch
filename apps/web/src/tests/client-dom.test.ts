@@ -224,3 +224,12 @@ test('a terminal empty report explains the gap and opens retained actual sources
   renderReport(container, viewWith({ state: 'researching', answer: [] }), { onCitation: () => undefined });
   assert.equal(container.querySelector('.report-incomplete'), null);
 });
+
+test('source inspector presents readable inert HTML and retains the immutable original',()=>{
+ const container=domContainer();const raw='<style>body{color:red}</style><script>window.bad=1</script><nav>Unrelated navigation</nav><p>Actual author: R&amp;D &#39;work&#39;.</p><img src="https://fixture-reader.org/pixel" onerror="window.bad=1">';
+ const source={...viewWith({}).sources[0]!,excerpt:raw,identityConfirmed:false,identityLabel:'已选人物账号范围；归属依据见第一步'};const original=JSON.stringify(source);
+ renderSourceDetail(container,viewWith({sources:[source]}),source.sourceKey,{onSelect:()=>undefined,onExclude:()=>undefined,onRestore:()=>undefined,onUndo:()=>undefined});
+ assert.equal(container.querySelector('.source-quote p')?.textContent,"Actual author: R&D 'work'.");
+ assert.equal(container.querySelector('.source-original pre')?.textContent,raw);assert.equal(container.querySelectorAll('script,img,style').length,0);
+ assert.match(container.textContent??'',/已选人物账号范围/);assert.equal(JSON.stringify(source),original);
+});
