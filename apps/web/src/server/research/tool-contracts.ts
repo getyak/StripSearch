@@ -3,10 +3,17 @@ export type ResearchToolAction =
  | { type: 'search'; query: string; numResults?: number }
  | { type: 'read' | 'firecrawl' | 'social_profile' | 'social_posts' | 'github_profile'; url: string };
 export interface ResearchAccount { platform: 'github' | 'x'; handle: string; id: string; profileUrl: string }
+/** A link bound to an exact span of the retained original, never an index label. */
+export interface ResearchLinkContext {
+ url: string; quote: string; locator: string;
+ binding: 'html_anchor' | 'markdown_link' | 'native_profile_field';
+ surface: 'authorial' | 'profile_field' | 'third_party' | 'unknown';
+}
 export interface ResearchPage {
  url: string; title: string; text: string; kind: 'profile' | 'work' | 'third_party';
  publishedAt: string | null; account?: ResearchAccount; links: string[]; limitations: string[];
  author?: string | null; retrievedAt?: string; retrieval?: 'search' | 'read' | 'profile'; textTruncated?: boolean;
+ linkContexts?: ResearchLinkContext[];
 }
 export interface ResearchToolResult {
  pages: ResearchPage[]; requests: number; bytes: number;
@@ -19,4 +26,3 @@ export interface ResearchToolsOptions {
  tikhubApiKey: string | null; githubToken: string | null; timeoutMs: number; maxBytes: number;
 }
 export interface ResearchTools { execute(action: ResearchToolAction, signal: AbortSignal): Promise<ResearchToolResult> }
-

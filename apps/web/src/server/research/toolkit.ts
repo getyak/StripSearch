@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 import { extractGitHubHandle, isPrivateHost, sanitizeText } from '../../shared/validation.js';
 import { classifyFirstStepUrl } from '../../shared/first-step-discovery.js';
+import { extractOriginalLinkContexts, nativeProfileLinkContext } from './link-context.js';
 import { asArray, asNumber, asRecord, asString, safeFetchJson } from '../adapters/http.js';
 import { ProviderError } from '../adapters/types.js';
 import type { HttpRequestInit } from '../adapters/types.js';
@@ -30,6 +31,7 @@ function isXHost(host: string): boolean { return host === 'x.com' || host.endsWi
 function ordinaryUrl(raw: unknown): string { const url = publicUrl(raw); if (/\.pdf(?:$|\/)/i.test(new URL(url).pathname)) fail('这里只读取普通网页，不转换 PDF 文档。'); if (isXHost(new URL(url).hostname)) fail('X 资料须通过公开账号工具读取，不能使用网页摘要路线。'); return url; }
 function linksFrom(rawText: string, extra: unknown[] = [], base?: string): string[] {
   const values: unknown[] = [...extra];
+  if (base) values.push(...extractOriginalLinkContexts(rawText, base).map(link => link.url));
   // Extract discovery links before clipping the retained text. Never execute source instructions.
   values.push(...(rawText.match(/https:\/\/[^\s<>"'\]）)]+/g) ?? []).map(value => value.replace(/[.,;。；]+$/, '')));
   for (const match of rawText.matchAll(/\[[^\]\n]*\]\(<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\)/g)) values.push(match[1]);
@@ -110,7 +112,9 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const searchCount = action.type === 'search' ? Math.min(25, Math.max(1, Math.trunc(action.numResults ?? 5))) : 5;
     // Original contents requests must not fix maxCharacters: the toolkit keeps
     // all supplied text and any provider/HTTP truncation is an explicit gap.
-    const payload = searching ? { query, numResults: searchCount, contents: { text: { maxCharacters: TEXT_LIMIT }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: true, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
+    // Keep href + original context together. An extras link index alone cannot
+    // establish ownership. includeHtmlTags is a documented Exa text option.
+    const payload = searching ? { query, numResults: searchCount, contents: { text: { maxCharacters: TEXT_LIMIT, includeHtmlTags: true }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: { includeHtmlTags: true }, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
     const { body, bytes } = await request(`https://api.exa.ai/${searching ? 'search' : 'contents'}`, { method: 'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(payload) }, signal);
     if (!Array.isArray(body.results)) fail('网页供应商返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
@@ -133,7 +137,9 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
       const truncated = searching && rawContent.length > TEXT_LIMIT;
       if (truncated) limitations.push(`供应商正文为有界读取，最多保留 ${TEXT_LIMIT} 个字符；后续正文是缺口，不能当作完整原文。`);
       else if (!searching) limitations.push('本次读取未指定供应商正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。');
-      pages.push({ url, title: text(item.title, 200) || url, text: content, kind: profileKind(url), publishedAt: asString(item.publishedDate), author: author || null, retrieval: searching ? 'search' : 'read', textTruncated: truncated, links: linksFrom(rawContent, asArray(asRecord(item.extras).links), url), limitations: [...limitations, '自链仅作发现线索；供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整，不自动确认身份或历史完整。'] });
+      const extras = asRecord(item.extras);
+      const extraLinks = [...asArray(extras.links), ...asArray(extras.richLinks).map(link => asRecord(link).url)];
+      pages.push({ url, title: text(item.title, 200) || url, text: content, kind: profileKind(url), publishedAt: asString(item.publishedDate), author: author || null, retrieval: searching ? 'search' : 'read', textTruncated: truncated, links: linksFrom(rawContent, extraLinks, url), linkContexts: extractOriginalLinkContexts(content, url), limitations: [...limitations, '自链仅作发现线索；供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整，不自动确认身份或历史完整。'] });
     }
     if (requested && pages.length !== 1) fail('请求网页没有返回对应正文。');
     return {...result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。']),...(!searching?{coverageGaps:['供应商未证明整页正文与出站链接提取完整。']}: {})};
@@ -153,7 +159,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const rawContent = asString(data.markdown) ?? '';
     const content = retainText(rawContent); if (!content) fail('目标网页没有可用正文。');
     const limitations = ['网页原文仍需核对人物归属。', `请求地址：${sourceUrl}`, `最终地址：${finalUrl}`, '本次读取未指定正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。'];
-    return result([{ url: sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], sourceUrl), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
+    return result([{ url: sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], sourceUrl), linkContexts: extractOriginalLinkContexts(content, sourceUrl), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
   }
   async function social(type: 'social_profile' | 'social_posts', url: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const handle = xHandle(url); const apiKey = key(options.tikhubApiKey, '公开账号');
@@ -168,7 +174,9 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const target = xAccount(type === 'social_profile' ? data : data.user, handle);
     if (type === 'social_profile') {
       const content = [text(target.data.name, 200), retainText(target.data.desc), asString(target.data.website)].filter(Boolean).join('\n');
-      return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [target.data.website]), limitations: ['账号资料是账号自述；不自动证明跨平台身份。'] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
+      const website = asString(target.data.website);
+      const context = website ? nativeProfileLinkContext(content, website) : null;
+      return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [target.data.website]), linkContexts: context ? [context] : [], limitations: ['账号资料是账号自述；不自动证明跨平台身份。'] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
     }
     if (!Array.isArray(data.timeline)) fail('公开帖子返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
@@ -199,7 +207,9 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (!login || login.toLowerCase() !== handle.toLowerCase() || !id || comparable(returnedUrl).toLowerCase() !== comparable(url).toLowerCase()) fail('返回的 GitHub 账号与请求不匹配。');
     const content = [text(body.name, 200), retainText(body.bio), text(body.company, 200), asString(body.blog)].filter(Boolean).join('\n');
     const account: ResearchAccount = { platform: 'github', handle: login, id, profileUrl: returnedUrl };
-    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [body.blog]), limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。'] }], bytes, 0);
+    const website = asString(body.blog);
+    const context = website ? nativeProfileLinkContext(content, website) : null;
+    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [body.blog]), linkContexts: context ? [context] : [], limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。'] }], bytes, 0);
   }
   return { async execute(action, signal) {
     signal.throwIfAborted();
