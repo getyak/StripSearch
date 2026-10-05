@@ -94,8 +94,8 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    if((action.type==='social_profile'||action.type==='social_posts')&&!options.socialAvailable)throw new ResearchStop('tool_unavailable');
   }else if(!action.query.trim()||action.query.length>600)throw new ResearchStop('invalid_decision');
   const key='tool:'+digest(action);
-  const old=store.research.reserve(run.id,key,'tool',action,{inputTokens:0,outputTokens:0},limits);
-  if(old)return old.result as ResearchToolResult;
+  const old=store.research.reserve(run.id,key,'tool',action,{inputTokens:0,outputTokens:0},limits,Boolean(options.firstStepScope));
+  if(old){if(old.state==='failed')throw new ProviderError('provider_unavailable','资料请求已有已结算失败回执，不自动重放。');return old.result as ResearchToolResult;}
   try{
    const result=await tools.execute(action,signal);
    if(result.requests!==1)throw new ResearchStop('tool_contract_violation');
@@ -113,8 +113,8 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const key=`model:${step}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
-    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path},{inputTokens:inputBound,outputTokens:2500},limits);
-    if(old)return old.result as Awaited<ReturnType<typeof invokeDeepSeek>>;
+    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
+    if(old){if(old.state==='failed')throw new ProviderError('provider_unavailable','模型请求已有已结算失败回执，不自动重放。');return old.result as Awaited<ReturnType<typeof invokeDeepSeek>>;}
     try{const result=await invokeDeepSeek(options.transport,options.deepseekApiKey,request);
      const usage=parseMessagesUsage(result.body);
      store.research.settle(run.id,key,result,{inputTokens:usage.known?usage.inputTokens:inputBound,outputTokens:usage.known?usage.outputTokens:2500,estimatedUsd:usage.known?estimateModelUsd(String(request.body.model),usage.inputTokens,usage.outputTokens):null,unknownCost:!usage.known||estimateModelUsd(String(request.body.model),usage.inputTokens,usage.outputTokens)===null,bytes:Buffer.byteLength(result.body)});

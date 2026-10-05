@@ -25,6 +25,7 @@
 import { createHash } from 'node:crypto';
 import type { Store } from '../store.js';
 import type { HttpTransport } from '../adapters/types.js';
+import { ProviderError } from '../adapters/types.js';
 import { invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { runDshDecision } from './dsh-decision.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchPage } from './tool-contracts.js';
@@ -136,10 +137,11 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
   ): Promise<ResearchToolResult> => {
     signal.throwIfAborted();
     options.store.research.assertActive(options.runId);
-    const old = options.store.research.reserve(options.runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, limits);
+    const old = options.store.research.reserve(options.runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, limits, true);
     if (old) {
       // Same-attempt recovery: the real prior receipt, original timestamp.
       note(requestKey, kind, target, retrieval, old, old.state === 'completed' ? 'completed' : 'failed');
+      if (old.state === 'failed') throw new ProviderError('provider_unavailable', '本次请求已有已结算失败回执，保留缺口，不自动重复调用。');
       return old.result as ResearchToolResult;
     }
     try {
@@ -180,12 +182,12 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
       return [...log];
     },
     async withModel(requestKey, call, reservation = { inputTokens: 0, outputTokens: 0 }) {
-      const old = options.store.research.reserve(options.runId, requestKey, 'model', { model: options.modelName ?? 'first-step-search-model' }, reservation, limits);
+      const old = options.store.research.reserve(options.runId, requestKey, 'model', { model: options.modelName ?? 'first-step-search-model' }, reservation, limits, true);
       if (old) {
         // Same-attempt recovery: replay the EXACT saved result with its
         // original receipt time. Unknown inflight attempts are never replayed
         // (reserve throws) and failed attempts never silently re-call.
-        if (old.state !== 'completed') throw new ResearchStop('unknown_inflight');
+        if (old.state === 'failed') throw new ProviderError('provider_unavailable', '模型请求已有已结算失败回执，保留缺口，不自动重复调用。');
         return old.result as never;
       }
       try {

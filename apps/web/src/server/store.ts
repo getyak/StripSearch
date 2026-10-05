@@ -757,7 +757,9 @@ export class Store {
     for (const row of rows) {
       const run = this.getRun(row.id);
       if (run?.provider === 'research') {
-        const unknown = this.research.receipts(row.id).some(receipt => receipt.state !== 'completed');
+        const hasFirstStepTable = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='first_step_links'").get();
+        const firstStep = hasFirstStepTable && this.db.prepare('SELECT 1 FROM first_step_links WHERE run_id=?').get(row.id);
+        const unknown = this.research.receipts(row.id).some(receipt => firstStep ? receipt.state === 'inflight' : receipt.state !== 'completed');
         if (!unknown) { this.updateRun(row.id, {state:'queued', interrupted:1}); continue; }
       }
       if (this.markInterrupted(row.id)) {

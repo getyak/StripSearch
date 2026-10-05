@@ -87,10 +87,10 @@ export class ResearchStore {
   }
   return budget;
  }
- reserve(runId:string,key:string,kind:'tool'|'model',request:unknown,reservation:{inputTokens:number;outputTokens:number},limits=RESEARCH_LIMITS):ActionReceipt|undefined {
+ reserve(runId:string,key:string,kind:'tool'|'model',request:unknown,reservation:{inputTokens:number;outputTokens:number},limits=RESEARCH_LIMITS,allowSettledFailure=false):ActionReceipt|undefined {
   return this.db.transaction(()=>{
    this.assertActive(runId);
-   const old=this.receipt(runId,key);if(old){if(old.state!=='completed')throw new ResearchStop('unknown_inflight');return old;}
+   const old=this.receipt(runId,key);if(old){if(old.state==='inflight'||old.state==='failed'&&!allowSettledFailure)throw new ResearchStop('unknown_inflight');return old;}
    const budget=this.budget(runId,limits);
    // A zero total is a disabled ceiling, never a zero allowance.
    const over=(limits.toolCalls>0&&kind==='tool'&&budget.toolCalls>=limits.toolCalls)

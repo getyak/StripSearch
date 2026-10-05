@@ -386,6 +386,10 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
       idempotencyKey,
       bodyFingerprint: fingerprint
     });
+    if (parent.provider === 'research' && deps.firstStep?.link(parent.id)) {
+      if (deps.firstStep.selectionBinding(parent.id)) deps.firstStep.inheritFirstStepScope(user.id, run, parent.id);
+      else deps.firstStep.attachRun(run, parent.question);
+    }
     if (idempotencyKey) store.recordIdempotencyKey(user.id, idempotencyKey, fingerprint, run.id);
     store.addEvent(run.id, 'state', { state: 'queued', retryOf: parent.id });
     runner.recordStart(user.id);

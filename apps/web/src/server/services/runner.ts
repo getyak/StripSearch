@@ -451,7 +451,7 @@ export class Runner {
         const requestKey = `firststep:fetch:${seedAttempt}:${account.accountId}`;
         let result: Awaited<ReturnType<ResearchTools['execute']>> | null = null;
         try {
-          const old = this.deps.store.research.reserve(runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, fetchLimits);
+          const old = this.deps.store.research.reserve(runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, fetchLimits, true);
           if (old) {
             if (old.state !== 'completed') {
               // Known settled failure: kept inspectable, never re-executed.
