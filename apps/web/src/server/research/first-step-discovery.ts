@@ -720,7 +720,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const requestKey = (kind: string): string => `firststep:${attemptId}:${kind}:${String(++requestIndex)}`;
 
   /** Non-account tool result links stay available as honest related leads. */
-  const keepMaterialLead = (ref: FirstStepAccountRef): void => {
+  const keepMaterialLead = (ref: FirstStepAccountRef, note?: string): void => {
     if (relatedLeads.has(ref.profileUrl)) return;
     const platformRoot = ref.platform !== 'personal_site' && ref.platform !== 'rss_blog' && ref.platform !== 'web_page';
     const navigation = platformRoot && ref.entry === 'page' && ref.accountUrl === ref.profileUrl;
@@ -728,9 +728,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       url: ref.profileUrl,
       title: null,
       reason: navigation ? 'navigation' : 'content_page',
-      note: navigation
+      note: note ?? (navigation
         ? '平台导航/登录/搜索/播放列表等页面，从来不是公开账号入口；仅保留真实链接回执。'
-        : '未观察到归属依据的第三方内容页，不能按域名推定为本人账号；仅保留真实链接回执。',
+        : '未观察到归属依据的第三方内容页，不能按域名推定为本人账号；仅保留真实链接回执。'),
       observedAt: now()
     });
   };
@@ -743,11 +743,15 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
    * subpages never become selectable person accounts. Explicit URL input is
    * always retained as an observed lead.
    */
-  const register = (url: string, options?: { explicit?: boolean }): FirstStepAccountRef | null => {
+  const register = (url: string, options?: { explicit?: boolean; candidate?: boolean; note?: string }): FirstStepAccountRef | null => {
     const classified = classifyFirstStepUrl(url);
     if (!classified.ok) return null;
     const ref = classified.ref;
     originalRefs.set(ref.accountKey,ref);
+    if (options?.candidate === false && !options.explicit && !candidateRefs.has(resolveKey(ref.accountKey))) {
+      keepMaterialLead(ref, options.note);
+      return ref;
+    }
     const projectedKey = resolveKey(ref.accountKey);
     if (projectedKey !== ref.accountKey) {
       // An observed alias of a canonical representative is never a second
@@ -755,6 +759,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       return candidateRefs.get(projectedKey) ?? ref;
     }
     if (ref.entry === 'profile') {
+      relatedLeads.delete(ref.profileUrl);
       const existing = candidateRefs.get(ref.accountKey);
       // Prefer the actual account/home entry (profile URL == documented home):
       // a derived home page (About) never displaces the home entry itself.
@@ -853,13 +858,23 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       const result = await ctx.search.search(requestKey('search'), query, budget.maxSearchResults, ctx.signal, includeDomains, provider);
       active();
       for (const page of result.pages) {
-        const ref = register(page.url);
+        const classifiedResult = classifyFirstStepUrl(page.url);
+        if (!classifiedResult.ok) continue;
+        const resultRef = classifiedResult.ref;
+        const genericSite = resultRef.platform === 'personal_site' || resultRef.platform === 'web_page';
+        // An indexed @handle conflicting with the literal URL is a lead to
+        // investigate, never a canonical alias or ownership proof.
+        const titleHandles = [...page.title.matchAll(/(?:^|[\s(])@([\p{L}\p{N}_.-]+)/gu)].map(match => match[1]!);
+        const conflictingHandle = resultRef.handle !== null && titleHandles.some(handle => handle.toLowerCase() === resultRef.handle!.toLowerCase() && handle !== resultRef.handle);
+        const ref = register(page.url, {candidate: !conflictingHandle && (!genericSite || matchesInput(page.title) || ctx.input.kind === 'homepage_url' && comparableUrl(page.url) === comparableUrl(ctx.input.value)),
+          note: conflictingHandle ? '搜索标题中的账号标识与入口大小写不一致；未取得实际账号证明，保留待核对资料，不推定别名。' : undefined});
         if (!ref) continue;
         indexedTitles.set(ref.accountKey, [...(indexedTitles.get(ref.accountKey) ?? []), page.title]);
         const names=ctx.input.value.split(/\s*[\/／]\s*/).map(name=>name.trim().toLowerCase()).filter(Boolean);
         if(names.some(name=>page.title.toLowerCase().includes(name))){
          for(const link of page.links){
-          const linked=register(link);if(!linked)continue;
+          const linkRef=classifyFirstStepUrl(link);
+          const linked=register(link, {candidate: !linkRef.ok || !['personal_site','web_page'].includes(linkRef.ref.platform)});if(!linked)continue;
           // An index's link list is observed discovery metadata, never an
           // authorial claim, identity support or fetch authorization. An
           // unverified outbound link inherits NO name relevance from its
@@ -972,8 +987,6 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           const targetClassified = classifyFirstStepUrl(target);
           if (!targetClassified.ok) continue;
           const targetRef = targetClassified.ref;
-          register(target);
-          if (resolveKey(targetRef.accountKey) === resolveKey(source.accountKey)) continue;
           const context = byTarget.get(target) ?? null;
           const fallback = context === null ? quoteAround(page.text, target) : null;
           const quote = context !== null ? context.quote : fallback?.quote ?? null;
@@ -989,6 +1002,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
             sourceIsRestrictedSurface: flags.sourceIsRestrictedSurface,
             sourceIsSocialPlatform: flags.sourceIsSocialPlatform
           });
+          const identifiesAccount = ['self_account_section', 'explicit_directory', 'explicit_claim', 'explicit_denial'].includes(role.role) && role.retrieval === 'read';
+          register(target, {candidate: !['personal_site','web_page'].includes(targetRef.platform) || identifiesAccount});
+          if (resolveKey(targetRef.accountKey) === resolveKey(source.accountKey)) continue;
           pushObservation({
             observationId: `obs_${digest(`${page.url}|${target}`)}`,
             sourceId: `page:${digest(page.url)}`,
@@ -1106,6 +1122,21 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       if (observation.linkRole !== 'self_account_section' && observation.linkRole !== 'explicit_directory') continue;
       const target = classifyFirstStepUrl(observation.targetUrl);
       if (target.ok) enqueueRead(target.ref);
+    }
+    // Investigate observed variants before unrelated leads exhaust the read
+    // budget. This schedules actual IO; it never creates an alias proof.
+    if (outcome === 'ok') {
+      for (const other of candidateRefs.values()) {
+        if (other.accountKey === next.accountKey) continue;
+        const nativeVariant = nativeNamespace(next) !== null && nativeNamespace(next) === nativeNamespace(other);
+        const a = new URL(next.profileUrl), b = new URL(other.profileUrl);
+        const hostVariant = (a.hostname === `www.${b.hostname}` || b.hostname === `www.${a.hostname}`) && a.pathname === b.pathname && a.search === b.search;
+        if (nativeVariant || hostVariant) {
+          const queued = readQueue.findIndex(item => resolveKey(item.accountKey) === resolveKey(other.accountKey));
+          if (queued >= 0) readQueue.splice(queued, 1);
+          enqueueRead(other);
+        }
+      }
     }
   }
 

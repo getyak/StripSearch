@@ -361,7 +361,8 @@ test('an unverified search outlink inherits no name relevance from its referring
     const view = await discoverFirstStep(h.ctx);
     // A direct result page title may count name relevance; an unverified
     // outbound link must not jump the read queue through its referring title.
-    assert.deepEqual(h.reads, [home, other, outlink], 'the outlink keeps its platform priority only');
+    assert.deepEqual(h.reads, [home, outlink], 'the profile outlink keeps its platform priority; unrelated generic sites remain material');
+    assert.ok(view.relatedLeads.some(lead => lead.url === other));
     const linked = view.accounts.find((account) => account.profileUrl === outlink)!;
     assert.ok(linked, 'the actual outlink stays a candidate');
     assert.equal(linked.identity.basis, 'search_index', 'the unverified outlink stays an indexed candidate (unknown_role only)');
@@ -415,4 +416,23 @@ for(const heading of ["My colleague's account",'Not my account; impersonator'])t
   assert.notEqual(account.identity.state,'supported');assert.equal(account.defaultSuggestion.suggested,false);assert.ok(view.gaps.some(g=>g.includes('模型提议被拒')));
   assert.ok(view.clusters.every(c=>c.linkage!=='linked'));
  }finally{h.db.close();}
+});
+
+ test('observed native variants are actually read before unrelated profiles exhaust the identity budget', async () => {
+  const canonical = 'https://github.com/FixtureAuthor';
+  const variant = 'https://github.com/fixtureauthor';
+  const other = 'https://github.com/unrelated-fixture';
+  const h = harness({kind:'name_query',value:'Fixture Author',question:null}, {
+    search: () => [page(canonical,'Indexed author.'),page(other,'Indexed other.'),page(variant,'Indexed author.',{title:'Unverified variant'})],
+    read: url => [page(canonical,'Original author.',{aliasProof:{kind:'native_profile',platform:'github',nativeId:'123456',requestedUrl:url,returnedUrl:canonical}})],
+    budget:{maxSearchQueries:1,maxProfileReads:2}
+  });
+  h.ctx.budget={maxSearchQueries:1,maxSearchResults:12,maxProfileReads:2,maxModelCalls:2,policyVersion:'first-step/v2'};
+  try {
+    const view = await discoverFirstStep(h.ctx);
+    assert.deepEqual(h.reads,[canonical,variant],JSON.stringify({gaps:view.gaps,accounts:view.accounts.map(account=>account.profileUrl),receipts:view.receipts}));
+    assert.equal(view.accounts.filter(account => account.platform === 'github' && account.profileUrl !== other).length,1);
+    assert.equal(view.accounts.find(account => account.profileUrl === canonical)!.identity.state,'proposed');
+    assert.ok(view.accounts.some(account => account.profileUrl === other),'unread unrelated direct account stays an uncertain candidate');
+  } finally {h.db.close();}
 });

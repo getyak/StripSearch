@@ -12,6 +12,7 @@ import { loadPlatformCatalog } from '../server/platforms/catalog.js';
 import { applyCoreSchema, openDatabase, type DB } from '../server/db/index.js';
 import { Store } from '../server/store.js';
 import { FirstStepStore } from '../server/research/first-step-store.js';
+import { extractOriginalLinkContexts } from '../server/research/link-context.js';
 import {
   createFirstStepCheckedSearch,
   discoverFirstStep,
@@ -285,9 +286,9 @@ test("another author's social-activity 'my' never supports the homepage owner's 
     const view = await discoverFirstStep(h.ctx);
     const acmeAccount = view.accounts.find((account) => account.profileUrl === acme);
     const jordanAccount = view.accounts.find((account) => account.profileUrl === jordan);
-    assert.ok(acmeAccount, 'the observed lead is preserved');
+    assert.equal(acmeAccount, undefined, 'an unrelated company root never becomes a person account');
+    assert.ok(view.relatedLeads.some(lead => lead.url === acme), 'the observed company link is preserved as material');
     assert.ok(jordanAccount, 'the colleague profile lead is preserved');
-    assert.notEqual(acmeAccount!.identity.state, 'supported', "another author's 'my' is never ownership");
     assert.notEqual(jordanAccount!.identity.state, 'supported', "a feed item never supports someone's account");
     assert.equal(jordanAccount!.defaultSuggestion.suggested, false);
     // The profile website field (native, verified) IS the owner's explicit
@@ -295,7 +296,7 @@ test("another author's social-activity 'my' never supports the homepage owner's 
     const cluster = view.clusters.find((item) => item.accountIds.length >= 2);
     assert.ok(cluster, 'home + profile join via the reverse profile-field website link');
     const clusterAccounts = cluster!.accountIds;
-    for (const account of [acmeAccount!, jordanAccount!]) {
+    for (const account of [jordanAccount!]) {
       assert.ok(!clusterAccounts.includes(account.accountId), 'feed/colleague leads stay outside the person cluster');
     }
   } finally {
@@ -780,4 +781,49 @@ test('later original ownership evidence replaces an earlier index-only basis lab
   assert.equal(assessment.state, 'supported');
   assert.equal(assessment.basis, 'explicit_self_link');
   assert.deepEqual(assessment.supportObservationIds, ['read']);
+});
+
+ test('unknown company and news roots from indexed or ordinary outlinks stay material; an actual self-link can promote an unknown site', async () => {
+  const company = 'https://compiler-company.test-public.net/';
+  const news = 'https://compiler-news.test-public.net/';
+  const owned = 'https://mira-notes.test-public.net/';
+  const quote = `<p>My personal website: <a href="${owned}">my notes</a>.</p>`;
+  const original = `<p>References: <a href="${company}">compiler company</a> and <a href="${news}">newsroom</a>.</p>${quote}`;
+  const h = harness({kind:'name_query',value:'Mira Kepler',question:null}, {
+    search: () => [page(home, 'Mira Kepler', {links:[company,news,owned]})],
+    read: url => url === home ? [page(home,original,{links:[company,news,owned],linkContexts: extractOriginalLinkContexts(original,home)})] : [page(url,'Original personal notes.')]
+  });
+  try {
+    const view = await discoverFirstStep(h.ctx);
+    for (const url of [company,news]) {
+      assert.equal(view.accounts.some(account => account.profileUrl === url),false);
+      assert.ok(view.relatedLeads.some(lead => lead.url === url));
+      assert.equal(h.reads.includes(url),false,'ordinary outside links do not consume identity reads');
+    }
+    const account = view.accounts.find(account => account.profileUrl === owned)!;
+    assert.ok(account,JSON.stringify({reads:h.reads,gaps:view.gaps,accounts:view.accounts.map(account => account.profileUrl)}));
+    assert.equal(account.identity.state,'supported');
+    assert.ok(account.identity.evidence.some(item => item.quote === quote));
+    assert.ok(h.reads.includes(owned));
+    assert.ok(view.receipts.some(receipt => receipt.state === 'completed'));
+  } finally { h.db.close(); }
+});
+
+ test('an indexed handle and URL case conflict is retained as a lead without inventing an alias', async () => {
+  const exact = 'https://www.instagram.com/mira_kepler';
+  const variant = 'https://www.instagram.com/Mira_Kepler';
+  const h = harness({kind:'name_query',value:'Mira Kepler',question:null}, {
+    search: () => [page(exact,'Indexed profile.',{title:'(@mira_kepler) • Instagram'}),page(variant,'Indexed profile.',{title:'(@mira_kepler) • Instagram'})],
+    read: url => [page(url,'Original public profile.')]
+  });
+  try {
+    const view = await discoverFirstStep(h.ctx);
+    assert.ok(view.accounts.some(account => account.profileUrl === exact));
+    assert.equal(view.accounts.some(account => account.profileUrl === variant),false);
+    assert.ok(view.relatedLeads.some(lead => lead.url === variant && lead.note.includes('不推定别名')));
+    assert.equal(h.reads.includes(variant),false);
+    assert.equal(view.accounts.find(account => account.profileUrl === exact)!.identity.state,'proposed');
+    const raw = h.store.research.receipts(h.runId).find(receipt => receipt.kind === 'tool' && (receipt.request as {type?:string}).type === 'search')!;
+    assert.ok(JSON.stringify(raw.result).includes(variant),'literal indexed result remains in the actual receipt');
+  } finally { h.db.close(); }
 });
