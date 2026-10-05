@@ -120,7 +120,9 @@ test('chosen cluster accounts are the main choices; unconfirmed leads are a coll
     assert.equal(container.querySelectorAll('img').length, 0, 'sourcequote HTML never becomes live markup');
     assert.equal((env.window as unknown as { __xss?: number }).__xss, undefined);
     // The grounded descriptor keeps its statement and its inspectable source.
-    assert.match(clusterButtons[0]!.textContent ?? '', /合成测试研究价值/);
+    assert.match(clusterButtons[0]!.textContent ?? '', /原文摘录：.*本人声明摘录/);
+    assert.doesNotMatch(clusterButtons[0]!.textContent ?? '', /<img/);
+    assert.match(container.querySelector('.first-step-cluster-basis')!.textContent ?? '', /合成测试研究价值/);
   } finally {
     fixture.close();
     env.document.body.replaceChildren();

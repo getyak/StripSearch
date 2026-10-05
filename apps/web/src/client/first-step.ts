@@ -98,6 +98,16 @@ function shortUrl(url: string | null): string {
   return url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
 }
 
+/** Presentation-only excerpt; retained evidence below keeps the exact original. */
+function excerptText(quote: string): string {
+  return quote.replace(/<[^>]*>/g, ' ').replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (match, value: string) => {
+    const code = value[0]?.toLowerCase() === 'x' ? Number.parseInt(value.slice(1), 16) : Number.parseInt(value, 10);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+  }).replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (_match, entity: string) =>
+    ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }[entity] ?? '')
+  ).replace(/\s+/g, ' ').trim();
+}
+
 export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   const draft = new Map<string, FirstStepDecisionDraft>();
   const cache = firstStepDraftCache(deps.ownerId, deps.runId);
@@ -205,11 +215,11 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       // Grounded concise descriptor: plain statement text with its real source
       // label — never a raw URL dump, and never discarded just because the
       // source URL exists beside the summary.
-      for (const lead of cluster.leads.slice(0, 2)) {
-        button.appendChild(make('small', { className: 'first-step-lead', text: lead.statement }));
-        if (lead.sourceUrl) {
-          button.appendChild(make('small', { className: 'first-step-lead-source', text: `来源：${shortUrl(lead.sourceUrl ?? null)}` }));
-        }
+      const excerpt = cluster.anchorBasis?.quote ?? cluster.leads.find(lead => lead.quote)?.quote;
+      const excerptSource = cluster.anchorBasis?.sourceUrl ?? cluster.leads.find(lead => lead.quote)?.sourceUrl;
+      if (excerpt) {
+        button.appendChild(make('small', { className: 'first-step-lead', text: `原文摘录：“${excerptText(excerpt)}”` }));
+        if (excerptSource) button.appendChild(make('small', { className: 'first-step-lead-source', text: `来源：${shortUrl(excerptSource)}` }));
       }
       if (cluster.conflicts.length > 0) {
         button.appendChild(make('small', { className: 'first-step-conflict', text: cluster.conflicts.join('；') }));

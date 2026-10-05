@@ -1221,7 +1221,7 @@ export function assessIdentityLink(
     if (SUPPORTING_BASES.has(basis)) {
       supportSources.add(groupOf(observation));
       support.push(observation.observationId);
-      if (strongest === 'none' || strongest === 'mutual_link') strongest = basis;
+      if (!SUPPORTING_BASES.has(strongest) || strongest === 'mutual_link') strongest = basis;
       continue;
     }
     candidates.push(observation.observationId);
@@ -1300,7 +1300,7 @@ export function firstStepDefaultSuggestion(
     return { suggested: false, reason: '支持状态缺少实际来源依据，默认不勾选。' };
   }
   if (!policy.allowAccountKinds.includes(accountKind)) {
-    return { suggested: false, reason: '组织/第三方账号不作为本人研究的默认勾选。' };
+    return { suggested: false, reason: accountKind === 'unknown' ? '账号类型尚未确认，请按原文依据自行选择。' : '组织/第三方账号不作为本人研究的默认勾选。' };
   }
   // Access limits are shown honestly and never prove or disprove identity.
   return {

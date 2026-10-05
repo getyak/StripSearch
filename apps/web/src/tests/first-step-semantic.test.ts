@@ -767,3 +767,15 @@ test('a later exact self-account span wins over an earlier uninformative href sp
   const h = harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[page(home,'Mira Kepler')],read:url=>[page(url,plain+owned,{links:[target],linkContexts:[{url:target,quote:plain,locator:'first actual div',binding:'html_anchor',surface:'authorial'},{url:target,quote:owned,locator:'second actual p',binding:'html_anchor',surface:'authorial'}]})]});
   try {const view=await discoverFirstStep(h.ctx);const account=view.accounts.find(account=>account.platform==='youtube')!;assert.equal(account.identity.state,'supported');assert.ok(account.identity.evidence.some(evidence=>evidence.quote===owned));assert.ok(!account.identity.evidence.some(evidence=>evidence.quote===plain));} finally {h.db.close();}
 });
+
+
+test('later original ownership evidence replaces an earlier index-only basis label', () => {
+  const shared = { sourceId: 'actual-page', sourceRevision: 1, sourceUrl: 'https://mira-site.dev/', sourceContentHash: 'hash', sourceRetrievedAt: null, fromAccountKey: 'anchor', targetAccountKey: 'account', targetUrl: 'https://github.com/mira', direction: 'outbound' as const, locator: 'retained span', observedAt: '2026-10-05T00:00:00.000Z' };
+  const assessment = assessIdentityLink('account', [
+    { ...shared, observationId: 'index', linkRole: 'prose_mention', retrieval: 'indexed', quote: 'Mira' },
+    { ...shared, observationId: 'read', linkRole: 'self_account_section', retrieval: 'read', quote: 'My GitHub profile: https://github.com/mira' }
+  ]);
+  assert.equal(assessment.state, 'supported');
+  assert.equal(assessment.basis, 'explicit_self_link');
+  assert.deepEqual(assessment.supportObservationIds, ['read']);
+});
