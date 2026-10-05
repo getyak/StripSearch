@@ -175,8 +175,12 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
     async readIdentity(requestKey, action, signal) {
       // The first step may only read identity-level material: no posts, no
       // arbitrary fetch — deep reading happens after the scope confirmation.
-      if (action.type !== 'read' && action.type !== 'github_profile' && action.type !== 'social_profile') {
+      if (action.type !== 'read' && action.type !== 'github_profile' && action.type !== 'social_profile' && action.type !== 'firecrawl') {
         throw new ResearchStop('invalid_decision');
+      }
+      if (action.type === 'firecrawl') {
+        const target = classifyFirstStepUrl(action.url);
+        if (!target.ok || target.ref.entry !== 'profile' || !['personal_site', 'linktree'].includes(target.ref.platform)) throw new ResearchStop('invalid_decision');
       }
       return run(requestKey, 'profile_read', action.url, 'read', action, signal);
     },
@@ -544,6 +548,8 @@ export interface FirstStepDiscoverContext {
   catalog?: PlatformCatalogSnapshot | null;
   /** Manual hint from an explicit expand; a lead, never identity evidence. */
   hint?: string | null;
+  /** Operator-configured original-link HTML reader; each call shares the frozen ledger. */
+  firecrawlAvailable?: boolean;
   budget?: FirstStepBudgetPolicy;
   /** Optional restricted model proposals; metered and server-verified. */
   propose?: (signal: AbortSignal, input: FirstStepProposalModelInput) => Promise<FirstStepModelProposal[] | FirstStepProposalModelResult>;
@@ -747,7 +753,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         ? { type: 'github_profile', url: ref.profileUrl }
         : ref.platform === 'x'
           ? { type: 'social_profile', url: ref.profileUrl }
-          : { type: 'read', url: ref.profileUrl };
+          : ctx.firecrawlAvailable && ['personal_site', 'linktree'].includes(ref.platform)
+            ? { type: 'firecrawl', url: ref.profileUrl }
+            : { type: 'read', url: ref.profileUrl };
     try {
       const result = await ctx.search.readIdentity(requestKey('profile'), action, ctx.signal);
       active();

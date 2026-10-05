@@ -76,7 +76,7 @@ test('Firecrawl disables AI/TLS bypass and validates both source and final URLs'
   const body = { success: true, data: { markdown: 'Original synthetic markdown.', metadata: { sourceURL: url, url, statusCode: 200, creditsUsed: 1 } } };
   const h = harness(body); const r = await h.execute({ type: 'firecrawl', url });
   assert.equal(r.credits, 1); assert.equal(r.estimatedUsd, null);
-  const sent = JSON.parse(h.calls[0]!.init!.body!); assert.deepEqual(sent.formats, ['markdown']); assert.equal(sent.skipTlsVerification, false); assert.deepEqual(sent.parsers, []);
+  const sent = JSON.parse(h.calls[0]!.init!.body!); assert.deepEqual(sent.formats, ['markdown', 'html']); assert.equal(sent.onlyMainContent, false); assert.equal(sent.skipTlsVerification, false); assert.deepEqual(sent.parsers, []);
   for (const patch of [{ sourceURL: 'https://other-synthetic.dev/' }, { url: 'https://other-synthetic.dev/' }, { url: 'https://[::ffff:127.0.0.1]/' }, { statusCode: 403 }]) {
     const b = harness({ ...body, data: { ...body.data, metadata: { ...body.data.metadata, ...patch } } });
     await assert.rejects(b.execute({ type: 'firecrawl', url })); assert.equal(b.calls.length, 1);
@@ -164,4 +164,16 @@ test('dense original link catalogs retain all unique links and stable order',asy
  const url='https://synthetic-author.dev/archive';const links=Array.from({length:5000},(_,i)=>`https://synthetic-author.dev/post/${i}`);const raw=JSON.stringify({entries:[...links,...links]});
  const h=harness({results:[{id:url,url,text:raw,extras:{links}}],statuses:[{id:url,status:'success'}]},200,{maxBytes:2000000});
  const page=(await h.execute({type:'read',url})).pages[0]!;assert.deepEqual(page.links,links);assert.equal(page.text,raw);
+});
+
+
+test('Firecrawl preserves actual HTML links and exact spans instead of rebuilding hrefs from markdown or extras', async () => {
+  const url = 'https://synthetic-author.dev/';
+  const html = '<p>My GitHub: <a href="https://github.com/synthetic-author">my projects</a>.</p>';
+  const h = harness({success: true, data: {html, markdown: 'My GitHub: my projects.', metadata: {sourceURL: url, url, statusCode: 200, creditsUsed: 1}}});
+  const read = await h.execute({type: 'firecrawl', url});
+  assert.equal(h.calls.length, 1);
+  assert.equal(read.pages[0]!.text, html);
+  assert.equal(read.pages[0]!.linkContexts![0]!.quote, html);
+  assert.equal(read.pages[0]!.linkContexts![0]!.url, 'https://github.com/synthetic-author');
 });

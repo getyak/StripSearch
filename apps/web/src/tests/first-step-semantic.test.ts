@@ -728,3 +728,21 @@ test('full platform catalog binds relevant receipts using one ledger materializa
     assert.ok(web.receiptKeys.every(key => view.receipts.find(receipt => receipt.requestKey === key)?.kind === 'search'));
   } finally { h.db.close(); }
 });
+
+
+test('a configured HTML identity reader uses the same frozen receipt and original-context path', async () => {
+  const html = `<p>My GitHub account: <a href="${github}">code</a>.</p>`;
+  const actions: ResearchToolAction[] = [];
+  const h = harness({kind: 'name_query', value: 'Mira Kepler', question: null}, {search: () => [page(home, 'Mira Kepler')], read: url => [page(url, html, {links: [github], linkContexts: [{url: github, quote: html, locator: 'actual HTML paragraph', binding: 'html_anchor', surface: 'authorial'}]})]});
+  h.ctx.firecrawlAvailable = true;
+  const execute = h.ctx.search.readIdentity.bind(h.ctx.search);
+  h.ctx.search.readIdentity = async (key, action, signal) => { actions.push(action); return execute(key, action, signal); };
+  try {
+    const view = await discoverFirstStep(h.ctx);
+    assert.equal(actions[0]?.type, 'firecrawl');
+    const account = view.accounts.find(account => account.platform === 'github')!;
+    assert.equal(account.identity.state, 'supported');
+    assert.ok(account.identity.evidence.some(evidence => evidence.quote === html && evidence.sourceUrl === home));
+    assert.ok(view.receipts.some(receipt => receipt.kind === 'profile_read' && receipt.target === home && receipt.state === 'completed'));
+  } finally {h.db.close();}
+});

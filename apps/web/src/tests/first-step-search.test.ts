@@ -328,9 +328,10 @@ test('the checked search surface refuses posts deep-read and arbitrary fetch bef
     /invalid_decision|not allowed/i
   );
   await assert.rejects(
-    () => checked.readIdentity('k3', { type: 'firecrawl', url: 'https://lantern.dev/' }, signal),
+    () => checked.readIdentity('k3', { type: 'firecrawl', url: 'https://lantern.dev/articles/another-author' }, signal),
     /invalid_decision|not allowed/i
   );
+  await assert.rejects(() => checked.readIdentity('k4', {type: 'firecrawl', url: 'https://x.com/linzhou'}, signal), /invalid_decision|not allowed/i);
   // Attempt-bound keys: a new attempt never replays old receipts as new work.
   assert.ok(checked.receipts().length === 1);
   db.close();

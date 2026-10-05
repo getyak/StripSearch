@@ -147,7 +147,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
   async function firecrawl(urlInput: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const url = ordinaryUrl(urlInput);
     const apiKey = key(options.firecrawlApiKey, '网页');
-    const { body, bytes } = await request('https://api.firecrawl.dev/v2/scrape', { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown'], parsers: [], onlyMainContent: true, onlyCleanContent: false, timeout: Math.min(30_000, options.timeoutMs), skipTlsVerification: false }) }, signal);
+    const { body, bytes } = await request('https://api.firecrawl.dev/v2/scrape', { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown', 'html'], parsers: [], onlyMainContent: false, onlyCleanContent: false, timeout: Math.min(30_000, options.timeoutMs), skipTlsVerification: false }) }, signal);
     const data = asRecord(body.data); const metadata = asRecord(data.metadata);
     if (body.success !== true || metadata.statusCode !== 200 || metadata.error) fail('目标网页未成功返回公开正文。');
     const contentType = asString(metadata.contentType) ?? asString(metadata.mimeType) ?? asString(metadata['content-type']);
@@ -156,7 +156,9 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (comparable(sourceUrl) !== comparable(url)) fail('抓取来源与请求地址不匹配。');
     const canonicalHost = (value: string) => new URL(value).hostname.replace(/^www\./, '');
     if (canonicalHost(finalUrl) !== canonicalHost(url)) fail('网页跳转到了其他网站，未采用返回资料。');
-    const rawContent = asString(data.markdown) ?? '';
+    // Preserve provider-supplied HTML hrefs and their real surrounding spans.
+    // Markdown remains the fallback; never reconstruct anchors from a link index.
+    const rawContent = asString(data.html) || asString(data.markdown) || '';
     const content = retainText(rawContent); if (!content) fail('目标网页没有可用正文。');
     const limitations = ['网页原文仍需核对人物归属。', `请求地址：${sourceUrl}`, `最终地址：${finalUrl}`, '本次读取未指定正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。'];
     return result([{ url: sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], sourceUrl), linkContexts: extractOriginalLinkContexts(content, sourceUrl), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);

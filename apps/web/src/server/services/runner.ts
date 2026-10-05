@@ -347,6 +347,7 @@ export class Runner {
         registryVersion: this.deps.discoveryCatalog?.registryVersion ?? 'catalog-unavailable',
         catalog: this.deps.discoveryCatalog ?? null,
         hint: link.hint,
+        firecrawlAvailable: Boolean(this.deps.config.firecrawlApiKey),
         // The restricted first-step model role runs on the PRODUCT model
         // provider (same configured DeepSeek credential as research); metered
         // through the checked ledger and fully server-verified.
