@@ -43,6 +43,7 @@ export interface StoredPage extends ResearchPage { sourceKey: string; discovered
 export interface ResearchCheckpoint {
  /** Last bounded model validation feedback; never source evidence. */
  planFeedback?: string;
+ planValidationFailures?: number;
  phase: string; steps: number; startedAt: number; elapsedMs: number;
  limits?: ResearchBudgetLimits;
  /** Latest locally inspected source window (an excerpt scope window, not full text). */

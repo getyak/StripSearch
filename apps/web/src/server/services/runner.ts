@@ -399,6 +399,7 @@ export class Runner {
       // rejected predispatch action is never billed and leaves no receipt.
       predispatch(action) {
         guard.assertDispatch(action);
+        if(action.type==='search')throw new FirstStepSelectionError('out_of_scope','账号范围已确认；此阶段只读取已观察到的所选账号内容。扩展平台须显式修订发现范围。');
       },
       async execute(action, signal) {
         try {

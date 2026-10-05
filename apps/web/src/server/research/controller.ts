@@ -293,7 +293,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    if(!object(decision)||typeof decision.action!=='string')throw new ResearchStop('invalid_decision');
    if(decision.action==='finish'){
     if(!Array.isArray(decision.claims))throw new ResearchStop('invalid_evidence');
-    const claims:ResearchClaim[]=decision.claims.map(raw=>{
+    let validOriginalClaims=0;
+    const claims:ResearchClaim[]=decision.claims.map((raw,index)=>{
+     try {
      if(!object(raw)||typeof raw.sourceKey!=='string'||typeof raw.quote!=='string'||raw.quote.length<3||raw.quote.length>600)throw new ResearchStop('invalid_evidence');
      const page=activePages.find(p=>p.sourceKey===raw.sourceKey);if(!page||(page.retrieval!=='read'&&page.retrieval!=='profile')||!page.text.includes(raw.quote))throw new ResearchStop('invalid_evidence');
      const kind=raw.kind??'page_statement';if(!['attributed_statement','page_statement','inference'].includes(String(kind)))throw new ResearchStop('invalid_evidence');
@@ -301,8 +303,14 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      const statement=typeof raw.statement==='string'?sanitizeText(raw.statement,600):raw.quote;if(!statement)throw new ResearchStop('invalid_evidence');
      const facet=raw.facet;
      if(facet!==undefined&&!RESEARCH_FACETS.some(f=>f.id===facet))throw new ResearchStop('invalid_evidence');
+     validOriginalClaims++;
      return {sourceKey:raw.sourceKey,quote:raw.quote,statement,kind:kind as ResearchClaim['kind'],section:section as ResearchClaim['section'],...(facet?{facet:facet as ResearchFacet}:{})};
-    }).filter(claim=>{
+     } catch(error) {
+      if(!options.firstStepScope||!(error instanceof ResearchStop)||error.code!=='invalid_evidence')throw error;
+      checkpoint.unknowns.push(`第 ${index+1} 条结论未通过原文引用校验，未发布；其余合法条目仍须独立核验。`);
+      return null;
+     }
+    }).filter((claim):claim is ResearchClaim=>claim!==null).filter(claim=>{
      // Independent first-step account material is retained as sources but can
      // never become a claim about the selected person.
      const page=activePages.find(p=>p.sourceKey===claim.sourceKey);
@@ -313,6 +321,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      }
      return true;
     });
+    if(options.firstStepScope&&decision.claims.length>0&&validOriginalClaims===0)throw new ResearchStop('invalid_evidence');
     checkpoint.claims=[];checkpoint.pendingClaims=claims;checkpoint.steps++;
     checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...Array.isArray(decision.unknowns)?decision.unknowns.filter((v):v is string=>typeof v==='string').map(v=>sanitizeText(v,600)):[]])];
     checkpoint.phase='verifying';save();return await verify();
@@ -402,7 +411,8 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     // new, metered model call under the original cap, never a hidden retry.
     checkpoint.planFeedback=`上个方案未被接受（${error.code}）。只允许一个平铺的 batch，actions 为 1–4 个 read/search/social/social_posts/firecrawl/inspect/catalog，禁止嵌套 batch；inspect 仅使用已存 sourceKey 与非负整数 offset。finish 的 quote 必须是已读 sourceKey 原文中精确、连续的 3–600 字符片段，不能把 HTML 改写后的展示文本当原文。请改正方案；仅使用所选范围，不猜测地址。`;
     checkpoint.unknowns.push(`模型方案未通过校验（${error.code}）；该方案未成为结论，保留缺口并在原预算内重新规划。`);
-    checkpoint.steps++;save();
+    checkpoint.steps++;checkpoint.planValidationFailures=(checkpoint.planValidationFailures??0)+1;save();
+    if(checkpoint.planValidationFailures>=3)return finish('invalid_decision','partial');
    }
   }
   return finish('budget_exhausted','partial');

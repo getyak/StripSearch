@@ -359,3 +359,37 @@ test('malformed nested batch gets counted feedback without dispatching any part 
   assert.equal(f.store.research.budget(f.run.id).toolCalls, 2);
 });
 
+
+test('one fabricated quote cannot erase an independently verified valid claim',async t=>{
+ const f=fixture();t.after(()=>f.close());select(f);const {calls,tools}=recordingTools();let verified=0;
+ const planner:ResearchPlanner={async decide(input){
+  if(input.mode==='verify'){verified++;assert.equal(input.claims?.length,1);assert.equal(input.claims?.[0]?.quote,HOME_TEXT);return {supported:[0],rejected:[]};}
+  return {action:'finish',claims:[{sourceKey:sourceKeyFor(input,HOME_URL),quote:'Fabricated words absent from the original.',statement:'Unsupported conclusion.',kind:'page_statement'},{sourceKey:sourceKeyFor(input,HOME_URL),quote:HOME_TEXT,statement:CLAIM,kind:'page_statement'}]};
+ }};
+ const runner=runnerFor(f,tools,planner);t.after(()=>runner.stopAll());const run=await runToTerminal(f,runner);
+ assert.equal(run.stopReason,'limited_evidence');assert.equal(verified,1);assert.equal(calls.length,2);
+ const observations=f.store.listObservations(f.run.id);assert.equal(observations.length,1);assert.equal(observations[0]?.statement,CLAIM);
+ assert.ok(run.limitations.some(s=>s.includes('第 1 条结论未通过原文引用校验')));
+});
+
+test('broad Fetch search is refused without paid dispatch and selected originals remain usable',async t=>{
+ const f=fixture();t.after(()=>f.close());select(f);const {calls,tools}=recordingTools();let plans=0;
+ const planner:ResearchPlanner={async decide(input){
+  if(input.mode==='verify')return {supported:[0],rejected:[]};
+  if(plans++===0)return {action:'search',query:'Lin Zhou biography outside frozen account scope'};
+  assert.ok(input.checkpoint.unknowns.some(s=>s.includes('未发送请求')));
+  return {action:'finish',claims:[{sourceKey:sourceKeyFor(input,HOME_URL),quote:HOME_TEXT,statement:CLAIM,kind:'page_statement'}]};
+ }};
+ const runner=runnerFor(f,tools,planner);t.after(()=>runner.stopAll());const run=await runToTerminal(f,runner);
+ assert.equal(run.stopReason,'limited_evidence');assert.equal(calls.length,2);assert.ok(calls.every(a=>a.type!=='search'));
+ assert.ok(f.store.research.receipts(f.run.id).every(r=>(r.request as {type?:string}).type!=='search'));assert.equal(f.store.research.budget(f.run.id).toolCalls,2);
+ assert.equal(f.store.listObservations(f.run.id)[0]?.statement,CLAIM);
+});
+
+test('repeated malformed plans stop after three corrections even with no global model cap',async t=>{
+ const f=fixture();t.after(()=>f.close());select(f);const {tools}=recordingTools();let plans=0;
+ const planner:ResearchPlanner={async decide(){plans++;return {action:'batch',actions:[{action:'batch',actions:[]}]};}};
+ const runner=runnerFor(f,tools,planner,{...LIMITS,modelCalls:0});t.after(()=>runner.stopAll());const run=await runToTerminal(f,runner);
+ assert.equal(plans,3);assert.equal(run.stopReason,'invalid_decision');assert.equal(run.state,'partial');assert.equal(f.store.listObservations(f.run.id).length,0);
+ assert.equal(f.store.research.checkpoint(f.run.id)?.planValidationFailures,3);assert.equal(f.store.research.budget(f.run.id).toolCalls,2);
+});

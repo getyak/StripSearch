@@ -40,8 +40,15 @@ export interface ResearchPlanner {
 export function createDshPlanner(model='deepseek-flash'):ResearchPlanner {
  return {decide(input,signal,invoke){
   const prompt=buildResearchPrompt(input);
-  return runDshDecision({prompt,signal,model,maxTokens:2500,timeoutMs:60_000,invoke});
+  return runDshDecision({prompt,signal,model,maxTokens:2500,timeoutMs:60_000,invoke,...(input.checkpoint.firstStep?{schema:researchDecisionSchema(input.mode)}:{})});
  }};
+}
+
+/** Scoped guidance bounds output size; controller still validates every value. */
+export function researchDecisionSchema(mode?:'plan'|'verify'):Record<string,unknown> {
+ if(mode==='verify')return {type:'object',required:['supported','rejected'],properties:{supported:{type:'array',items:{type:'integer',minimum:0}},rejected:{type:'array',items:{type:'object',required:['index','reason'],properties:{index:{type:'integer',minimum:0},reason:{type:'string',maxLength:200}}}}}};
+ const operations=['read','social','social_posts','firecrawl','inspect','catalog'];
+ return {type:'object',required:['action'],properties:{action:{enum:[...operations,'batch','finish']},actions:{type:'array',minItems:1,maxItems:4,items:{type:'object',required:['action'],properties:{action:{enum:operations}}}},claims:{type:'array',maxItems:4,items:{type:'object',required:['statement','sourceKey','quote','kind','section'],properties:{statement:{type:'string',maxLength:160},sourceKey:{type:'string'},quote:{type:'string',minLength:3,maxLength:250},kind:{enum:['attributed_statement','page_statement','inference']},section:{enum:['background','work','expression','analysis']}}}},unknowns:{type:'array',maxItems:4,items:{type:'string',maxLength:200}}}};
 }
 
 export function buildResearchPrompt(input:PlannerInput):string {
@@ -84,7 +91,7 @@ export function buildResearchPrompt(input:PlannerInput):string {
    // and honest per-account coverage. Checkpoints without a binding (frozen
    // replay and legacy runs) keep the historical prompt verbatim.
    ...(input.checkpoint.firstStep?{firstStepScope:{
-     lastValidationFeedback:input.checkpoint.planFeedback??null,clusterId:input.checkpoint.firstStep.clusterId,displayName:input.checkpoint.firstStep.displayName,anchorUrl:input.checkpoint.firstStep.anchorUrl,
+     planningInstruction:'Fetch scope is already frozen. Never use search: it is refused before dispatch. Use only observed selected-account links and local inspect. Return one flat batch of at most4 actions. Finish after at most6 planning steps, or sooner with sufficient original evidence; reserve verification. Finish with at most4 concise claims (statement<=160chars,exact original quote<=250chars) and at most4 concise unknowns. Preserve HTML entities and tags literally inside quote. Never summarize text inside quote. Include only what each quoted span itself supports, not extra dates/numbers/roles from elsewhere. Repeated actions add no evidence; use existing originals and finish. One valid claim is better than padding dimensions.',planningSteps:input.checkpoint.steps,lastValidationFeedback:input.checkpoint.planFeedback??null,clusterId:input.checkpoint.firstStep.clusterId,displayName:input.checkpoint.firstStep.displayName,anchorUrl:input.checkpoint.firstStep.anchorUrl,
      accounts:input.checkpoint.firstStep.accounts.map(a=>({accountId:a.accountId,profileUrl:a.profileUrl,allowedScope:a.allowedScope,independent:a.independent,accessCoverage:a.accessCoverage})),
      note:'研究只限这些已选账号；独立账号材料只作该账号自身记录，不并入同一人物结论；未选/排除/后来发现的账号不能读取。只请求 sources.links 中实际观察到的地址，不得根据名称拼接或猜测网址。链接目录已按冻结范围筛选，最终仍由实时权限守卫判断。优先 inspect 已存原文以提炼有依据的结论；范围外线索记录为缺口，继续整理已选资料。' 
    }}:{}),
