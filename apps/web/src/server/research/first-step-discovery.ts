@@ -141,7 +141,7 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
     if (old) {
       // Same-attempt recovery: the real prior receipt, original timestamp.
       note(requestKey, kind, target, retrieval, old, old.state === 'completed' ? 'completed' : 'failed');
-      if (old.state === 'failed') throw new ProviderError('provider_unavailable', '本次请求已有已结算失败回执，保留缺口，不自动重复调用。');
+      if (old.state === 'failed') throw new ProviderError('provider_bad_response', '本次请求已有已结算失败回执，保留缺口，不自动重复调用。');
       return old.result as ResearchToolResult;
     }
     try {
@@ -187,7 +187,7 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
         // Same-attempt recovery: replay the EXACT saved result with its
         // original receipt time. Unknown inflight attempts are never replayed
         // (reserve throws) and failed attempts never silently re-call.
-        if (old.state === 'failed') throw new ProviderError('provider_unavailable', '模型请求已有已结算失败回执，保留缺口，不自动重复调用。');
+        if (old.state === 'failed') throw new ProviderError('provider_bad_response', '模型请求已有已结算失败回执，保留缺口，不自动重复调用。');
         return old.result as never;
       }
       try {

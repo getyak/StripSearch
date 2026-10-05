@@ -166,3 +166,17 @@ test('the frozen binding keeps independent account material isolated with its ow
     seeded.close();
   }
 });
+
+
+test('retry lineage retains later exclusions from the retried run and its follow-up ancestors', t => {
+  const seeded = seedSelected(); t.after(() => seeded.close());
+  const child = seeded.store.insertRun({ ownerId: 'user-owner', question: 'retry selected scope', seedUrl: null,
+    provider: 'research', parentRunId: null, retryOf: seeded.run.id, followup: false, idempotencyKey: null, bodyFingerprint: 'scope-retry' });
+  seeded.firstStep.inheritFirstStepScope('user-owner', child, seeded.run.id);
+  const guard = seeded.firstStep.scopeGuard('user-owner', child.id);
+  guard.assertDispatch({ type: 'read', url: 'https://x.com/selected_author' });
+  seeded.db.prepare('INSERT INTO first_step_exclusions (id, run_id, case_id, account_id, statement, recorded_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)')
+    .run('exclude-before-retry-read', seeded.run.id, seeded.caseId, seeded.accountIdFor(1), '用户声明：不是此人。', new Date().toISOString());
+  expectOut(() => guard.assertDispatch({ type: 'read', url: 'https://x.com/selected_author' }), 'out_of_scope');
+  expectOut(() => guard.assertIngest([{ url: 'https://x.com/selected_author/status/2' }]), 'out_of_scope');
+});

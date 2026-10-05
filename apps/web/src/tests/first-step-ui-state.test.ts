@@ -6,7 +6,7 @@ import {createFirstStepPanel, type FirstStepPanelApi} from '../client/first-step
 import type {FirstStepSelectionPayload} from '../client/api.js';
 
 test('choice revisions preserve focus, input, evidence, and payload-bound retries', async (t) => {
-const env=installDom(),fixture=seedFirstStep({accounts:[{url:'https://github.com/linzhou',identityState:'supported'},{url:'https://x.com/linzhou',identityState:'supported'}]}),response=fixture.firstStep.getFirstStepView(fixture.run.ownerId,fixture.run.id);assert.ok(response && response.mode === 'first_step'); let view=response.view;const requests: Array<{payload: FirstStepSelectionPayload; key: string}> = [];
+const env=installDom(),fixture=seedFirstStep({accounts:[{url:'https://github.com/linzhou',supportedBy:{sourceUrl:'https://fixture-linzhou.org/',quote:'My GitHub: https://github.com/linzhou.'}},{url:'https://x.com/linzhou',supportedBy:{sourceUrl:'https://fixture-linzhou.org/',quote:'My X: https://x.com/linzhou.'}}]}),response=fixture.firstStep.getFirstStepView(fixture.run.ownerId,fixture.run.id);assert.ok(response && response.mode === 'first_step'); let view=response.view;const requests: Array<{payload: FirstStepSelectionPayload; key: string}> = [];
 t.after(() => fixture.close());
 const container=env.document.createElement('section');env.document.body.appendChild(container);let expanded=0;
 const api: FirstStepPanelApi = {getFirstStepDiscovery:async()=>({mode:'first_step',view,runRevision:1}),submitFirstStepSelection:async(_run: string,payload: FirstStepSelectionPayload,key: string)=>{requests.push({payload,key});throw new Error('synthetic request failure')},expandFirstStep:async()=>{expanded++;return{queued:true}}};

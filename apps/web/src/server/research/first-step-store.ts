@@ -1138,20 +1138,23 @@ export class FirstStepScopeGuard {
     return { accountId, allowedScope: allowed.state, accountUrl: ref.accountUrl, entry: ref.entry };
   }
 
-  /** Live revocation dependencies: an exclusion on this run OR any parent blocks. */
+  /** Live revocation dependencies include both follow-up and retry ancestry. */
   private excludedInChain(accountId: string): boolean {
-    let current: string | null = this.runId;
+    const pending = [this.runId];
     const seen = new Set<string>();
-    while (current && !seen.has(current)) {
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (seen.has(current)) continue;
       seen.add(current);
       const row = this.db
         .prepare('SELECT id FROM first_step_exclusions WHERE run_id = ? AND account_id = ? AND revoked_at IS NULL')
         .get(current, accountId) as { id: string } | undefined;
       if (row) return true;
-      const parent = this.db.prepare('SELECT parent_run_id FROM runs WHERE id = ?').get(current) as
-        | { parent_run_id: string | null }
+      const parent = this.db.prepare('SELECT parent_run_id, retry_of FROM runs WHERE id = ? AND owner_id = ?').get(current, this.ownerId) as
+        | { parent_run_id: string | null; retry_of: string | null }
         | undefined;
-      current = parent?.parent_run_id ?? null;
+      if (parent?.parent_run_id) pending.push(parent.parent_run_id);
+      if (parent?.retry_of) pending.push(parent.retry_of);
     }
     return false;
   }
