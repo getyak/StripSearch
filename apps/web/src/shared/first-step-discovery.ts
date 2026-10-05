@@ -1212,6 +1212,9 @@ export interface FirstStepAccountView {
   accountKind: FirstStepAccountKind;
   identity: {
     state: IdentitySupportState;
+    /** Current dependency validity, separate from the immutable stored facet. */
+    validity?: 'valid' | 'review';
+    reviewReason?: string | null;
     basis: FirstStepIdentityBasis;
     basisLabel: string;
     evidence: FirstStepEvidenceView[];
@@ -1661,6 +1664,9 @@ export function validateSelectionDecision(
     // Independent account scope: researched alone, never merged into the
     // person conclusions with the other selected accounts.
     return { ok: true, allowedScope: 'public_history' };
+  }
+  if (account.identity.validity === 'review') {
+    return { ok: false, error: '该账号的归属依据已失效，只能作为独立账号研究，不能并入人物结论。' };
   }
   if (state === 'supported' || options?.anchorAccountIds?.has(account.accountId) === true) {
     return { ok: true, allowedScope: 'public_history' };

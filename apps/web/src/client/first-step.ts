@@ -344,8 +344,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     top.appendChild(label);
     top.appendChild(
       make('span', {
-        className: `first-step-badge${account.identity.state === 'supported' ? '' : ' uncertain'}`,
-        text: STATE_LABELS[account.identity.state] ?? account.identity.state
+        className: `first-step-badge${account.identity.state === 'supported' && account.identity.validity !== 'review' ? '' : ' uncertain'}`,
+        text: account.identity.validity === 'review' ? '原归属依据已失效' : STATE_LABELS[account.identity.state] ?? account.identity.state
       })
     );
     card.appendChild(top);

@@ -35,6 +35,7 @@ import {
   validateSelectionDecision,
   type FirstStepAccountDecision,
   type FirstStepAccountRef,
+  type FirstStepAccountView,
   type FirstStepDiscoveryView,
   type FirstStepEvidenceView,
   type FirstStepFrozenPlan,
@@ -472,8 +473,8 @@ export class FirstStepStore {
       view.stopReason = run.stopReason;
       return { mode: 'first_step', view, link };
     }
-    const accounts = this.cases.listAccounts(ownerId, link.caseId);
-    const byId = new Map(accounts.map((account) => [account.accountId, account]));
+    const accounts = this.projectCurrentAccounts(ownerId, link.caseId, current.view.accounts);
+    const activeEvidence = new Set(accounts.flatMap(account => [...account.identity.evidence, ...account.identity.counterevidence].map(item => item.evidenceId)));
     const exclusions = this.activeExclusions(runId);
     const view: FirstStepDiscoveryView = {
       ...current.view,
@@ -482,22 +483,36 @@ export class FirstStepStore {
       // ready_for_choice from the stored revision.
       phase: link.phase,
       readyForChoice: link.phase === 'ready_for_choice',
-      accounts: current.view.accounts.map((account) => {
-        const live = byId.get(account.accountId);
-        return live
-          ? {
-              ...account,
-              userSelection: live.userSelection,
-              allowedScope: live.allowedScope,
-              researchValue: live.researchValue,
-              accessCoverage: live.accessCoverage
-            }
-          : account;
-      }),
+      accounts,
+      clusters: current.view.clusters.map(cluster => ({ ...cluster,
+        leads: cluster.leads.filter(lead => lead.evidenceIds.every(id => activeEvidence.has(id))) })),
       selection: this.selectionState(link, liveScopeVersion)
     };
     void exclusions;
     return { mode: 'first_step', view, link };
+  }
+
+  /** Re-derive dependency validity without rewriting stored evidence or facets. */
+  private projectCurrentAccounts(ownerId: string, caseId: string, stored: readonly FirstStepAccountView[]): FirstStepAccountView[] {
+    const live = new Map(this.cases.reportView(ownerId, caseId).accounts.map(account => [account.accountId, account]));
+    const evidence = this.accountEvidenceViews(ownerId, caseId);
+    return stored.map(account => {
+      const current = live.get(account.accountId);
+      if (!current) return account;
+      const valid = current.identityValidity === 'valid';
+      const active = evidence.get(account.accountId) ?? [];
+      return { ...account,
+        identity: { ...account.identity, state: current.identitySupport.state,
+          validity: valid ? 'valid' : 'review', reviewReason: current.identityReviewReason,
+          evidence: active.filter(item => item.role === 'identity_support'),
+          counterevidence: active.filter(item => item.role === 'identity_counterevidence'),
+          conflicts: [...account.identity.conflicts, ...valid ? [] : [current.identityReviewReason ?? '原归属依据已失效，请重新核对。']] },
+        defaultSuggestion: valid && current.identitySupport.state === 'supported' && active.some(item => item.role === 'identity_support' && current.identitySupport.evidenceIds.includes(item.evidenceId))
+          ? account.defaultSuggestion : { suggested: false, reason: valid ? '当前没有有效归属支撑，不默认推荐。' : '原归属依据已失效，不再默认推荐。' },
+        requiresIndependentScope: account.requiresIndependentScope || !valid || current.identitySupport.state !== 'supported',
+        userSelection: current.userSelection, allowedScope: current.allowedScope,
+        researchValue: current.researchValue, accessCoverage: current.accessCoverage };
+    });
   }
 
   private selectionState(link: FirstStepLinkRecord, liveScopeVersion: number): FirstStepSelectionStateView {
@@ -648,7 +663,8 @@ export class FirstStepStore {
       if (caseRecord.scopeVersion !== input.expectedScopeVersion) {
         throw new FirstStepSelectionError('stale_scope_version', '研究范围已更新，请刷新后重新提交。');
       }
-      const known = new Map(record.view.accounts.map((account) => [account.accountId, account]));
+      const currentAccounts = this.projectCurrentAccounts(ownerId, link.caseId, record.view.accounts);
+      const known = new Map(currentAccounts.map((account) => [account.accountId, account]));
       const decisions = new Map<string, FirstStepAccountDecision>();
       for (const decision of input.accounts) {
         const account = known.get(decision.accountId);
@@ -662,7 +678,7 @@ export class FirstStepStore {
       if (!completeness.ok) throw new FirstStepSelectionError('incomplete_batch', completeness.error);
       // The person cluster is bound here: nonexistent clusters and cross-cluster
       // same-person merges are rejected; independent scopes stay separate.
-      const clusterChoice = validateClusterChoice(record.view.clusters, record.view.accounts, input.accounts, input.clusterId);
+      const clusterChoice = validateClusterChoice(record.view.clusters, currentAccounts, input.accounts, input.clusterId);
       if (!clusterChoice.ok) throw new FirstStepSelectionError('invalid_cluster', clusterChoice.error ?? '人物选择无效。');
       const chosen = [...decisions.values()].filter((d) => d.selection === 'selected' || d.selection === 'only_this_account');
       if (chosen.length === 0) {
@@ -1060,6 +1076,11 @@ export class FirstStepScopeGuard {
     if (!caseRow) throw new FirstStepSelectionError('scope_changed', '案例不可用，读取范围失效。');
     if (caseRow.scope_version !== binding.scopeVersion) {
       throw new FirstStepSelectionError('scope_changed', '研究范围已变更，冻结范围失效。');
+    }
+    const current = this.store.cases.reportView(this.ownerId, binding.caseId).accounts;
+    const merged = new Set(binding.selectedAccountIds.filter(id => !binding.independentAccountIds.includes(id)));
+    if (current.some(account => merged.has(account.accountId) && account.identityValidity !== 'valid')) {
+      throw new FirstStepSelectionError('scope_changed', '已选账号的归属依据已失效，人物研究暂停；原记录保留。');
     }
   }
 
