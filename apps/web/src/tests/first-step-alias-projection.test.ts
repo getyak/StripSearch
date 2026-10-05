@@ -22,6 +22,7 @@ import {
 import type { ResearchPage, ResearchToolResult, ResearchToolAction, ResearchAliasProof } from '../server/research/tool-contracts.js';
 import type { FirstStepBudgetPolicy, FirstStepInput, FirstStepSelectionInput } from '../shared/first-step-discovery.js';
 import { seedFirstStep } from './first-step-fixtures.js';
+import {extractOriginalLinkContexts} from '../server/research/link-context.js';
 
 const page = (url: string, text: string, over: Partial<ResearchPage> = {}): ResearchPage => ({
   url,
@@ -378,4 +379,32 @@ for(const mismatch of ['request','id','returned'] as const)test(`alias proof can
   aliasProof:{kind:'native_profile',platform:'github',nativeId:mismatch==='id'?'222':'111',requestedUrl:mismatch==='request'?'https://github.com/other-fixture':url,returnedUrl:mismatch==='returned'?'https://github.com/FIXTURE-AUTHOR':returned}
  })],budget:{maxSearchQueries:1}});
  try{const view=await discoverFirstStep(h.ctx);assert.ok(view.accounts.some(a=>a.profileUrl===requested));assert.ok(view.accounts.some(a=>a.profileUrl===returned));assert.ok(view.gaps.some(g=>g.includes('与实际请求或原生返回账号不绑定')));}finally{h.db.close();}
+});
+
+for(const rollback of [false,true])test(`actual contradictory native IDs never collapse case variants; rollback=${rollback}`,async()=>{
+ const canonical='https://github.com/FixtureAuthor',alias='https://github.com/fixtureauthor',third='https://github.com/FIXTUREAUTHOR';
+ const urls=rollback?[alias,third]:[canonical,alias];let reads=0;
+ const h=harness({kind:'name_query',value:'Fixture Author',question:null},{search:()=>urls.map(url=>page(url,'Indexed synthetic name.')),read:url=>{
+  const id=++reads===1?'111':'222';return [page(canonical,'Actual synthetic native profile.',{account:{platform:'github',id,handle:'FixtureAuthor',profileUrl:canonical},aliasProof:{kind:'native_profile',platform:'github',nativeId:id,requestedUrl:url,returnedUrl:canonical}})];
+ },budget:{maxSearchQueries:1}});
+ try{
+  const view=await discoverFirstStep(h.ctx);assert.ok(reads>=2);assert.equal(view.accounts.length,rollback?3:2);
+  assert.ok(view.accounts.every(a=>a.identity.conflicts.some(c=>c.includes('原生 ID 冲突'))&&a.requiresIndependentScope&&!a.defaultSuggestion.suggested));
+  assert.ok(view.gaps.some(g=>g.includes('111 / 222')));assert.ok(!view.gaps.some(g=>g.includes('已按实际响应合并')));
+  assert.ok(view.clusters.every(c=>c.linkage!=='linked'));
+  const results=h.store.research.receipts(h.runId).filter(r=>r.kind==='tool').flatMap(r=>(r.result as ResearchToolResult).pages);
+  assert.ok(results.some(p=>p.account?.id==='111')&&results.some(p=>p.account?.id==='222'),'both original native responses remain in the real ledger');
+ }finally{h.db.close();}
+});
+
+for(const heading of ["My colleague's account",'Not my account; impersonator'])test(`model anchor subspan cannot discard ${heading} ancestor semantics`,async()=>{
+ const home='https://fixture-author.dev/',target='https://github.com/fixture-colleague';
+ const anchor=`<a rel="me" href="${target}">GitHub</a>`;
+ const original=`<h1>Fixture Author</h1><section><h2>${heading}</h2><p>${anchor}</p></section>`;
+ const h=harness({kind:'homepage_url',value:home,question:null},{search:()=>[],read:url=>url===home?[page(home,original,{links:[target],linkContexts:extractOriginalLinkContexts(original,home)})]:[],budget:{maxSearchQueries:1}});
+ h.ctx.propose=async(_signal,input)=>({proposals:[{targetUrl:target,fromUrl:home,linkRole:'self_account_section',quote:anchor,requestKey:input.excerpts.find(e=>e.url===home)!.requestKey}],leads:[]});
+ try{const view=await discoverFirstStep(h.ctx);const account=view.accounts.find(a=>a.profileUrl===target)!;
+  assert.notEqual(account.identity.state,'supported');assert.equal(account.defaultSuggestion.suggested,false);assert.ok(view.gaps.some(g=>g.includes('模型提议被拒')));
+  assert.ok(view.clusters.every(c=>c.linkage!=='linked'));
+ }finally{h.db.close();}
 });

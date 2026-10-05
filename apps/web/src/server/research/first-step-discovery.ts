@@ -513,7 +513,7 @@ export function verifyFirstStepModelProposals(
     // link contexts: source, target, surface AND ownership semantics.
     const flags = sourceFlags(proposal.fromUrl);
     const role = linkRoleFromContext({
-      quote: proposal.quote,
+      quote: boundContext?.quote ?? proposal.quote,
       targetUrl: proposal.targetUrl,
       binding: boundContext?.binding ?? null,
       surface: boundContext?.surface ?? null,
@@ -690,6 +690,13 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   // literal source URL/targetURL/quote/hash and receipt stays untouched.
   const aliasToRepresentative = new Map<string, string>();
   const aliasNotes = new Set<string>();
+  const aliasSuccessNotes=new Map<string,string>();
+  const originalRefs=new Map<string,FirstStepAccountRef>();
+  const originalObservations=new Map<string,FirstStepLinkObservation>();
+  const nativeIds=new Map<string,Set<string>>();
+  const nativeConflicts=new Map<string,string>();
+  const nativeNamespace=(ref:FirstStepAccountRef):string|null=>
+    (ref.platform==='github'||ref.platform==='x')&&ref.handle?`${ref.platform}:${ref.handle.toLowerCase()}`:null;
   const readKeys = new Set<string>();
   const resolveKey = (key: string): string => {
     let current = key;
@@ -740,6 +747,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     const classified = classifyFirstStepUrl(url);
     if (!classified.ok) return null;
     const ref = classified.ref;
+    originalRefs.set(ref.accountKey,ref);
     const projectedKey = resolveKey(ref.accountKey);
     if (projectedKey !== ref.accountKey) {
       // An observed alias of a canonical representative is never a second
@@ -774,6 +782,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const pushObservation = (observation: FirstStepLinkObservation): void => {
     if (observationIds.has(observation.observationId)) return;
     observationIds.add(observation.observationId);
+    originalObservations.set(observation.observationId,{...observation});
     // Canonical projection remaps ACCOUNT KEYS only; every literal source
     // URL/targetURL/quote/hash stays exactly as observed.
     linkObservations.push({
@@ -795,6 +804,23 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     if (!verified.ok) {
       aliasNotes.add(`重复候选的别名证明未通过服务端核验（${verified.reason}）：${proof.requestedUrl}；不做合并，保留分离候选。`);
       return;
+    }
+    if(proof.kind==='native_profile'){
+      const namespace=nativeNamespace(verified.aliasRef)!;
+      const ids=nativeIds.get(namespace)??new Set<string>();ids.add(proof.nativeId);nativeIds.set(namespace,ids);
+      if(ids.size>1){
+        const conflict=`实际原生 ID 冲突（${namespace}：${[...ids].join(' / ')}）；保持账号变体分离，不作同人合并或默认推荐。`;
+        nativeConflicts.set(namespace,conflict);aliasNotes.add(conflict);
+        // Undo only this attempt's in-memory aliases. Persisted history and
+        // literal observations/receipts remain untouched.
+        for(const [key,ref] of originalRefs)if(nativeNamespace(ref)===namespace){aliasToRepresentative.delete(key);candidateRefs.set(key,ref);aliasSuccessNotes.delete(key);}
+        for(const observation of linkObservations){
+          const raw=originalObservations.get(observation.observationId)!;
+          observation.fromAccountKey=raw.fromAccountKey===null?null:resolveKey(raw.fromAccountKey);
+          observation.targetAccountKey=resolveKey(raw.targetAccountKey);
+        }
+        return;
+      }
     }
     if (verified.aliasKey === verified.representativeKey) return;
     if (ctx.store.cases.listAccounts(ctx.ownerId, caseId).length > 0) {
@@ -818,7 +844,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       indexedTitles.set(projected, [...(indexedTitles.get(projected) ?? []), ...titles]);
       indexedTitles.delete(key);
     }
-    aliasNotes.add(`重复候选已按实际响应合并为同一账号投影（${proof.requestedUrl} → ${proof.returnedUrl}）；合并仅为投影去重，不构成身份依据，不改变用户输入、原始摘录或回执。`);
+    aliasSuccessNotes.set(verified.aliasKey,`重复候选已按实际响应合并为同一账号投影（${proof.requestedUrl} → ${proof.returnedUrl}）；合并仅为投影去重，不构成身份依据，不改变用户输入、原始摘录或回执。`);
   };
 
   const searchOnce = async (query: string, includeDomains?: readonly string[], provider?: 'bluesky'): Promise<'ok' | 'failed' | 'budget'> => {
@@ -1219,7 +1245,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   for (const ref of accountRefs) {
     active();
     const accountId = firstStepAccountId(caseId, ref.accountKey);
+    const conflict=nativeConflicts.get(nativeNamespace(ref)??'');
+    const conflictedKey=(key:string|null):boolean=>key!==null&&nativeConflicts.has(nativeNamespace(originalRefs.get(key)??candidateRefs.get(key)??ref)??'');
     const relevant = linkObservations.filter((observation) => observation.targetAccountKey === ref.accountKey);
+    const applicable=relevant.filter(observation=>observation.linkRole==='explicit_denial'||!conflictedKey(observation.fromAccountKey)&&!conflictedKey(observation.targetAccountKey));
     const accessReadable = observed.some((entry) => entry.ref.accountKey === ref.accountKey);
     ctx.firstStep.recordDiscoveredAccount({
       ownerId: ctx.ownerId,
@@ -1235,7 +1264,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         note: accessReadable ? '已读取身份资料最小原文。' : '仅搜索索引可见，尚未回读。'
       }
     });
-    for (const observation of relevant) {
+    for (const observation of applicable) {
       // Only role-correct read-original observations with a real stored quote
       // become identity evidence rows: plain mentions stay candidates even
       // when read, and indexed/link-only receipts never become evidence.
@@ -1279,8 +1308,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     // The projected identity state comes from PERSISTED facets only.
     const persisted = ctx.store.cases.listAccounts(ctx.ownerId, caseId).find((account) => account.accountId === accountId);
     const identityState: IdentitySupportState = persisted?.identitySupport.state ?? 'proposed';
-    const assessment = assessIdentityLink(ref.accountKey, relevant);
-    const suggestion = firstStepDefaultSuggestion(
+    const assessment = assessIdentityLink(ref.accountKey, applicable);
+    if(conflict)assessment.conflicts.push(conflict);
+    const suggestion = conflict?{suggested:false,reason:conflict}:firstStepDefaultSuggestion(
       { ...assessment, state: identityState, supportObservationIds: persisted?.identitySupport.evidenceIds ?? [] },
       ref.accountKind,
       { readable: accessReadable, note: accessReadable ? null : '仅索引可见' }
@@ -1317,7 +1347,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       researchSummary: RESEARCH_SUMMARIES[ref.materialUse],
       accessLabel: accessReadable ? '原文可读' : '仅索引可见',
       defaultSuggestion: suggestion,
-      requiresIndependentScope: identityState !== 'supported'
+      requiresIndependentScope: Boolean(conflict)||identityState !== 'supported'
     });
   }
 
@@ -1327,7 +1357,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const clusters = buildClusters({
     anchors: anchorsRead,
     accountViews,
-    observations: linkObservations,
+    observations: linkObservations.filter(observation=>{
+      const refs=[observation.fromAccountKey,observation.targetAccountKey].map(key=>key===null?null:originalRefs.get(key)??candidateRefs.get(key));
+      return !refs.some(ref=>ref&&nativeConflicts.has(nativeNamespace(ref)??''));
+    }),
     observed,
     modelLeads,
     preferredName: ctx.input.value
@@ -1412,7 +1445,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     `目录义务已绑定 ${ctx.catalog ? `${ctx.catalog.registryVersion} / ${ctx.catalog.contentHash}` : '无目录快照（仅通用路线）'}；逐条状态见路线回执，no_adapter/deferred/no_clue 均不代表已完成。`
   );
 
-  gaps.push(...aliasNotes);
+  gaps.push(...aliasNotes,...aliasSuccessNotes.values());
   const receipts = ctx.search.receipts();
   const view: FirstStepDiscoveryView = {
     schemaVersion: FIRST_STEP_SCHEMA_VERSION,
