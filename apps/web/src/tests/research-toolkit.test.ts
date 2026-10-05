@@ -208,3 +208,14 @@ test('GitHub uses the actual verified twitter_username field without guessing na
   const missing = await absent.execute({ type: 'github_profile', url: 'https://github.com/fixtureauthor' });
   assert.ok(missing.pages[0]!.links.every(url => !url.startsWith('https://x.com/')));
 });
+
+
+test('platform recall forwards explicit search domains in one request and rejects private filter hosts', async () => {
+  const h = harness({ results: [], costDollars: { total: 0.001 } });
+  await h.execute({ type: 'search', query: 'Synthetic Author Instagram profile', includeDomains: ['instagram.com', 'threads.net'] });
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual(JSON.parse(h.calls[0]!.init!.body!).includeDomains, ['instagram.com', 'threads.net']);
+  const invalid = harness({ results: [] });
+  await assert.rejects(invalid.execute({ type: 'search', query: 'Synthetic Author', includeDomains: ['127.0.0.1'] }));
+  assert.equal(invalid.calls.length, 0);
+});

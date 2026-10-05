@@ -31,3 +31,18 @@ test('publication platform landing pages and tracking parameters never become an
   assert.equal(ref('https://substack.com/@synthetic-author').entry, 'profile');
   assert.equal(ref('https://medium.com/@synthetic-author').entry, 'profile');
 });
+
+
+test('documented institution profiles keep individual namespaces instead of becoming institution roots', () => {
+  const one = ref('https://profiles.stanford.edu/synthetic-one');
+  const two = ref('https://profiles.stanford.edu/synthetic-two');
+  assert.equal(one.entry, 'profile'); assert.equal(one.accountUrl, 'https://profiles.stanford.edu/synthetic-one');
+  assert.equal(one.materialUse, 'academic'); assert.notEqual(one.accountKey, two.accountKey);
+  assert.equal(one.accountKind, 'unknown');
+});
+test('a publication blog listing and a specific article keep different identity eligibility', () => {
+  const list = ref('https://synthetic-author.bearblog.dev/blog/');
+  const article = ref('https://synthetic-author.bearblog.dev/a-work/');
+  assert.equal(list.entry, 'profile'); assert.equal(article.entry, 'page');
+  assert.equal(list.accountKey, article.accountKey);
+});

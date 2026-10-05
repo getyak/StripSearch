@@ -77,7 +77,7 @@ import type { IdentitySupportState, ScopeVersion } from '../../shared/research-c
 
 export interface FirstStepCheckedSearch {
   /** Ordinary web search with a bounded result count; one metered request. */
-  search(requestKey: string, query: string, numResults: number, signal: AbortSignal): Promise<ResearchToolResult>;
+  search(requestKey: string, query: string, numResults: number, signal: AbortSignal, includeDomains?: readonly string[]): Promise<ResearchToolResult>;
   /** Minimal identity read of one already-classified public page. */
   readIdentity(requestKey: string, action: ResearchToolAction, signal: AbortSignal): Promise<ResearchToolResult>;
   /** Real request receipts for the discovery projection (original timestamps). */
@@ -168,9 +168,9 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
     }
   };
   return {
-    async search(requestKey, query, numResults, signal) {
+    async search(requestKey, query, numResults, signal, includeDomains) {
       if (query.trim().length === 0 || query.length > 600) throw new ResearchStop('invalid_decision');
-      return run(requestKey, 'search', query, 'indexed', { type: 'search', query, numResults }, signal);
+      return run(requestKey, 'search', query, 'indexed', { type: 'search', query, numResults, ...(includeDomains ? { includeDomains } : {}) }, signal);
     },
     async readIdentity(requestKey, action, signal) {
       // The first step may only read identity-level material: no posts, no
@@ -635,6 +635,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
 
   const observed: ObservedPage[] = [];
   const candidateRefs = new Map<string, FirstStepAccountRef>();
+  const indexedTitles = new Map<string, string[]>();
+  const inputNames = ctx.input.kind === 'name_query' ? ctx.input.value.toLowerCase().split(/[\/／]/).map(value => value.trim()).filter(Boolean) : [];
+  const matchesInput = (title: string): boolean => inputNames.some(name => title.toLowerCase().includes(name));
   const relatedLeads = new Map<string, FirstStepRelatedLeadView>();
   const linkObservations: FirstStepLinkObservation[] = [];
   const observationIds = new Set<string>();
@@ -703,14 +706,15 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     linkObservations.push(observation);
   };
 
-  const searchOnce = async (query: string): Promise<'ok' | 'failed' | 'budget'> => {
+  const searchOnce = async (query: string, includeDomains?: readonly string[]): Promise<'ok' | 'failed' | 'budget'> => {
     active();
     try {
-      const result = await ctx.search.search(requestKey('search'), query, budget.maxSearchResults, ctx.signal);
+      const result = await ctx.search.search(requestKey('search'), query, budget.maxSearchResults, ctx.signal, includeDomains);
       active();
       for (const page of result.pages) {
         const ref = register(page.url);
         if (!ref) continue;
+        indexedTitles.set(ref.accountKey, [...(indexedTitles.get(ref.accountKey) ?? []), page.title]);
         const classified = classifyFirstStepUrl(page.url);
         if (!classified.ok) continue;
         pushObservation({
@@ -879,7 +883,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    stop the wave and one failure never hides the other routes.
   const queryPlan = firstStepQueryPlan(ctx.input, budget);
   for (const item of queryPlan) {
-    if ((await searchOnce(item.query)) === 'budget') break;
+    if ((await searchOnce(item.query, item.includeDomains)) === 'budget') break;
   }
 
   // 3. Minimal identity reads BEFORE the explicit selection, prioritizing
@@ -890,9 +894,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    never counted as anchor evidence.
   stage('expanding_accounts', '读取公开身份资料与实际外链');
   const priorityOf = (ref: FirstStepAccountRef): number => {
-    if (ref.platform === 'personal_site' || ref.platform === 'linktree') return 0;
-    if (ref.platform === 'github' || ref.platform === 'x') return 1;
-    return 2;
+    const relevance = (indexedTitles.get(ref.accountKey) ?? []).some(matchesInput) ? -100 : 0;
+    if (ref.platform === 'personal_site' || ref.platform === 'linktree') return relevance;
+    if (ref.platform === 'github' || ref.platform === 'x') return relevance + 1;
+    return relevance + 2;
   };
   const readQueue: FirstStepAccountRef[] = [...candidateRefs.values()]
     .filter(
@@ -904,8 +909,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     .sort((a, b) => priorityOf(a) - priorityOf(b));
   const enqueueRead = (ref: FirstStepAccountRef): void => {
     if (ref.entry !== 'profile' || readKeys.has(ref.accountKey) || readQueue.some((other) => other.accountKey === ref.accountKey)) return;
-    readQueue.push(ref);
+    readQueue.unshift(ref);
   };
+  const drainReads = async (): Promise<void> => {
   while (readQueue.length > 0 && readKeys.size < Math.max(0, budget.maxProfileReads)) {
     const next = readQueue.shift()!;
     if (readKeys.has(next.accountKey)) continue;
@@ -926,18 +932,25 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     }
   }
 
+  };
+  await drainReads();
+
   // 4. Actual observed alias/coverage expansion with the reserved remaining
   //    query slots: aliases come from read pages only (titles/handles actually
   //    observed) — never fabricated usernames, and instruction-shaped text is
   //    never followed as an action.
-  const observedAliases = observed
+  const relevantObserved = observed.filter(entry => matchesInput(entry.page.title));
+  const observedAliases = relevantObserved
     .map((entry) => entry.page.title)
-    .concat(observed.map((entry) => entry.ref.handle ?? ''))
+    .concat(relevantObserved.map((entry) => entry.ref.handle ?? ''))
     .filter((alias): alias is string => typeof alias === 'string' && alias.trim().length >= 2 && !isUntrustedInstructionText(alias));
   const expanded = firstStepQueryPlan(ctx.input, budget, [...new Set(observedAliases)]);
   for (const item of expanded.slice(queryPlan.length)) {
-    if ((await searchOnce(item.query)) === 'budget') break;
+    if ((await searchOnce(item.query, item.includeDomains)) === 'budget') break;
   }
+
+  for (const ref of [...candidateRefs.values()].sort((a, b) => priorityOf(a) - priorityOf(b)).reverse()) enqueueRead(ref);
+  await drainReads();
 
   // 5. Optional restricted model proposals, metered through the ledger and
   //    verified against real receipts and real source spans.

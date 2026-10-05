@@ -34,13 +34,13 @@ import type { DiscoveredAccountIdentity } from './discovery-plan.js';
 export const FIRST_STEP_SCHEMA_VERSION = 'stripsearch/first-step-discovery/v1';
 export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
 /**
- * Policy v2 (2026-10-05 repair batch): generic default of at most 8 search
+ * Policy v3 (2026-10-05 live coverage repair): generic default of at most 10 search
  * queries, 12 results per query, 16 identity-profile reads and 2 restricted
  * model calls per discovery attempt. Operator limits always dominate these
- * defaults; the six initial query families stay frozen and the remaining
+ * defaults; the eight initial query families stay frozen and the remaining
  * query slots are reserved for ACTUAL observed alias/coverage expansion.
  */
-export const FIRST_STEP_POLICY_VERSION = 'first-step/v2';
+export const FIRST_STEP_POLICY_VERSION = 'first-step/v3';
 
 /* ------------------------------------------------------------------ */
 /* Input                                                               */
@@ -452,7 +452,7 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
         instance: host,
         materialUse: 'writing',
         accountKind: 'publication',
-        entry: segments.length === 0 ? 'profile' : 'page'
+        entry: segments.length === 0 || isBearblog && segments.length === 1 && ['blog', 'about', 'posts'].includes(segments[0]!) ? 'profile' : 'page'
       })
     };
   }
@@ -887,6 +887,13 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
     }
     default:
       break;
+  }
+
+  // Stanford Profiles publicly documents /<profile-slug> entries on its
+  // directory host (https://profiles.stanford.edu/). Each slug stays separate.
+  if (host === 'profiles.stanford.edu' && segments.length === 1 && !RESERVED_FIRST_SEGMENTS.has(segments[0]!.toLowerCase())) {
+    const accountUrl = `https://${host}/${segments[0]}`;
+    return { ok: true, ref: refOf('personal_site', accountUrl, { accountUrl, handle: segments[0], instance: host, materialUse: 'academic', accountKind: 'unknown', entry: 'profile' }) };
   }
 
   // A shared host is not one person's account. Common published personal
@@ -1545,7 +1552,7 @@ export interface FirstStepBudgetPolicy {
 }
 
 export const FIRST_STEP_DEFAULT_BUDGET: FirstStepBudgetPolicy = {
-  maxSearchQueries: 8,
+  maxSearchQueries: 10,
   maxSearchResults: 12,
   maxProfileReads: 16,
   maxModelCalls: 2,
@@ -1553,11 +1560,13 @@ export const FIRST_STEP_DEFAULT_BUDGET: FirstStepBudgetPolicy = {
 };
 
 /** Deliberate query families covering home/work/writing/social/academic/video. */
-export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: 'home' | 'work' | 'writing' | 'social' | 'academic' | 'video'; build: (value: string) => string }> = [
+export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: string; build: (value: string) => string; includeDomains?: readonly string[] }> = [
   { family: 'home', build: (value) => `${value}` },
   { family: 'work', build: (value) => `${value} works projects` },
   { family: 'writing', build: (value) => `${value} blog newsletter` },
-  { family: 'social', build: (value) => `${value} social profile` },
+  { family: 'social', build: (value) => `${value} Twitter X profile`, includeDomains: ['x.com', 'twitter.com'] },
+  { family: 'visual_social', build: (value) => `${value} Instagram Threads profile`, includeDomains: ['instagram.com', 'threads.net', 'threads.com'] },
+  { family: 'federated_social', build: (value) => `${value} Bluesky Mastodon profile`, includeDomains: ['bsky.app', 'mastodon.social'] },
   { family: 'academic', build: (value) => `${value} scholar publications` },
   { family: 'video', build: (value) => `${value} video channel` }
 ];
@@ -1565,32 +1574,34 @@ export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: 'home' | 'work' 
 /**
  * Frozen query plan: deliberate coverage per family first, then ACTUAL
  * observed alias/coverage expansion with the reserved remaining budget (the
- * generic v2 default reserves its last two queries for this). No guessed
+ * generic v3 default reserves its last two queries for this). No guessed
  * usernames, no fabricated aliases, no human-gold seeding.
  */
 export function firstStepQueryPlan(
   input: FirstStepInput,
   budget: FirstStepBudgetPolicy,
   observedAliases: readonly string[] = []
-): Array<{ query: string; family: string }> {
+): Array<{ query: string; family: string; includeDomains?: readonly string[] }> {
   const value = input.value.trim();
   if (value.length === 0) return [];
-  const plan: Array<{ query: string; family: string }> = [];
+  const plan: Array<{ query: string; family: string; includeDomains?: readonly string[] }> = [];
   const max = budget.maxSearchQueries > 0 ? budget.maxSearchQueries : 0;
   if (max === 0) return plan;
   const families = input.kind === 'name_query' ? FIRST_STEP_QUERY_FAMILIES : FIRST_STEP_QUERY_FAMILIES.slice(0, 1);
   for (const entry of families) {
     if (plan.length >= max) break;
-    const query = entry.build(value);
-    if (!plan.some((item) => item.query === query)) plan.push({ query, family: entry.family });
+    const names = input.kind === 'name_query' ? value.split(/\s*[\/／]\s*/).map(name => name.trim()).filter(Boolean) : [value];
+    const query = entry.build(names[0] ?? value);
+    if (!plan.some((item) => item.query === query && JSON.stringify(item.includeDomains) === JSON.stringify(entry.includeDomains))) plan.push({ query, family: entry.family, ...(entry.includeDomains ? { includeDomains: entry.includeDomains } : {}) });
   }
   let aliasSlots = 0;
-  for (const alias of observedAliases) {
+  const providedAliases = input.kind === 'name_query' ? value.split(/\s*[\/／]\s*/).slice(1) : [];
+  for (const alias of [...providedAliases, ...observedAliases]) {
     if (plan.length >= max || aliasSlots >= 2) break;
     const trimmed = alias.trim();
     if (trimmed.length < 2 || trimmed.length > 120) continue;
     const query = `${trimmed} public profile`;
-    if (!plan.some((item) => item.query === query)) {
+    if (!plan.some((item) => item.query === query && item.includeDomains === undefined)) {
       plan.push({ query, family: 'alias' });
       aliasSlots++;
     }

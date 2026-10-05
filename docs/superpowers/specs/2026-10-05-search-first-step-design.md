@@ -153,3 +153,8 @@
 独立复核补充：平台多作者页面的 website/my 词本身不证明作者，只有已观察 profile 字段或原生字段能赋予归属；作品链接不证明其宿主账号属于作者。人物描述只显示经过原文匹配的字面摘录，模型的另行概括不成为辨识事实。选中的独立个人网站包含该站自己的博客/文章分区；材料用途不会拆分该站账号键。共享主机上的作者命名空间仍独立，跨站链接仍须另行选择。路线只绑定实际有关的读取/搜索回执。旧发现快照缺少 relatedLeads 字段时按空列表读取。
 
 真实供应商修订：Exa 返回 HTML 标签但可能不保留 href，不能把独立链接列表重建为证据。部署已配置 Firecrawl 时，Search 的个人站/公开目录身份读取直接使用其 [Scrape HTML 与 Markdown 格式](https://docs.firecrawl.dev/api-reference/endpoint/scrape)，同一次请求保留实际 HTML 周边链接，页眉页脚保持可检视；仍受已冻结身份读取和操作员总预算约束。没有配置时保留 Exa 的诚实缺口，不静默调用新服务。
+
+
+2026-10-05 真实覆盖修正（v3）：在读取之前冻结通用上限 ≤10 次检索 / 每次12结果 / 16次身份读取 / 2次模型调用，操作员总上限优先。初始检索明确覆盖网站、作品、写作、X、Instagram/Threads、Bluesky/Mastodon、学术与视频；社交域名过滤使用 Exa `includeDomains`，不拼猜用户名。用户输入明确给出的姓名/别名可分别检索，读取中的别名扩展限于与输入匹配的实际来源，避免追踪无关网页作者。GitHub `twitter_username` 只从已核对账号的真实原生字段生成其文档定义的主页入口；摘录仍为实际字段值。共用网页读取通道默认按最小 Firecrawl 计划节奏串行，可取消，不自动重试、不扩大调用预算，等待计入整个研究的时限。机构目录的独立人物路径保留独立账号键；博客列表入口可用于识别，文章不能证明整个宿主账号归属。
+
+来源：[Exa Search domain filters](https://exa.ai/docs/reference/search)、[Firecrawl rate limits](https://docs.firecrawl.dev/rate-limits)、[GitHub user fields](https://docs.github.com/en/rest/users/users)、[Stanford Profiles directory](https://profiles.stanford.edu/)。以上接口验证不代替真实召回、语义归属、界面或下游报告验收。

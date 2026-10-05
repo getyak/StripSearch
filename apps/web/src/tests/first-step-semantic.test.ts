@@ -627,7 +627,7 @@ test('prompt-injection text never becomes a person descriptor, display name or a
   }
 });
 
-test('the frozen generic v2 budget bounds queries and reserves alias expansion for observed aliases only', async () => {
+test('the frozen generic v3 budget bounds queries and reserves alias expansion for observed aliases only', async () => {
   const h = harness(
     { kind: 'name_query', value: 'Mira Kepler', question: null },
     {
@@ -637,8 +637,8 @@ test('the frozen generic v2 budget bounds queries and reserves alias expansion f
   );
   try {
     const view = await discoverFirstStep(h.ctx);
-    assert.ok(h.queries.length <= 8, 'at most 8 search queries per attempt');
-    assert.ok(view.budget.toolCalls <= 24, 'tool calls stay inside the frozen budget shape');
+    assert.ok(h.queries.length <= 10, 'at most 10 search queries per attempt');
+    assert.ok(view.budget.toolCalls <= 26, 'tool calls stay inside the frozen budget shape');
     const aliasQueries = h.queries.filter((query) => query.endsWith('public profile'));
     assert.ok(aliasQueries.length <= 2, 'only the two reserved slots expand observed aliases');
     for (const query of aliasQueries) {

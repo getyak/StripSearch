@@ -115,7 +115,9 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     // all supplied text and any provider/HTTP truncation is an explicit gap.
     // Keep href + original context together. An extras link index alone cannot
     // establish ownership. includeHtmlTags is a documented Exa text option.
-    const payload = searching ? { query, numResults: searchCount, contents: { text: { maxCharacters: TEXT_LIMIT, includeHtmlTags: true }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: { includeHtmlTags: true }, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
+    const domains = action.type === 'search' ? action.includeDomains : undefined;
+    if (domains && (domains.length < 1 || domains.length > 12 || domains.some(domain => !/^[a-z0-9.-]+$/i.test(domain) || !domain.includes('.') || isPrivateHost(domain) || isIP(domain) !== 0))) fail('检索平台过滤范围无效。');
+    const payload = searching ? { query, numResults: searchCount, ...(domains ? { includeDomains: [...domains] } : {}), contents: { text: { maxCharacters: TEXT_LIMIT, includeHtmlTags: true }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: { includeHtmlTags: true }, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
     const { body, bytes } = await request(`https://api.exa.ai/${searching ? 'search' : 'contents'}`, { method: 'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(payload) }, signal);
     if (!Array.isArray(body.results)) fail('网页供应商返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
