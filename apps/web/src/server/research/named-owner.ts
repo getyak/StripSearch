@@ -10,6 +10,19 @@ export interface NativeNameDeclaration {
 }
 export const normalizedPersonName=(name:string):string=>name.normalize('NFKC').trim().replace(/\s+/g,' ').toLocaleLowerCase('en');
 
+function introductionText(node:Tree.Node):string|null {
+  const pending:Tree.Node[]=[node];let text='';
+  while(pending.length){
+    const item=pending.shift()!;
+    if('tagName' in item&&(['q','cite','blockquote','script','style','template','aside','article','pre','code','svg','math','noscript'].includes(item.tagName)||
+      item.attrs.some(attr=>attr.name==='hidden'||attr.name==='aria-hidden'&&attr.value==='true')||
+      /(?:feed|timeline|comment|repost|quote|recommend)/i.test(item.attrs.map(attr=>attr.value).join(' '))))return null;
+    if(item.nodeName==='#text'&&'value' in item)text+=item.value;
+    if('childNodes' in item)pending.unshift(...item.childNodes);
+  }
+  return text;
+}
+
 /** Native names are account self-declarations, never independent ownership. */
 export function namedOwnerQuote(page:ResearchPage,action:ResearchToolAction,personName:string):{quote:string;offset:number;nativeField?:{platform:'github'|'x';nativeId:string;payloadField:'name'}}|null {
   if(action.type==='search'||page.retrieval==='search'||isUntrustedInstructionText(personName))return null;
@@ -35,8 +48,7 @@ export function namedOwnerQuote(page:ResearchPage,action:ResearchToolAction,pers
     if('tagName' in node&&(node.tagName==='blockquote'||['script','style','template','aside','article'].includes(node.tagName)||/(?:feed|timeline|comment|repost|quote|recommend)/i.test(node.attrs.map(attr=>attr.value).join(' '))))continue;
     if('childNodes' in node)pending.unshift(...node.childNodes);
     if(!('tagName' in node)||!['p','h1','h2'].includes(node.tagName)||!node.sourceCodeLocation)continue;
-    const textNodes:Tree.Node[]=[node];let text='';
-    while(textNodes.length){const item=textNodes.shift()!;if(item.nodeName==='#text'&&'value' in item)text+=item.value;if('childNodes' in item)textNodes.unshift(...item.childNodes);}
+    const text=introductionText(node);if(text===null)continue;
     const normalized=normalizedPersonName(text),name=normalizedPersonName(personName);
     const escaped=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
     if(!new RegExp(`^(?:(?:hi|hello)[,!]?\\s+)?(?:(?:i am|i'm|my name is)\\s+|我是|我叫)${escaped}(?=$|[\\s,.!。！])`,'u').test(normalized))continue;

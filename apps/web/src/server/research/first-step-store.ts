@@ -48,7 +48,7 @@ import {
 import type { IdentityCandidate } from '../../shared/types.js';
 import type { FirstStepBinding, ResearchCheckpoint } from './research-store.js';
 import type { Store } from '../store.js';
-import {namedOwnerQuote} from './named-owner.js';
+import {namedOwnerQuote,normalizedPersonName} from './named-owner.js';
 import type {ResearchToolAction,ResearchToolResult} from './tool-contracts.js';
 
 export type FirstStepErrorCode =
@@ -465,10 +465,11 @@ export class FirstStepStore {
       const existing=this.cases.reportView(input.ownerId,input.caseId).evidence.find(evidence=>evidence.accountId===input.accountId&&evidence.sourceId===revision.sourceId&&evidence.sourceRevision===revision.sourceRevision&&evidence.role==='owner_declaration'&&evidence.quote===owner.quote&&evidence.revokedAt===null);
       const evidence=existing??this.cases.addEvidence(ctx,{sourceId:revision.sourceId,sourceRevision:revision.sourceRevision,role:'owner_declaration',quote:owner.quote,locator:`原文第 ${owner.offset+1}–${owner.offset+owner.quote.length} 字符`,provenance:firstStepProvenance('原生姓名字段或第一人称姓名原文；仅为自述。')});
       const previous=account.identitySupport.ownerAnchor;
-      const claims=previous?.personLabel===input.personName?[...previous.claims]:[];
+      if(previous&&normalizedPersonName(previous.personLabel)!==normalizedPersonName(input.personName))throw new FirstStepSelectionError('invalid_decision','已有姓名声明属于其他姓名；不能隐式覆盖原声明或反证。');
+      const claims=previous?[...previous.claims]:[];
       if(!claims.some(claim=>claim.evidenceId===evidence.evidenceId))claims.push({evidenceId:evidence.evidenceId,kind:'owner_self_declaration',sourceReceiptKey:receipt.key,sourceContentHash:hash,quoteOffset:owner.offset,...(owner.nativeField?{nativeField:owner.nativeField}:{})});
-      const counterevidenceIds=previous?.personLabel===input.personName?previous.counterevidenceIds:[];
-      this.cases.updateAccountFacets(ctx,{identitySupport:{...account.identitySupport,ownerAnchor:{state:counterevidenceIds.length?'disputed':claims.some(claim=>claim.kind==='publisher_named_biography')?'independently_supported':'self_declared',personLabel:input.personName,policyVersion:'named-owner/v1',claims,counterevidenceIds}}});
+      const counterevidenceIds=previous?.counterevidenceIds??[];
+      this.cases.updateAccountFacets(ctx,{identitySupport:{...account.identitySupport,ownerAnchor:{state:counterevidenceIds.length?'disputed':claims.some(claim=>claim.kind==='publisher_named_biography')?'independently_supported':'self_declared',personLabel:previous?.personLabel??input.personName,policyVersion:'named-owner/v1',claims,counterevidenceIds}}});
     })();
   }
 

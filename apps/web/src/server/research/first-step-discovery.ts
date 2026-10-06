@@ -235,7 +235,14 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
         if (!navigation || navigation.accountKey !== intent.accountKey || navigation.purpose !== intent.purpose || intent.url !== action.url ||
           !prefix || !intent.sourceReceiptKey.startsWith(prefix) || receipt?.kind !== 'tool' || receipt.state !== 'completed' ||
           !['read', 'firecrawl'].includes(String(request?.type)) || !sameAuthor || !boundDocument || !realContext || !['read', 'firecrawl'].includes(action.type)) throw new ResearchStop('invalid_decision');
-      } else if (target.ref.entry !== 'profile') throw new ResearchStop('invalid_decision');
+      } else if (target.ref.entry !== 'profile') {
+        // A user's literal public starting document is authorized once. This
+        // does not grant permission to sibling pages or turn it into a profile.
+        const seed=options.store.getRun(options.runId)?.seedUrl;
+        let literalSeed:string|null=null;
+        try{if(seed){const url=new URL(seed);url.hash='';literalSeed=url.href;}}catch{ /* invalid seed never grants a read */ }
+        if(literalSeed!==action.url||!['read','firecrawl'].includes(action.type)||!['personal_site','web_page','rss_blog'].includes(target.ref.platform))throw new ResearchStop('invalid_decision');
+      }
       if (action.type === 'firecrawl' && !['personal_site', 'linktree'].includes(target.ref.platform)) throw new ResearchStop('invalid_decision');
       return run(requestKey, 'profile_read', action.url, 'read', action, signal);
     },

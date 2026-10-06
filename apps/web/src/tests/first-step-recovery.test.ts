@@ -16,7 +16,7 @@ test('first-step recovery distinguishes a settled failure from an unresolved inf
     firstStep.attachRun(run); store.updateRun(run.id, { state: 'researching' }); return run;
   };
   const settled = make();
-  const action = { type: 'search', query: 'Lin Zhou' };
+  const action = { type: 'search', query: 'Lin Zhou', numResults:12 };
   store.research.reserve(settled.id, 'failed-read', 'tool', action, { inputTokens: 0, outputTokens: 0 });
   store.research.settle(settled.id, 'failed-read', null, { estimatedUsd: null, unknownCost: true }, 'failed');
   const unresolved = make();

@@ -1122,3 +1122,32 @@ test('name-first discovery persists separate owner self-claims and invalidates o
     assert.equal(JSON.stringify(h.firstStep.currentDiscovery(h.runId)!.view),stored,'the historical discovery stays immutable');
   }finally{h.db.close();}
 });
+
+test('the literal user-supplied document grants no permission for a sibling long path',async()=>{
+  const seed=`https://mira-kepler.dev/${'a'.repeat(700)}`;
+  const h=harness({kind:'homepage_url',value:seed},{read:url=>[originalPage(url,'Original supplied document.')]});
+  try{
+    await h.ctx.search.readIdentity('firststep:seed:v10:profile:input',{type:'read',url:seed},h.ctx.signal);
+    await assert.rejects(()=>h.ctx.search.readIdentity('firststep:seed:v10:profile:sibling',{type:'read',url:seed+'b'},h.ctx.signal),/invalid_decision/);
+    assert.deepEqual(h.reads,[seed]);assert.equal(h.store.research.receipts(h.runId).length,1);
+  }finally{h.db.close();}
+});
+
+test('a capitalization-only name variation cannot erase a persisted owner counterstatement',async()=>{
+  const denial='This is not Mira Kepler’s account.';
+  const tools=createResearchTools({exaApiKey:null,tikhubApiKey:null,firecrawlApiKey:null,githubToken:null,timeoutMs:100,maxBytes:100000,transport:{async fetch(){return new Response(JSON.stringify({login:'mira-k',id:123456,html_url:github,name:'Mira Kepler',bio:denial}));}}});
+  const native=(await tools.execute({type:'github_profile',url:github},new AbortController().signal)).pages[0]!;
+  const h=harness({kind:'name_query',value:'Mira Kepler'},{search:()=>[page(github,'Mira Kepler')],read:()=>[native]});
+  try{
+    const view=await discoverFirstStep(h.ctx),account=view.accounts.find(account=>account.profileUrl===github)!;
+    const original=h.store.cases.listAccounts(h.ownerId,view.caseId).find(item=>item.accountId===account.accountId)!;
+    const anchor=original.identitySupport.ownerAnchor!,claim=anchor.claims[0]!;
+    const evidence=h.store.cases.reportView(h.ownerId,view.caseId).evidence.find(item=>item.evidenceId===claim.evidenceId)!;
+    const ctx={ownerId:h.ownerId,caseId:view.caseId,accountId:account.accountId,expectedScopeVersion:view.selection.scopeVersion as import('../shared/research-case.js').ScopeVersion};
+    const counter=h.store.cases.addEvidence(ctx,{sourceId:evidence.sourceId,sourceRevision:evidence.sourceRevision,role:'owner_counterevidence',quote:denial,locator:'actual native bio',provenance:evidence.provenance});
+    h.store.cases.updateAccountFacets(ctx,{identitySupport:{...original.identitySupport,ownerAnchor:{...anchor,state:'disputed',counterevidenceIds:[counter.evidenceId]}}});
+    h.firstStep.recordNamedOwner({...ctx,runId:h.runId,personName:'mira kepler',receiptKey:claim.sourceReceiptKey,pageUrl:github});
+    const current=h.store.cases.listAccounts(h.ownerId,view.caseId).find(item=>item.accountId===account.accountId)!.identitySupport.ownerAnchor!;
+    assert.equal(current.state,'disputed');assert.equal(current.personLabel,'Mira Kepler');assert.deepEqual(current.counterevidenceIds,[counter.evidenceId]);assert.deepEqual(current.claims,anchor.claims);
+  }finally{h.db.close();}
+});
