@@ -210,8 +210,13 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     const lexicalPolicy=mode==='verify'?checkpoint.quoteLexicalPolicy:null;
     const rolePolicy=checkpoint.quoteRolePolicy;
     const genrePolicy=checkpoint.quoteGenrePolicy;
-    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}${lexicalPolicy?':literal_terms_v1':''}${rolePolicy?':preserve_actor_v1':''}${genrePolicy?':genre_context_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
-    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{}),...(rolePolicy?{rolePolicy}:{}),...(genrePolicy?{genrePolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
+    // An old approval cannot be rebound to changed claims or a new original,
+    // even if URL, quote and step stayed the same. Bind the actual model input
+    // plus full active originals; preserve old receipts and metered budgets.
+    const genreRequestBinding=genrePolicy?{bodyHash:createHash('sha256').update(JSON.stringify(request.body)).digest('hex'),...(mode==='verify'?{claims:claims??[]} : {}),sources:activePages.map(page=>({sourceKey:page.sourceKey,url:page.url,contentHash:createHash('sha256').update(page.text).digest('hex')}))}:undefined;
+    const genreBindingHash=genreRequestBinding?createHash('sha256').update(JSON.stringify(genreRequestBinding)).digest('hex'):undefined;
+    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}${lexicalPolicy?':literal_terms_v1':''}${rolePolicy?':preserve_actor_v1':''}${genrePolicy?`:genre_context_v1:binding_${genreBindingHash}`:''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
+    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{}),...(rolePolicy?{rolePolicy}:{}),...(genrePolicy?{genrePolicy,genreBindingHash,genreRequestBinding}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
     if(old){if(old.state==='failed')throw new ProviderError('provider_bad_response','模型请求已有已结算失败回执，不自动重放。');return old.result as Awaited<ReturnType<typeof invokeDeepSeek>>;}
     try{const result=await invokeDeepSeek(options.transport,options.deepseekApiKey,request);
      const usage=parseMessagesUsage(result.body);

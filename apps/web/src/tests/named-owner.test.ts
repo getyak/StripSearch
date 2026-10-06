@@ -85,3 +85,8 @@ test('an ordinary HTML comment does not authorize the named introduction in foll
  const actual='<!-- ordinary comment -->\n\n<html><body><p>I am Mira Kepler. I build compilers.</p></body></html>';
  const owner=namedOwnerQuote(web(actual),action,'Mira Kepler')!;assert.ok(owner);assert.equal(actual.slice(owner.offset,owner.offset+owner.quote.length),owner.quote);
 });
+
+ test('a second HTML comment in a fenced example cannot authorize its named introduction',()=>{
+ const original='<!-- ordinary comment -->\n\n```html\n<!-- example comment -->\n<html><body><p>I am Mira Kepler. I build compilers.</p></body></html>\n```';
+ assert.equal(namedOwnerQuote(web(original),action,'Mira Kepler'),null);
+ });

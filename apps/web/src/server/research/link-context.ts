@@ -21,8 +21,29 @@ type OriginalRange={start:number;end:number};
 const markdownRanges=new Map<string,{restricted:OriginalRange[];links:OriginalRange[]}>();
 /** Full HTML documents use HTML semantics; layout indentation is not Markdown code. */
 function originalIsHtmlDocument(original:string):boolean {
- return /^(?:\uFEFF)?(?:[ ]{0,3}\r?\n)*[ ]{0,3}(?:<!--[\s\S]*?-->(?:[ ]{0,3}\r?\n)*[ ]{0,3})*(?:<!doctype\s+html\b|<(?:html|body)\b)/iu.test(original);
+ let at=original.startsWith('\uFEFF')?1:0;
+ const whitespace=():boolean=>{
+  let indentation=0;
+  while(at<original.length){
+   const char=original[at]!;
+   if(char===' '){if(++indentation>=4)return false;at++;}
+   else if(char==='\n'){indentation=0;at++;}
+   else if(char==='\r'&&original[at+1]==='\n'){indentation=0;at+=2;}
+   else if(char==='\t')return false;
+   else break;
+  }
+  return true;
+ };
+ if(!whitespace())return false;
+ while(original.startsWith('<!--',at)){
+  // Consume the FIRST actual end only. Regex backtracking must not skip a
+  // fence/indent boundary by finding another comment end inside an example.
+  const end=original.indexOf('-->',at+4);if(end<0)return false;
+  at=end+3;if(!whitespace())return false;
+ }
+ return /^(?:<!doctype\s+html(?:\s|>)|<(?:html|body)(?:\s|\/?>))/iu.test(original.slice(at));
 }
+
 function originalMarkdownRanges(original:string):{restricted:OriginalRange[];links:OriginalRange[]} {
  const cached=markdownRanges.get(original);if(cached)return cached;
  const ranges:{restricted:OriginalRange[];links:OriginalRange[]}={restricted:[],links:[]};

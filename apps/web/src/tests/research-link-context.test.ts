@@ -204,3 +204,9 @@ test('regex cannot manufacture a Markdown link from an AST HTML block or code ex
  const contexts=extractOriginalLinkContexts(code,'https://fixture-author.dev/');assert.equal(contexts.length,1);assert.equal(contexts[0]!.surface,'third_party');
  const original=`<!-- ordinary comment -->\n\n<html><body><p>My GitHub: <a href="${url}">My account</a></p></body></html>`;assert.equal(extractOriginalLinkContexts(original,'https://fixture-author.dev/')[0]!.surface,'authorial');
  });
+
+ test('HTML format detection cannot skip a fence by backtracking over a second comment terminator',()=>{
+ const url='https://github.com/fixture-comment-fence';
+ const original=`<!-- ordinary comment -->\n\n\`\`\`html\n<!-- example comment -->\n<html><body><p>My GitHub: <a href="${url}">My account</a></p></body></html>\n\`\`\``;
+ assert.equal(extractOriginalLinkContexts(original,'https://fixture-author.dev/')[0]!.surface,'third_party');
+ });
