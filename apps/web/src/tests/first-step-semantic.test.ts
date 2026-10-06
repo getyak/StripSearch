@@ -999,7 +999,9 @@ for(const change of ['cancel','person_revision','input_revision'] as const) test
     assert.deepEqual(h.reads,[home,about]);
     const receipt=h.store.research.receipts(h.runId).find(row=>(row.request as {url?:string}).url===about)!;
     assert.equal(receipt.state,'completed');
-    assert.equal(h.firstStep.getFirstStepView(h.ownerId,h.runId).view.discoveryRevision,0);
+    const projection=h.firstStep.getFirstStepView(h.ownerId,h.runId);
+    assert.ok(projection?.mode==='first_step');
+    assert.equal(projection.view.discoveryRevision,0);
     assert.equal(h.store.cases.listAccounts(h.ownerId,h.firstStep.link(h.runId)!.caseId).length,0);
   }finally{h.db.close();}
 });
