@@ -396,3 +396,21 @@ for(const total of [0,10])test(`scoped empty discovered pages stop after two att
  assert.equal(store.research.checkpoint(run.id)!.pages.length,3);assert.equal(store.research.checkpoint(run.id)!.noProgressBatches,2);
  assert.equal(store.research.receipts(run.id).filter(r=>r.kind==='tool').length,3);db.close();
 });
+
+for(const facetsFound of [4,5])test(`scoped five-facet synthesis preserves missing-dimension gap (${facetsFound})`,async()=>{
+ const {db,store,run}=setup();let round=0;
+ const original={...interview,text:'Ada Fixture started in 2020. Ada Fixture wrote a compiler. Ada Fixture published an essay. Ada Fixture answered a reviewer. Ada Fixture corrected a mistake.',links:[]};
+ const facets=['background','work','expression','interaction','counterevidence'] as const;
+ const quotes=original.text.split('. ').map(s=>s.endsWith('.')?s:s+'.');
+ const {researchDecisionSchema}=await import('../server/research/planner.js');
+ const schema=researchDecisionSchema() as {properties:{claims:{maxItems:number;items:{required:string[];properties:{facet:{enum:string[]}}}}}};
+ const proposed=facets.slice(0,facetsFound).map((facet,i)=>({sourceKey:'S2',quote:quotes[i]!,statement:quotes[i]!,facet,kind:'page_statement',section:'work'}));
+ assert.ok(proposed.length<=schema.properties.claims.maxItems,'all five evidenced dimensions fit the actual model schema');
+ for(const claim of proposed){assert.ok(schema.properties.claims.items.required.includes('facet'));assert.ok(schema.properties.claims.items.properties.facet.enum.includes(claim.facet));}
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,
+ firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(action){return {pages:[action.type==='github_profile'?profile:original],requests:1,bytes:original.text.length,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify')return {supported:proposed.map((_,i)=>i),rejected:[]};return ++round===1?{action:'read',url:interview.url}:{action:'finish',claims:proposed};}}});
+ assert.equal(result.observations.length,facetsFound);assert.equal(result.state,facetsFound===5?'completed':'partial');
+ assert.equal(store.buildCanonicalView(run).research!.coverage!.find(f=>f.id==='counterevidence')!.state,facetsFound===5?'evidence_found':'gap');db.close();
+});
