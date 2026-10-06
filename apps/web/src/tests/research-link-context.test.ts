@@ -4,6 +4,46 @@ import { extractOriginalLinkContexts, nativeProfileLinkContext } from '../server
 import { createResearchTools } from '../server/research/toolkit.js';
 import { linkRoleFromContext } from '../shared/first-step-discovery.js';
 
+test('a same-target ownership predicate after the anchor preserves the exact original', () => {
+ const home='https://fixture-author.dev/', blog='https://fixture-author.blog/';
+ for(const original of [
+  `<p>I have three blogs. This <a href="${blog}">GitHub blog</a> is my oldest one. I switched to another blog.</p>`,
+  `<p>This <a href="${blog}">page</a> is my personal blog.</p>`,
+  `This [blog](${blog}) is my oldest one.`,
+ ]){
+  const context=extractOriginalLinkContexts(original,home).find(c=>c.url===blog)!;
+  assert.ok(original.includes(context.quote));
+  assert.equal(linkRoleFromContext({...context,targetUrl:blog,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');
+  assert.notEqual(linkRoleFromContext({...context,targetUrl:blog,sourceIsOwnProfilePage:true,sourceIsDirectory:false,sourceIsRestrictedSurface:true}).role,'self_account_section');
+ }
+ for(const original of [
+  `<p>This <a href="${blog}">book</a> is my oldest one.</p>`,
+  `<p>This <a href="${blog}">blog</a>. My blog is elsewhere.</p>`,
+  `<p>This <a href="${blog}">blog</a> and <a href="${home}">website</a> is my oldest one.</p>`,
+  `<p>My colleague's <a href="${blog}">blog</a> is my oldest one.</p>`,
+  `<p>This <a href="${blog}">blog</a> is not my oldest one.</p>`,
+  `<p>I authored a book on <a href="${blog}">blog</a> is my oldest one.</p>`,
+  `<p>This <a href="${blog}">blog</a> is my oldest one?</p>`,
+  `<p>This <a href="${blog}">blog</a> is my blog if I purchase it.</p>`,
+  `<p>This <a href="${blog}">blog</a> is my personal blog bookmark.</p>`,
+  `<p>This <a href="${blog}">book about a blog</a> is my oldest one.</p>`,
+  `<p>This <a href="${blog}">Blog: A Novel</a> is my oldest one.</p>`,
+ ]){
+  const context=extractOriginalLinkContexts(original,home).find(c=>c.url===blog)!;
+  assert.notEqual(linkRoleFromContext({...context,targetUrl:blog,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section',original);
+ }
+});
+
+test('attribute punctuation cannot manufacture a visible ownership declaration',()=>{
+ const url='https://github.com/fixture-book';
+ for(const attribute of ['title="Synthetic > My GitHub"',"title='Synthetic > My GitHub'",'aria-label="Synthetic > My GitHub"','data-caption="Synthetic > My GitHub"']){
+  const original=`<p><a href="${url}" ${attribute}>Synthetic Book</a></p>`;
+  const context=extractOriginalLinkContexts(original,'https://fixture-author.dev/')[0]!;
+  assert.equal(context.quote,original);
+  assert.notEqual(linkRoleFromContext({...context,targetUrl:url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');
+ }
+});
+
 test('rel-me local attribution does not borrow unrelated prose from the page root', () => {
   const source = '<main><header><div><a rel="me" href="https://github.com/fixture-author">GitHub</a></div></header><article><p>He said this about a different person.</p></article></main>';
   const [context] = extractOriginalLinkContexts(source, 'https://fixture-author.dev/');

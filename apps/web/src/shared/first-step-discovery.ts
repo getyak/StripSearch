@@ -1070,10 +1070,19 @@ export function isUntrustedInstructionText(text: string | null): boolean {
  */
 export function classifyLinkContext(quote: string | null): FirstStepLinkContextClass {
   if (typeof quote !== 'string' || quote.trim().length < 2) return 'unknown';
-  const readable = quote.replace(/<[^>]*>/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ');
+  const readable = visibleIdentityContext(quote).replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ');
   if (THIRD_PARTY_MARKERS.test(readable)) return 'third_party';
   if (OWNERSHIP_MARKERS.test(readable)) return 'ownership';
   return 'unknown';
+}
+
+/** Quote-aware tag removal: a > inside an attribute is never visible prose.
+ * Incomplete markup grants no ownership. This changes semantic inspection,
+ * never the retained original, quote, hash or target offset. */
+const IDENTITY_HTML_TAG = /<!--[\s\S]*?-->|<(?:[^<>"']|"[^"]*"|'[^']*')*>/gu;
+function visibleIdentityContext(text:string):string {
+ const readable=text.replace(IDENTITY_HTML_TAG,' ');
+ return /<\/?[a-z!]/iu.test(readable)?'':readable;
 }
 
 /**
@@ -1098,7 +1107,7 @@ export function classifyLinkContext(quote: string | null): FirstStepLinkContextC
  */
 /** HTML punctuation inside attributes and pretty-print whitespace are not prose boundaries. */
 function targetPrefixSentence(prefix:string,html:boolean,period:boolean):string {
-  const masked=html?prefix.replace(/<[^>]*>/g,tag=>tag.replace(/[。!?\n;]/g,' ')).replace(/\n/g,' '):prefix;
+  const masked=html?prefix.replace(IDENTITY_HTML_TAG,tag=>tag.replace(/[.。!?\n;]/g,' ')).replace(/\n/g,' '):prefix;
   const pattern=period?/<br\s*\/?\s*>|[。!?\n;]|\.\s+/giu:/<br\s*\/?\s*>|[。!?\n;]/giu;
   const boundary=[...masked.matchAll(pattern)].at(-1);
   return prefix.slice(boundary?boundary.index!+boundary[0].length:0);
@@ -1155,7 +1164,7 @@ export function linkRoleFromContext(input: {
   if(targetAt<0&&(input.binding==='html_anchor'||input.binding==='markdown_link'))return {role:'unknown_role',retrieval:'link_only'};
   if(targetAt>=0&&input.binding!=='html_rel_me'){
     const anchorAt=extractedTargetAt>=0?extractedTargetAt:quote.lastIndexOf('<a',targetAt);
-    const before=targetPrefixSentence(quote.slice(0,anchorAt>=0?anchorAt:targetAt),input.binding==='html_anchor',false).replace(/<[^>]*>/g,' ').slice(-240);
+    const before=visibleIdentityContext(targetPrefixSentence(quote.slice(0,anchorAt>=0?anchorAt:targetAt),input.binding==='html_anchor',false)).slice(-240);
     const workActions=[...before.matchAll(/\b(?:wrote|authored|published|created|built)\b.{0,100}\b(?:books?|novels?|papers?|articles?|projects?)\b|(?:撰写|编写|出版|创作).{0,30}(?:书籍|小说|论文|文章|项目)/giu)];
     const workAction=workActions.at(-1);
     if(workAction&&!OWNERSHIP_MARKERS.test(before.slice(workAction.index!+workAction[0].length)))return {role:'prose_mention',retrieval:'read'};
@@ -1166,21 +1175,32 @@ export function linkRoleFromContext(input: {
   // Later sentences and unrelated paragraph tails cannot establish ownership,
   // regardless of how the author describes a linked work.
   let localQuote=quote;
+  let targetOwnPredicate=false;
   if(targetAt>=0&&input.binding!=='html_rel_me'&&!input.sourceIsDirectory){
     const anchorAt=extractedTargetAt>=0?extractedTargetAt:quote.lastIndexOf('<a',targetAt);
     const start=anchorAt>=0?anchorAt:targetAt;
     const prefix=targetPrefixSentence(quote.slice(0,start),input.binding==='html_anchor',true);
     const anchorEnd=input.binding==='html_anchor'?quote.indexOf('</a>',start):input.binding==='markdown_link'?quote.indexOf(')',start):targetAt+(input.targetUrl?.length??0);
-    localQuote=prefix+quote.slice(start,anchorEnd>=0?anchorEnd+(input.binding==='html_anchor'?4:input.binding==='markdown_link'?1:0):start);
-    const readable=prefix.replace(/<a\b[^>]*>[\s\S]*?<\/a>/giu,' ').replace(/<[^>]*>/g,' ');
+    const end=anchorEnd>=0?anchorEnd+(input.binding==='html_anchor'?4:input.binding==='markdown_link'?1:0):start;
+    localQuote=prefix+quote.slice(start,end);
+    const readable=visibleIdentityContext(prefix.replace(/<a\b(?:[^<>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/a\s*>/giu,' '));
     localQuote=readable+localQuote.slice(prefix.length);
+    // A predicate immediately after THIS anchor can name its ownership.
+    // No following sentence, second anchor or work-authorship relationship
+    // may supply the missing account declaration.
+    const caption=visibleIdentityContext(quote.slice(start,end)).replace(/\[([^\]]*)\]\([^)]*\)/g,'$1').trim();
+    const suffix=visibleIdentityContext(quote.slice(end));
+    const accountCaption=/^(?:(?:github|personal|public|official|main|current|first|second|new|old|own|original|professional)\s+){0,3}(?:website|webpage|homepage|site|blog|channel|newsletter|account|profile)$/iu.test(caption);
+    const ownPredicate=/^\s*is\s+my\s+(?:(?:personal|public|official|main|current|first|second|new|old|oldest|own|other|original|professional)\s+){0,3}(?:website|webpage|homepage|site|blog|channel|newsletter|account|profile)(?=\s*(?:[.!;。]|$))/iu.test(suffix)
+      || accountCaption&&/^\s*is\s+my\s+(?:first|second|oldest|newest|original|other)\s+one(?=\s*(?:[.!;。]|$))/iu.test(suffix);
+    targetOwnPredicate=/^[\s]*(?:this|that)?[\s]*$/iu.test(readable)&&ownPredicate;
     const marker=[...readable.matchAll(new RegExp(OWNERSHIP_MARKERS.source,'giu'))].at(-1);
     const tail=marker?readable.slice(marker.index!+marker[0].length).trim():null;
     // A preceding self-link can extend through a simple link list, but new
     // prose/action after it starts another relationship, not an owned list.
     if(tail!==null&&!/^(?:(?:on|at|and|or|is|are|here|below|profiles?|accounts?|pages?|links?|channels?|websites?|blogs?|newsletters?)\b|网站|博客|频道|主页|账号|通讯|在|和|与|或|以及|位于|[\s:：,，.;/＆&()\-–—])*$/iu.test(tail))localQuote='';
   }
-  const context=classifyLinkContext(localQuote);
+  const context=targetOwnPredicate?'ownership':classifyLinkContext(localQuote);
   if(input.binding==='html_rel_me'&&input.surface==='authorial'&&input.sourceIsOwnProfilePage&&!input.sourceIsRestrictedSurface&&!input.sourceIsSocialPlatform){
     return isUntrustedInstructionText(quote) ? {role:'unknown_role',retrieval:'link_only'} : {role:'self_account_section',retrieval:'read'};
   }

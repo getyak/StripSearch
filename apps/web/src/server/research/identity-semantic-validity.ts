@@ -3,7 +3,7 @@ import type {DB} from '../db/index.js';
 import type {CaseReportView} from '../../shared/research-case.js';
 import {classifyFirstStepUrl,linkRoleFromContext} from '../../shared/first-step-discovery.js';
 import {verifyAliasProjection} from './alias-proof.js';
-import {extractOriginalLinkContexts} from './link-context.js';
+import {extractOriginalLinkContexts,extractOriginalLiteralLinkContexts} from './link-context.js';
 import type {ResearchPage, ResearchToolAction} from './tool-contracts.js';
 import {verifiedNativeAccountRequest, verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext} from './toolkit.js';
 
@@ -16,7 +16,15 @@ export function identitySemanticReviewAccounts(db:DB,report:CaseReportView):Set<
  const originals=new Map<string,{page:ResearchPage;action:ResearchToolAction}>();
  for(const row of rows){
   let result:{pages?:ResearchPage[]},action:ResearchToolAction;try{result=JSON.parse(row.result_json??'null')??{};action=JSON.parse(row.request_json);}catch{continue;}
-  for(const page of Array.isArray(result.pages)?result.pages:[]){if(!page||typeof page.text!=='string'||typeof page.url!=='string')continue;originals.set(page.url+'|'+createHash('sha256').update(page.text).digest('hex'),{page,action});}
+  for(const page of Array.isArray(result.pages)?result.pages:[]){
+   if(!page||typeof page.text!=='string'||typeof page.url!=='string'||action.type==='search')continue;
+   const proof=page.aliasProof;
+   const aliasBound=!!proof&&proof.requestedUrl===action.url&&proof.returnedUrl===page.url&&verifyAliasProjection(proof).ok&&
+    (proof.kind==='native_profile'?verifiedNativeAccountRequest(page,action)&&page.account?.id===proof.nativeId&&page.account.platform===proof.platform:page.documentBinding?.requestedUrl===action.url&&page.documentBinding.returnedUrl===page.url);
+   const exactBound=action.url===page.url&&(!page.documentBinding||page.documentBinding.requestedUrl===action.url&&page.documentBinding.returnedUrl===page.url);
+   if(!exactBound&&!aliasBound)continue;
+   originals.set(page.url+'|'+createHash('sha256').update(page.text).digest('hex'),{page,action});
+  }
  }
  const aliases=new Map<string,string>();
  for(const {page,action} of originals.values()){
@@ -47,7 +55,7 @@ export function identitySemanticReviewAccounts(db:DB,report:CaseReportView):Set<
    const social=!['personal_site','rss_blog','web_page'].includes(ref.ref.platform);
    // An extracted target context or native field is authoritative. A narrow
    // historical quote must never override its denial, attribution or field veto.
-   const literals=matched.length||nativeCandidates.length||/<a\b|\[[^\]\n]*\]\(/iu.test(evidence.quote)?[]:[...new Set([...(Array.isArray(page?.links)?page.links:[]),account.profileUrl].filter((url):url is string=>typeof url==='string'))].filter(url=>{const ref=classifyFirstStepUrl(url);return ref.ok&&keyFor(url)===keyFor(account.profileUrl)&&text.includes(url.replace(/\/+$/,''));}).map(url=>({url,quote:text,binding:null,surface:null,targetOffset:text.indexOf(url.replace(/\/+$/,''))}));
+   const literals=matched.length||nativeCandidates.length||/<a\b|\[[^\]\n]*\]\(/iu.test(evidence.quote)?[]:[...new Set([...(Array.isArray(page?.links)?page.links:[]),account.profileUrl].filter((url):url is string=>typeof url==='string'))].filter(url=>{const ref=classifyFirstStepUrl(url);return ref.ok&&keyFor(url)===keyFor(account.profileUrl)&&text.includes(url.replace(/\/+$/,''));}).flatMap(url=>extractOriginalLiteralLinkContexts(text,source.originalUrl,url)).filter(c=>c.quote===evidence.quote||c.quote.includes(evidence.quote)||evidence.quote.includes(c.quote));
    const bound=[...matched,...native,...literals];
    const valid=bound.some(c=>{
     const role=linkRoleFromContext({quote:c.quote,targetUrl:c.url,targetOffset:c.targetOffset,binding:c.binding,surface:c.surface,sourceIsOwnProfilePage:ref.ref.entry==='profile'||page?.kind==='profile',sourceIsDirectory:ref.ref.platform==='linktree',sourceIsRestrictedSurface:social&&ref.ref.entry!=='profile',sourceIsSocialPlatform:social,sourceIsNativeAccount:c.binding==='native_profile_field'&&!!page?.account});

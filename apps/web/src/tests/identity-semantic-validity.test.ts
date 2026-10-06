@@ -9,6 +9,37 @@ import type {FirstStepBinding} from '../server/research/research-store.js';
 const home='https://mira-semantic-fixture.dev/',book='https://github.com/book-publisher';
 const bad='<p>I am the author of the book <a href="https://github.com/book&#45;publisher">Synthetic Book</a>.<br>When not working, find me reading.</p>';
 
+for(const variant of ['exact','wrong-request','wrong-document-binding','valid-redirect','unproved-redirect'])test(`cached original requires actual request/document binding: ${variant}`,()=>{
+ const f=seedFirstStep({accounts:[{url:home},{url:book,supportedBy:{sourceUrl:home}}]});
+ try{
+  for(const row of f.store.research.receipts(f.run.id).filter(r=>r.kind==='tool')){
+   const result=structuredClone(row.result) as {pages:ResearchPage[]};
+   const requested=variant==='wrong-request'?'https://another-author.dev/':variant.endsWith('redirect')?home.replace('https://','https://www.'):home;
+   for(const p of result.pages){
+    if(variant==='wrong-document-binding')p.documentBinding={requestedUrl:'https://another-author.dev/',returnedUrl:p.url};
+    if(variant==='valid-redirect'){p.documentBinding={requestedUrl:requested,returnedUrl:p.url};p.aliasProof={kind:'same_document_redirect',requestedUrl:requested,returnedUrl:p.url};}
+   }
+   f.db.prepare('UPDATE research_actions SET request_json=?,result_json=? WHERE run_id=? AND action_key=?').run(JSON.stringify({type:'read',url:requested}),JSON.stringify(result),f.run.id,row.key);
+  }
+  const before=JSON.stringify(f.firstStep.currentDiscovery(f.run.id));
+  const view=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(view.mode!=='first_step')throw Error('mode');
+  assert.equal(view.view.accounts.find(a=>a.profileUrl===book)!.identity.validity,['exact','valid-redirect'].includes(variant)?'valid':'review');
+  assert.equal(JSON.stringify(f.firstStep.currentDiscovery(f.run.id)),before);
+ }finally{f.close();}
+});
+
+for(const wrapper of ['p','script','blockquote','p hidden','p aria-hidden="true"','p style="display:none"','code','p class="activity-feed"'])test(`cached literal binds a visible authorial text node: ${wrapper}`,()=>{
+ const quote=`My GitHub: ${book}`,tag=wrapper.split(' ')[0]!,text=`<${wrapper}>${quote}</${tag}>`;
+ const f=seedFirstStep({accounts:[{url:home},{url:book,supportedBy:{sourceUrl:home,quote}}]});
+ try{
+  f.db.prepare('UPDATE research_case_source_revisions SET content_hash=? WHERE original_url=?').run(createHash('sha256').update(text).digest('hex'),home);
+  f.store.research.reserve(f.run.id,'node-original','tool',{type:'read',url:home},{inputTokens:0,outputTokens:0});
+  f.store.research.settle(f.run.id,'node-original',{pages:[{url:home,text,links:[book],kind:'profile',retrieval:'read'}]},{inputTokens:0,outputTokens:0});
+  const view=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(view.mode!=='first_step')throw Error('mode');
+  assert.equal(view.view.accounts.find(a=>a.profileUrl===book)!.identity.validity,wrapper==='p'?'valid':'review');
+ }finally{f.close();}
+});
+
 test('historical wrong ownership is review-only in current UI, selection and frozen Fetch without rewriting evidence',()=>{
  const f=seedFirstStep({accounts:[{url:home},{url:book,supportedBy:{sourceUrl:home,quote:bad}}]});
  try{

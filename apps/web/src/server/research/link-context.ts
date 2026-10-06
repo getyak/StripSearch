@@ -15,6 +15,10 @@ const BLOCKS = new Set(['p', 'li', 'nav', 'footer', 'header', 'section', 'div', 
 const THIRD_PARTY = /(?:activity|timeline|feed|comment|recommend|suggest|reshare|repost|quote|people-also|related-post)/i;
 const PAGE_ROOTS = new Set(['main', 'body', 'html']);
 
+function restrictedIdentityContainer(node:Tree.Element):boolean {
+ return ['script','style','template','noscript','title','code','pre','blockquote'].includes(node.tagName)||node.attrs.some(a=>['hidden','inert'].includes(a.name)||a.name==='aria-hidden'&&a.value==='true'||a.name==='style'&&/display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)/iu.test(a.value));
+}
+
 /** A root's adjacent heading/description belongs to this branch; an
  * independent article elsewhere on the page does not. Keep a literal span. */
 export function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment | Tree.Document, branch: Tree.Node): {startOffset:number;endOffset:number} | null {
@@ -81,7 +85,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
       // An RSS subscription wrapper around explicit social controls is not
       // a third-party timeline. Other feed/activity markers still veto it.
       const surfaceAttrs = relMe && socialControls ? attrs.replace(/\brss-feed\b/gi, 'rss-subscription') : attrs;
-      if (ancestor.tagName === 'blockquote' || THIRD_PARTY.test(surfaceAttrs)) thirdParty = true;
+      if (restrictedIdentityContainer(ancestor) || THIRD_PARTY.test(surfaceAttrs)) thirdParty = true;
       if (block === node && BLOCKS.has(ancestor.tagName) && ancestor.sourceCodeLocation) block = ancestor;
       // A nested paragraph cannot erase the heading or description of an
       // enclosing semantic container. Inspect actual ancestor text for a
@@ -127,6 +131,33 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
       binding: 'markdown_link', surface: thirdParty ? 'third_party' : quote.length > 8000 ? 'unknown' : 'authorial' });
   }
   return contexts;
+}
+
+/** Bind an actually observed literal URL to its original TEXT node, never an
+ * attribute, script, hidden element or somebody else's quotation. */
+type LiteralLinkContext=Omit<ResearchLinkContext,'binding'>&{binding:null};
+export function extractOriginalLiteralLinkContexts(original:string,base:string,url:string):LiteralLinkContext[] {
+ if(resolveLink(url,base)!==url)return [];
+ const root=parseFragment(original,{sourceCodeLocationInfo:true}),pending:Tree.Node[]=[root],contexts:LiteralLinkContext[]=[];
+ while(pending.length){
+  const node=pending.pop()!;if('childNodes' in node)pending.push(...node.childNodes);
+  if(node.nodeName!=='#text'||!('value' in node)||!node.sourceCodeLocation||!node.value.includes(url.replace(/\/+$/,'')))continue;
+  const location=node.sourceCodeLocation,literal=original.slice(location.startOffset,location.endOffset),at=literal.indexOf(url.replace(/\/+$/,''));
+  if(at<0)continue;
+  let block:Tree.Element|null=null,ancestor:Tree.Node|null=node.parentNode,branch:Tree.Node=node,restricted=false,veto:{startOffset:number;endOffset:number}|null=null;
+  while(ancestor&&'tagName' in ancestor){
+   const attrs=ancestor.attrs.map(a=>`${a.name}=${a.value}`).join(' ');
+   restricted ||= ancestor.tagName==='a'||restrictedIdentityContainer(ancestor)||THIRD_PARTY.test(attrs);
+   if(!block&&BLOCKS.has(ancestor.tagName)&&ancestor.sourceCodeLocation)block=ancestor;
+   const span=PAGE_ROOTS.has(ancestor.tagName)?adjacentRootSpan(ancestor,branch):ancestor.sourceCodeLocation;
+   if(!veto&&span){const quote=original.slice(span.startOffset,span.endOffset);if(isExplicitDenialQuote(quote)||classifyLinkContext(quote)==='third_party')veto=span;}
+   branch=ancestor;ancestor=ancestor.parentNode;
+  }
+  if(!veto&&ancestor===root){const span=adjacentRootSpan(root,branch);if(span){const quote=original.slice(span.startOffset,span.endOffset);if(isExplicitDenialQuote(quote)||classifyLinkContext(quote)==='third_party')veto=span;}}
+  const span=veto??block?.sourceCodeLocation??{startOffset:0,endOffset:original.length},quote=original.slice(span.startOffset,span.endOffset);
+  contexts.push({url,quote,targetOffset:location.startOffset+at-span.startOffset,locator:`文字原文第 ${span.startOffset+1}–${span.endOffset} 字符`,binding:null,surface:restricted?'third_party':quote.length>8000?'unknown':'authorial'});
+ }
+ return contexts;
 }
 
 /** The native adapter has verified the account; its website field is self-supplied. */
