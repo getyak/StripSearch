@@ -78,3 +78,10 @@ test('ordinary full document introduction keeps exact original offsets',()=>{
   assert.equal(claim.quote,'<p>Hello, my name is <span>Mira</span> <strong>Kepler</strong>.</p>');
   assert.equal(original.slice(claim.offset,claim.offset+claim.quote.length),claim.quote);
 });
+
+test('an ordinary HTML comment does not authorize the named introduction in following Markdown code',()=>{
+ const original='<!-- ordinary comment -->\n\n    <html><body><p>I am Mira Kepler. I build compilers.</p></body></html>';
+ assert.equal(namedOwnerQuote(web(original),action,'Mira Kepler'),null);
+ const actual='<!-- ordinary comment -->\n\n<html><body><p>I am Mira Kepler. I build compilers.</p></body></html>';
+ const owner=namedOwnerQuote(web(actual),action,'Mira Kepler')!;assert.ok(owner);assert.equal(actual.slice(owner.offset,owner.offset+owner.quote.length),owner.quote);
+});

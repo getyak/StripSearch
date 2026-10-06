@@ -197,3 +197,10 @@ test('regex cannot manufacture a Markdown link from an AST HTML block or code ex
  const url='https://github.com/fixture-code-example';
  for(const original of [`<p>I am Fixture.</p>\n\`\`\`text\nMy GitHub: [My account](${url})\n\`\`\``,`<p>My GitHub: [My account](${url})</p>`,`\`My GitHub: [My account](${url})\``])assert.ok(extractOriginalLinkContexts(original,'https://fixture-author.dev/').every(c=>c.binding!=='markdown_link'));
 });
+
+ test('HTML comments cannot hide Markdown indentation before an entire HTML code sample',()=>{
+ const url='https://github.com/fixture-comment-code';
+ const code=`<!-- ordinary comment -->\n\n    <html><body><p>I am Fixture. My GitHub: <a href="${url}">My account</a></p></body></html>`;
+ const contexts=extractOriginalLinkContexts(code,'https://fixture-author.dev/');assert.equal(contexts.length,1);assert.equal(contexts[0]!.surface,'third_party');
+ const original=`<!-- ordinary comment -->\n\n<html><body><p>My GitHub: <a href="${url}">My account</a></p></body></html>`;assert.equal(extractOriginalLinkContexts(original,'https://fixture-author.dev/')[0]!.surface,'authorial');
+ });

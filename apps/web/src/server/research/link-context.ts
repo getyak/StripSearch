@@ -21,7 +21,7 @@ type OriginalRange={start:number;end:number};
 const markdownRanges=new Map<string,{restricted:OriginalRange[];links:OriginalRange[]}>();
 /** Full HTML documents use HTML semantics; layout indentation is not Markdown code. */
 function originalIsHtmlDocument(original:string):boolean {
- return /^(?:\uFEFF)?(?:[ ]{0,3}\r?\n)*[ ]{0,3}(?:<!--[\s\S]*?-->\s*)*(?:<!doctype\s+html\b|<(?:html|body)\b)/iu.test(original);
+ return /^(?:\uFEFF)?(?:[ ]{0,3}\r?\n)*[ ]{0,3}(?:<!--[\s\S]*?-->(?:[ ]{0,3}\r?\n)*[ ]{0,3})*(?:<!doctype\s+html\b|<(?:html|body)\b)/iu.test(original);
 }
 function originalMarkdownRanges(original:string):{restricted:OriginalRange[];links:OriginalRange[]} {
  const cached=markdownRanges.get(original);if(cached)return cached;
