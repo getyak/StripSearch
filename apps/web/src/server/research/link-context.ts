@@ -11,8 +11,27 @@ function resolveLink(raw: string, base: string): string | null {
   } catch { return null; }
 }
 
-const BLOCKS = new Set(['p', 'li', 'nav', 'footer', 'header', 'section', 'div']);
-const THIRD_PARTY = /(?:activity|feed|comment|recommend|suggest|reshare|repost|quote|people-also|related-post)/i;
+const BLOCKS = new Set(['p', 'li', 'nav', 'footer', 'header', 'section', 'div', 'main']);
+const THIRD_PARTY = /(?:activity|timeline|feed|comment|recommend|suggest|reshare|repost|quote|people-also|related-post)/i;
+const PAGE_ROOTS = new Set(['main', 'body', 'html']);
+
+/** A root's adjacent heading/description belongs to this branch; an
+ * independent article elsewhere on the page does not. Keep a literal span. */
+function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment, branch: Tree.Node): {startOffset:number;endOffset:number} | null {
+  const location=branch.sourceCodeLocation;if(!location)return null;
+  const index=root.childNodes.findIndex(node=>node===branch);let start=location.startOffset,end=location.endOffset;
+  for(const direction of [-1,1]){
+   for(let i=index+direction;i>=0&&i<root.childNodes.length;i+=direction){
+    const sibling=root.childNodes[i]!;
+    if(sibling.nodeName==='#comment'||sibling.nodeName==='#text'&&'value' in sibling&&!sibling.value.trim())continue;
+    if('tagName' in sibling&&!/^(?:h[1-6]|p)$/.test(sibling.tagName))break;
+    if(!('tagName' in sibling)&&sibling.nodeName!=='#text')break;
+    if(!sibling.sourceCodeLocation)break;
+    if(direction<0)start=sibling.sourceCodeLocation.startOffset;else end=sibling.sourceCodeLocation.endOffset;
+   }
+  }
+  return start<location.startOffset||end>location.endOffset?{startOffset:start,endOffset:end}:null;
+}
 
 /** Retain actual HTML anchors and their original containing span. No source executes. */
 export function extractOriginalLinkContexts(original: string, base: string): ResearchLinkContext[] {
@@ -28,26 +47,40 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
     if (!url || !node.sourceCodeLocation) continue;
     const relMe=(node.attrs.find(attr=>attr.name==='rel')?.value??'').toLowerCase().split(/\s+/).includes('me');
     let block: Tree.Element = node;
-    let semanticVeto: Tree.Element | null = null;
+    let semanticVeto: {startOffset:number;endOffset:number} | null = null;
     let ancestor: Tree.Node | null = node.parentNode;
+    let branch: Tree.Node = node;
     let thirdParty = false;
+    let socialControls = false;
     while (ancestor && 'tagName' in ancestor) {
       const attrs = ancestor.attrs.map(attr => `${attr.name}=${attr.value}`).join(' ');
-      if (ancestor.tagName === 'blockquote' || THIRD_PARTY.test(attrs)) thirdParty = true;
+      socialControls ||= ancestor.attrs.some(attr => attr.name === 'class' && attr.value.split(/\s+/).includes('social-media-icons'));
+      // An RSS subscription wrapper around explicit social controls is not
+      // a third-party timeline. Other feed/activity markers still veto it.
+      const surfaceAttrs = relMe && socialControls ? attrs.replace(/\brss-feed\b/gi, 'rss-subscription') : attrs;
+      if (ancestor.tagName === 'blockquote' || THIRD_PARTY.test(surfaceAttrs)) thirdParty = true;
       if (block === node && BLOCKS.has(ancestor.tagName) && ancestor.sourceCodeLocation) block = ancestor;
       // A nested paragraph cannot erase the heading or description of an
       // enclosing semantic container. Inspect actual ancestor text for a
       // conservative veto; retain its exact span rather than invent context.
       if (relMe && semanticVeto === null && ancestor.sourceCodeLocation) {
-        const span=original.slice(ancestor.sourceCodeLocation.startOffset,ancestor.sourceCodeLocation.endOffset);
-        if (isExplicitDenialQuote(span)||classifyLinkContext(span)==='third_party') semanticVeto=ancestor;
+        const relevant=PAGE_ROOTS.has(ancestor.tagName)?adjacentRootSpan(ancestor,branch):ancestor.sourceCodeLocation;
+        const span=relevant?original.slice(relevant.startOffset,relevant.endOffset):'';
+        if (relevant&&(isExplicitDenialQuote(span)||classifyLinkContext(span)==='third_party')) semanticVeto=relevant;
       }
+      branch = ancestor;
       ancestor = ancestor.parentNode;
     }
-    if (semanticVeto) block=semanticVeto;
+    // parseFragment removes body/html wrappers; their direct descriptions
+    // remain siblings in the document fragment and must still constrain nav.
+    if(relMe&&semanticVeto===null&&ancestor===root){
+      const relevant=adjacentRootSpan(root,branch);
+      const span=relevant?original.slice(relevant.startOffset,relevant.endOffset):'';
+      if(relevant&&(isExplicitDenialQuote(span)||classifyLinkContext(span)==='third_party'))semanticVeto=relevant;
+    }
     // Preserve the surrounding original semantics: rel=me cannot discard a
     // nearby denial or attribution to someone else.
-    const location = block.sourceCodeLocation!;
+    const location = semanticVeto ?? block.sourceCodeLocation!;
     const quote = original.slice(location.startOffset, location.endOffset);
     // A huge wrapper is not a target-specific attribution context.
     const tooBroad = quote.length > 8000;

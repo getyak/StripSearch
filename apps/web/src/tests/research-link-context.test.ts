@@ -2,6 +2,45 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { extractOriginalLinkContexts, nativeProfileLinkContext } from '../server/research/link-context.js';
 import { createResearchTools } from '../server/research/toolkit.js';
+import { linkRoleFromContext } from '../shared/first-step-discovery.js';
+
+test('rel-me local attribution does not borrow unrelated prose from the page root', () => {
+  const source = '<main><header><div><a rel="me" href="https://github.com/fixture-author">GitHub</a></div></header><article><p>He said this about a different person.</p></article></main>';
+  const [context] = extractOriginalLinkContexts(source, 'https://fixture-author.dev/');
+  assert.equal(context!.surface, 'authorial');
+  assert.doesNotMatch(context!.quote, /He said/);
+  assert.equal(linkRoleFromContext({...context!, targetUrl:context!.url, sourceIsOwnProfilePage:true, sourceIsDirectory:false}).role, 'self_account_section');
+  for (const attribution of ["My colleague's accounts", 'Not my account; impersonator']) {
+    const scoped = `<main><section><h2>${attribution}</h2><div><p><a rel="me" href="https://github.com/fixture-other">GitHub</a></p></div></section></main>`;
+    const [item] = extractOriginalLinkContexts(scoped, 'https://fixture-author.dev/');
+    assert.ok(scoped.includes(item!.quote));
+    assert.notEqual(linkRoleFromContext({...item!,targetUrl:item!.url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');
+  }
+  const [rootDenial] = extractOriginalLinkContexts('<main>Not my account; impersonator: <a rel="me" href="https://github.com/fixture-other">GitHub</a></main>','https://fixture-author.dev/');
+  assert.notEqual(linkRoleFromContext({...rootDenial!,targetUrl:rootDenial!.url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');
+  for(const prefix of ["<h2>Accounts belonging to my colleague</h2>", '<p>This is not my account: https://github.com/fixture-other</p>']) {
+   for(const wrapper of ['main','body','']) {
+    for(const side of ['before','after']) {
+    const original=`${wrapper?`<${wrapper}>`:''}${side==='before'?prefix:''}<nav><a rel="me" href="https://github.com/fixture-other">GitHub</a></nav>${side==='after'?prefix:''}<article><p>Other content</p></article>${wrapper?`</${wrapper}>`:''}`;
+    const [denied]=extractOriginalLinkContexts(original,'https://fixture-author.dev/');
+    assert.ok(original.includes(denied!.quote));
+    assert.notEqual(linkRoleFromContext({...denied!,targetUrl:denied!.url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');
+    }
+   }
+  }
+});
+
+test('RSS subscription controls differ from third-party feeds and naked social navigation', () => {
+  const own = '<div class="rss-feed"><p>RSS Subscribe</p><div class="social-media-icons"><a rel="me" href="https://github.com/fixture-author">GitHub</a></div></div>';
+  const [context] = extractOriginalLinkContexts(own, 'https://fixture-author.dev/');
+  assert.equal(context!.surface, 'authorial');
+  for (const attrs of ['activity-feed', 'rss-feed comment-stream', 'rss-feed timeline', 'feed']) {
+    const third = `<section class="${attrs}"><div class="social-media-icons"><a rel="me" href="https://github.com/fixture-other">My account</a></div></section>`;
+    assert.equal(extractOriginalLinkContexts(third,'https://fixture-author.dev/')[0]!.surface,'third_party');
+  }
+  const [bare] = extractOriginalLinkContexts('<nav><a href="https://x.com/fixture-author">Twitter</a></nav>','https://fixture-author.dev/');
+  assert.equal(linkRoleFromContext({...bare!,targetUrl:bare!.url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'unknown_role');
+});
 
 test('HTML anchors retain exact source span, label, relative href and ownership paragraph', () => {
   const source = '<p>I create educational videos on <a href="https://www.youtube.com/@fixture-author">my channel</a>.</p><p>A colleague: <a href="https://github.com/other-author">Morgan</a>.</p><footer><a href="/about">About</a></footer>';
