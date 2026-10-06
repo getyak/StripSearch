@@ -91,3 +91,15 @@ for(const changed of ['context','claim'] as const)test(`a completed genre receip
  store.research.save(run.id,cp);const second=await runResearch(options);assert.equal(sends,2);assert.equal(second.observations.length,0);assert.equal(store.research.checkpoint(run.id)!.claims.length,0);
  const receipts=store.research.receipts(run.id).filter(r=>r.kind==='model');assert.equal(receipts.length,2);assert.notEqual(receipts[0]!.key,receipts[1]!.key);assert.deepEqual(store.research.receipts(run.id).find(r=>r.key===oldReceipt.key),oldReceipt);db.close();
 });
+
+test('a withdrawn pending quote stops before the planner or any new paid reservation',async()=>{
+ const {db,store,run}=setup();const cp:ResearchCheckpoint={phase:'verifying',steps:1,startedAt:0,elapsedMs:0,anchorUrl:page.url,identity:{displayName:'Fixture',handle:'genre-fixture',profileUrl:page.url,status:'resolved',note:'Synthetic',candidates:[]},candidates:[],pages:[{...page,sourceKey:'S1',retrieval:'read'}],claims:[],pendingClaims:[claim],unknowns:[],stopReason:null,quoteGenrePolicy:'genre_context/v1'};
+ store.addSource(run.id,{key:'S1',url:page.url,title:'Fixture',kind:'profile',publishedAt:null,excerpt:quote,excerptLocator:'synthetic',identityLabel:'synthetic',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);store.research.save(run.id,cp);store.setSourceExcluded(run.id,'S1',true);let plans=0,sends=0;
+ const result=await runResearch({store,run,limits,signal:new AbortController().signal,firstStepScope:scope,deepseekApiKey:'synthetic',transport:{async fetch(){sends++;throw Error('must not transmit');}},tools:{async execute(){throw Error('must not fetch');}},planner:{genreReviewPolicy:'genre_context/v1',async decide(){plans++;throw Error('must not expose quote to planner');}}});
+ assert.equal(plans,0);assert.equal(sends,0);assert.equal(store.research.receipts(run.id).length,0);assert.equal(result.stopReason,'source_revoked');assert.equal(result.observations.length,0);assert.equal(store.research.checkpoint(run.id)!.pendingClaims![0]!.quote,quote);db.close();
+});
+
+test('withdrawal between planner input and model invocation prevents transmission and reservation',async()=>{
+ const {db,store,run}=setup();let sends=0;const result=await runResearch({store,run,limits,signal:new AbortController().signal,firstStepScope:scope,deepseekApiKey:'synthetic',transport:{async fetch(){sends++;throw Error('must not transmit');}},tools:{async execute(){return {pages:[page],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{genreReviewPolicy:'genre_context/v1',async decide(input,signal,invoke){if(input.mode!=='verify')return {action:'finish',claims:[claim]};store.setSourceExcluded(run.id,'S1',true);await invoke({path:'/v1/messages',body:{model:'deepseek-flash',max_tokens:2500},signal} as Parameters<typeof invoke>[0]);throw Error('must stop before result');}}});
+ assert.equal(sends,0);assert.equal(store.research.receipts(run.id).filter(r=>r.kind==='model').length,0);assert.equal(result.stopReason,'source_revoked');assert.equal(result.observations.length,0);db.close();
+});

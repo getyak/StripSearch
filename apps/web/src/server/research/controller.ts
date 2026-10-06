@@ -138,6 +138,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const save=()=>{active();checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);};
  const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':phase==='verifying'?'核验引文与陈述':'读取相关资料',status:'active'});};
  const stillActivePages=()=>stillActivePagesOf(store,run,checkpoint);
+ const assertVerificationSources=(claims:ResearchClaim[],pages:StoredPage[]):void=>{
+  if(claims.some(c=>!pages.some(p=>p.sourceKey===c.sourceKey)))throw new ResearchStop('source_revoked');
+  if(claims.some(c=>!pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))))throw new ResearchStop('invalid_evidence');
+ };
  // Concrete scoped articles keep their observed URL. Legacy normalization
  // removes trailing slashes for anchor keys and is not a transport alias proof.
  const researchUrl=(raw:unknown):string|null=>{
@@ -200,10 +204,11 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  };
  const ask=async(mode:'plan'|'verify',claims?:ResearchClaim[]):Promise<unknown>=>{
   active();const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
+  if(mode==='verify')assertVerificationSources(claims??[],activePages);
   if(checkpoint.inspect&&!activePages.some(p=>p.sourceKey===checkpoint.inspect!.sourceKey))delete checkpoint.inspect;
   if(checkpoint.inspectWindows)checkpoint.inspectWindows=checkpoint.inspectWindows.filter(w=>activePages.some(p=>p.sourceKey===w.sourceKey)).slice(0,4);
   const decision=await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages,unknowns:[...presentedResearchUnknowns(checkpoint),...currentReadFailureGaps(store,run,checkpoint,activePages)]},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
-    active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
+    active();if(mode==='verify')assertVerificationSources(claims??[],stillActivePages());if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const verificationPolicy=mode==='verify'&&checkpoint.quoteSupportPolicy==='exact_quote/v1'?'exact_quote/v1':null;
     const attributionPolicy=mode==='verify'?checkpoint.quoteAttributionPolicy:null;
@@ -238,6 +243,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  };
  const verify=async():Promise<ProviderResult|null>=>{
   let claims=checkpoint.pendingClaims??[];
+  // Withdrawal must stop before planner input or any metered reservation,
+  // not merely after the response. Do not transmit a stale pending quote.
+  assertVerificationSources(claims,stillActivePages());
   const quoteFallback=(reason:'verification_budget'|'verification_unavailable'):ProviderResult=>{
    active();
    const pages=stillActivePages();
