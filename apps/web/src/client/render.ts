@@ -146,7 +146,7 @@ export function renderReport(
   }
   container.appendChild(header);
   if (view.answer.length === 0 && (view.state === 'queued' || view.state === 'researching')) {
-    container.appendChild(make('p', { className: 'reading-arrival', text: '正在核对人物线索。找到的资料会逐步出现在这里。' }));
+    container.appendChild(make('p', { className: 'reading-arrival', text: view.state==='queued'?'研究已排队。开始后，找到的资料会逐步出现在这里。':'正在核对人物线索。找到的资料会逐步出现在这里。' }));
   }
 
   const hasAnswer = view.answer.some(section => section.body.trim() || section.bullets.length > 0);

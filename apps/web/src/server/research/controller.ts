@@ -53,6 +53,12 @@ function draft(page:StoredPage,anchor:string|null,scope?:ResearchOptions['firstS
 function stillActivePagesOf(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint):StoredPage[]{
  return checkpoint.pages.filter(page=>store.isResearchSourceActive(run.id,page.sourceKey,run.ownerId));
 }
+function presentedUnknowns(checkpoint:ResearchCheckpoint):string[]{
+ return checkpoint.unknowns.map(text=>{
+  const historical=checkpoint.modelGapHistory?.find(item=>item.text===text);
+  return historical?`Agent 在步骤 ${historical.step} 提出的核对项（未经独立核验，不代表当前读取状态）：${text}`:text;
+ });
+}
 function currentReadFailureGaps(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint,pages:StoredPage[]):string[]{
  const completed=store.research.receipts(run.id).filter(r=>r.kind==='tool'&&r.state==='completed');
  return [...new Set((checkpoint.actionFailures??[]).filter(f=>{
@@ -103,7 +109,7 @@ export function buildResearchReport(context:ResearchReportContext,reason:string,
  const budget=store.research.budget(run.id,limits);
  const identity=checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates};
  return {state,identity:scopeStop&&checkpoint.identity?{...identity,note:`${identity.note?`${identity.note} `:''}冻结范围已失效或撤回（${reason}）：已读材料保留待复核，不能据此继续人物结论。`}:identity,sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl,context.firstStepScope)),observations,
-  answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...scope.readFailureGaps,...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[],...scopeStop?['冻结范围已失效或撤回：如需继续，请通过现有第一步流程以新的范围重新开始研究。']:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
+  answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...presentedUnknowns(checkpoint),...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...scope.readFailureGaps,...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[],...scopeStop?['冻结范围已失效或撤回：如需继续，请通过现有第一步流程以新的范围重新开始研究。']:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
 }
 
 export async function runResearch(options:ResearchOptions):Promise<ProviderResult>{
@@ -114,7 +120,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const checkpoint:ResearchCheckpoint=persisted??{phase:'identity',steps:0,startedAt:launched,elapsedMs:0,anchorUrl:normalizeResearchUrl(run.seedUrl),identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null};
  checkpoint.limits??={...limits};
  if(options.firstStepScope)checkpoint.quoteRolePolicy??='preserve_actor/v1';
- if(options.firstStepScope&&checkpoint.steps===0&&checkpoint.claims.length===0&&!checkpoint.pendingClaims)checkpoint.independentMaterials??=[];
+ if(options.firstStepScope&&checkpoint.steps===0&&checkpoint.claims.length===0&&!checkpoint.pendingClaims){checkpoint.independentMaterials??=[];checkpoint.modelGapHistory??=[];}
  // Historical checkpoints did not persist retrieval provenance. Recover it only
  // from a completed, matching action receipt; missing proof stays unread.
  for(const page of checkpoint.pages){
@@ -200,7 +206,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   active();const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
   if(checkpoint.inspect&&!activePages.some(p=>p.sourceKey===checkpoint.inspect!.sourceKey))delete checkpoint.inspect;
   if(checkpoint.inspectWindows)checkpoint.inspectWindows=checkpoint.inspectWindows.filter(w=>activePages.some(p=>p.sourceKey===w.sourceKey)).slice(0,4);
-  const decision=await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages,unknowns:[...checkpoint.unknowns,...currentReadFailureGaps(store,run,checkpoint,activePages)]},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
+  const decision=await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages,unknowns:[...presentedUnknowns(checkpoint),...currentReadFailureGaps(store,run,checkpoint,activePages)]},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
     active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const verificationPolicy=mode==='verify'&&checkpoint.quoteSupportPolicy==='exact_quote/v1'?'exact_quote/v1':null;
@@ -395,7 +401,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     });
     if(options.firstStepScope&&decision.claims.length>0&&validOriginalClaims===0)throw new ResearchStop('invalid_evidence');
     if(!options.firstStepScope)checkpoint.claims=[];checkpoint.pendingClaims=claims;checkpoint.steps++;
-    checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...Array.isArray(decision.unknowns)?decision.unknowns.filter((v):v is string=>typeof v==='string').map(v=>sanitizeText(v,600)):[]])];
+    const proposedGaps=Array.isArray(decision.unknowns)?decision.unknowns.filter((v):v is string=>typeof v==='string').map(v=>sanitizeText(v,600)):[];
+    if(checkpoint.modelGapHistory)for(const text of proposedGaps)checkpoint.modelGapHistory.push({step:checkpoint.steps,text});
+    checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...proposedGaps])];
     checkpoint.phase='verifying';save();const result=await verify();if(result)return result;continue;
    }
    const decisions=decision.action==='batch'?decision.actions:[decision];

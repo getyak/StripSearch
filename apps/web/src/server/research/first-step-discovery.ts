@@ -640,7 +640,9 @@ export function quoteAround(text: string, url: string): { quote: string | null; 
   let end = index + url.length;
   while (end < text.length && !delimiters.includes(text[end]!)) end++;
   if (end < text.length) end++;
-  const quote = text.slice(start, end).trim();
+  while(start<end&&/\s/u.test(text[start]!))start++;
+  while(end>start&&/\s/u.test(text[end-1]!))end--;
+  const quote = text.slice(start, end);
   return {
     quote: quote.length >= 2 ? quote : null,
     locator: `原文第 ${String(start + 1)}–${String(end)} 字符`

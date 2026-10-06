@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assessIdentityLink,
+  linkRoleFromContext,
   firstStepQueryPlan,
   classifyFirstStepUrl,
   firstStepAccountCategory,
@@ -19,6 +20,14 @@ import {
   type FirstStepLinkObservation,
   type FirstStepRetrieval
 } from '../shared/first-step-discovery.js';
+
+test('a book author relation cannot borrow later find-me text to support its host account',()=>{
+ const target='https://synthetic-book.dev/',quote=`<p>I wrote a couple of books — <a href="${target}">Synthetic Book</a> (2020).<br>When not working, find me reading.</p>`;
+ const context={targetUrl:target,binding:'html_anchor' as const,surface:'authorial' as const,sourceIsOwnProfilePage:true,sourceIsDirectory:false};
+ assert.equal(linkRoleFromContext({...context,quote}).role,'prose_mention');
+ assert.equal(linkRoleFromContext({...context,quote:`<p>I wrote a book.<br>My website: <a href="${target}">My site</a>.</p>`}).role,'self_account_section');
+ assert.equal(linkRoleFromContext({...context,quote,binding:'html_rel_me'}).role,'self_account_section','explicit rel-me is a distinct ownership declaration');
+});
 
 function classify(raw: string) {
   const result = classifyFirstStepUrl(raw);

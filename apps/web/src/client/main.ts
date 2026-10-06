@@ -1048,7 +1048,8 @@ function renderRunSummary(): void {
   if (!message && run?.state === 'partial') message = '已保留目前找到的资料，部分内容尚未完成。';
   if (!message && run?.state === 'failed') message = '这次研究未能完成。你的输入已保留，可以重试或补充线索。';
   if (run?.state === 'needs_input') message = '';
-  if (!message && research && (run?.state === 'queued' || run?.state === 'researching')) {
+  if (!message && run?.state === 'queued') message = '已保存研究范围，正在等待开始。';
+  if (!message && research && run?.state === 'researching') {
     const phases: Record<string, string> = { resolving: '正在核对人物身份。', identity: '正在核对人物身份。', identity_resolution: '正在核对人物身份。', searching: '正在发现原作、账号线索与反证。', planning: '正在按研究问题安排下一批资料。', reading: '正在读取原文与讨论上下文。', verifying: '正在独立核验断言与出处。', researching: '正在阅读公开资料，核对相关证据。', collecting: '正在阅读公开资料，核对相关证据。', synthesizing: '正在整理有出处的发现。', validating: '正在核对报告与出处。' };
     message = phases[research.phase] ?? '正在阅读与核对公开资料。';
   }

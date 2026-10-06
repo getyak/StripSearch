@@ -261,3 +261,15 @@ statement without appearing in the quote. Other source IDs, inline IDs and
 new English names remain subject to literal-term checks. Approximate time
 statements retain their approximation; lexical eligibility is not semantic
 support. Do not replay a historical failed run to manufacture new acceptance.
+
+Fresh scoped research retains model-proposed gap questions with their actual
+step in `modelGapHistory`. Show them as unverified historical questions, never
+current tool status; retain raw questions and completed read receipts. Legacy
+checkpoints without this optional field retain their prior presentation.
+Source qualification guards preserve sometimes versus often and past blog
+transitions versus simultaneous current operation. Identity research is a
+starting point; use actually observed articles or works within the selected
+scope for further research when budget allows. A linked book's authorship
+cannot borrow unrelated find-me text to establish ownership of its host.
+Sentence excerpt locators bind the trimmed literal UTF-16 span (1-based display,
+inclusive end), without changing source bytes or historical receipts.

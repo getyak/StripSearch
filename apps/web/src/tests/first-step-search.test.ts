@@ -362,6 +362,10 @@ test('cancel before ingestion drops late results and nothing is written', async 
 });
 
 test('quoteAround keeps real spans and honest locators; a missing span is never presented as text', () => {
+  const padded='😀.  My website is https://github.com/fixture-owner \n';
+  const span=quoteAround(padded,'https://github.com/fixture-owner');
+  assert.equal(span.quote,'My website is https://github.com/fixture-owner');
+  const start=padded.indexOf(span.quote!);assert.equal(span.locator,`原文第 ${start+1}–${start+span.quote!.length} 字符`);
   const text = 'Lin Zhou. My GitHub: https://github.com/linzhou. Recommended colleague Morgan Chen: https://github.com/morganchen.';
   const own = quoteAround(text, 'https://github.com/linzhou');
   assert.match(own.quote ?? '', /My GitHub/);

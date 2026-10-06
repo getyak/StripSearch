@@ -14,6 +14,12 @@ test('only a leading citation to this exact bound source is excluded from named 
   assert.ok(claimLiteralTermIssue({quote:claim.quote,statement:'S13 帖中介绍解析器。',quoteLexicalPolicy:'literal_terms/v1'}),'no source binding cannot exempt an ID');
   assert.ok(claimAuthorialIssue({quote:'I built this ~week ago.',statement:'本人称在一周前构建。',authorialBasis:'quote_first_person'}));
   assert.equal(claimAuthorialIssue({quote:'I built this ~week ago.',statement:'本人称在约一周前构建。',authorialBasis:'quote_first_person'}),null);
+  assert.ok(claimAuthorialIssue({quote:'Sometimes I am jokingly referred to as the reference human.',statement:'主页自述常被开玩笑称为参考人类。',authorialBasis:'quote_first_person'}));
+  assert.equal(claimAuthorialIssue({quote:'Sometimes I am jokingly referred to as the reference human.',statement:'主页自述有时被开玩笑称为参考人类。',authorialBasis:'quote_first_person'}),null);
+  assert.equal(claimAuthorialIssue({quote:'Sometimes I am jokingly referred to as the reference human.',statement:'主页自述常被开玩笑称为参考人类。'}),null,'legacy without attribution policy unchanged');
+  const migration='I have three blogs. I then briefly and sadly switched to my second blog on Medium. I now have a Bear blog.';
+  assert.ok(claimAuthorialIssue({quote:migration,statement:'主页自述共经营三个博客。',authorialBasis:'quote_first_person'}));
+  assert.equal(claimAuthorialIssue({quote:migration,statement:'主页自述先后有三个博客，目前使用 Bear。',authorialBasis:'quote_first_person'}),null);
 });
 
 test('real controller preserves independent excerpts outside claims; canonical renderers enforce quote, source and current scope dependencies',async()=>{
@@ -25,8 +31,10 @@ test('real controller preserves independent excerpts outside claims; canonical r
     const binding=f.firstStep.selectionBinding(f.run.id)!;
     const cp:ResearchCheckpoint={phase:'planning',steps:0,startedAt:Date.now(),elapsedMs:0,anchorUrl:url,identity:{displayName:'Synthetic account',handle:null,profileUrl:url,status:'resolved',note:null,candidates:[]},candidates:[],pages:[],claims:[],unknowns:[],stopReason:null,firstStep:binding};
     f.store.research.save(f.run.id,cp);
-    const result=await runResearch({store:f.store,run:f.store.getRun(f.run.id)!,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set([discovered.view.accounts[0]!.accountKey]),independentAccountKeys:new Set([discovered.view.accounts[0]!.accountKey]),accountKeyOf:()=>discovered.view.accounts[0]!.accountKey},tools:{async execute(){return {pages:[{url,title:'Synthetic account',text:original,kind:'profile',retrieval:'read',publishedAt:null,links:[],limitations:[]}],requests:1,bytes:original.length,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(input){return input.mode==='verify'?{supported:[],rejected:[]}:input.checkpoint.pages.length===0?{action:'read',url}:{action:'finish',claims:[{sourceKey:'S1',quote,statement:quote,kind:'page_statement',section:'work'}],unknowns:[]};}}});
+    const result=await runResearch({store:f.store,run:f.store.getRun(f.run.id)!,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set([discovered.view.accounts[0]!.accountKey]),independentAccountKeys:new Set([discovered.view.accounts[0]!.accountKey]),accountKeyOf:()=>discovered.view.accounts[0]!.accountKey},tools:{async execute(){return {pages:[{url,title:'Synthetic account',text:original,kind:'profile',retrieval:'read',publishedAt:null,links:[],limitations:[]}],requests:1,bytes:original.length,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(input){return input.mode==='verify'?{supported:[],rejected:[]}:input.checkpoint.pages.length===0?{action:'read',url}:{action:'finish',claims:[{sourceKey:'S1',quote,statement:quote,kind:'page_statement',section:'work'}],unknowns:['A model-proposed question']};}}});
     const saved=f.store.research.checkpoint(f.run.id)!;
+    assert.deepEqual(saved.modelGapHistory,[{step:2,text:'A model-proposed question'}]);
+    assert.ok(result.limitations.some(text=>text.includes('不代表当前读取状态')&&text.includes('A model-proposed question')));
     assert.equal(saved.claims.length,0);assert.equal(result.observations.length,0);assert.equal(result.answer.length,0);assert.equal(saved.independentMaterials!.length,1);
     assert.ok(result.limitations.every(item=>!item.includes(quote)),'raw excerpt is not a limitation');
     f.store.updateRun(f.run.id,{state:'partial',identity_json:JSON.stringify(result.identity)});
@@ -46,6 +54,13 @@ test('real controller preserves independent excerpts outside claims; canonical r
       assert.deepEqual(f.store.research.checkpoint(f.run.id)!.independentMaterials,saved.independentMaterials,'replacement never rewrites historical material');
     }
     f.store.replaceSources(f.run.id,[sourceDraft]);assert.equal(current().research!.accountMaterials!.length,1);
+    const history={...saved,unknowns:['X 帖文未读取'],modelGapHistory:[{step:1,text:'X 帖文未读取'}]};
+    f.db.prepare('update research_checkpoints set data_json=? where run_id=?').run(JSON.stringify(history),f.run.id);
+    const {buildResearchReport}=await import('../server/research/controller.js');
+    const historicalReport=buildResearchReport({store:f.store,run:f.store.getRun(f.run.id)!,checkpoint:history,limits:saved.limits!},'limited_evidence','partial');
+    assert.ok(historicalReport.limitations.some(text=>text.includes('步骤 1')&&text.includes('不代表当前读取状态')&&text.includes('X 帖文未读取')));
+    assert.ok(!historicalReport.limitations.includes('X 帖文未读取'));
+    assert.deepEqual(f.store.research.checkpoint(f.run.id)!.unknowns,['X 帖文未读取'],'historical model question is not rewritten');
     f.store.setSourceExcluded(f.run.id,'S1',true);assert.equal(current().research!.accountMaterials!.length,0);assert.equal(f.store.research.checkpoint(f.run.id)!.independentMaterials!.length,1,'historical material stays intact');
   }finally{f.close();}
 });

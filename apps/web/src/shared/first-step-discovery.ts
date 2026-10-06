@@ -1136,6 +1136,15 @@ export function linkRoleFromContext(input: {
       (!input.sourceIsSocialPlatform || input.surface === 'profile_field') && isExplicitDenialQuote(quote, input.binding === 'html_rel_me' ? null : input.targetUrl ?? null)) {
     return { role: 'explicit_denial', retrieval: 'read' };
   }
+  // A paragraph may contain unrelated "find me" text after a book link.
+  // Judge the actual target's local action before whole-paragraph ownership.
+  // Authorship of that work never proves ownership of its hosting account.
+  const targetAt=input.targetUrl?quote.indexOf(input.targetUrl.replace(/\/+$/,'')):-1;
+  if(targetAt>=0&&input.binding!=='html_rel_me'){
+    const anchorAt=quote.lastIndexOf('<a',targetAt);
+    const before=quote.slice(0,anchorAt>=0?anchorAt:targetAt).split(/<br\s*\/?\s*>|[。!?\n;]/iu).at(-1)!.replace(/<[^>]*>/g,' ').slice(-240);
+    if(/\b(?:wrote|authored|published|created|built)\b.{0,100}\b(?:books?|novels?|papers?|articles?|projects?)\b|(?:撰写|编写|出版|创作).{0,30}(?:书籍|小说|论文|文章|项目)/iu.test(before)&&!OWNERSHIP_MARKERS.test(before))return {role:'prose_mention',retrieval:'read'};
+  }
   const context = classifyLinkContext(quote);
   if (context === 'third_party') return { role: 'prose_mention', retrieval: 'read' };
   if(input.binding==='html_rel_me'&&input.surface==='authorial'&&input.sourceIsOwnProfilePage&&!input.sourceIsRestrictedSurface&&!input.sourceIsSocialPlatform){

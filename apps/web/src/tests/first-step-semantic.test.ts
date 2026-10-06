@@ -1151,3 +1151,11 @@ test('a capitalization-only name variation cannot erase a persisted owner counte
     assert.equal(current.state,'disputed');assert.equal(current.personLabel,'Mira Kepler');assert.deepEqual(current.counterevidenceIds,[counter.evidenceId]);assert.deepEqual(current.claims,anchor.claims);
   }finally{h.db.close();}
 });
+
+
+test('actual discovery and a model cannot convert a book link into an account using unrelated find-me text',async()=>{
+ const book='https://synthetic-book-fixture.dev/',text=`<p>I wrote a couple of books — <a href="${book}">Synthetic Book</a> (2020).<br>When not working, find me reading.</p>`;
+ const own=page(home,text,{links:[book],linkContexts:extractOriginalLinkContexts(text,home)});
+ const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[own,page(book,'Mira Kepler book')],read:url=>url===home?[own]:[page(book,'Website not found.')],propose:async(_signal,input)=>{const source=input.excerpts.find(e=>e.url===home);return {proposals:source?[{fromUrl:home,targetUrl:book,linkRole:'self_account_section',quote:text,requestKey:source.requestKey}]:[],leads:[]};}});
+ try{const view=await discoverFirstStep(h.ctx);const target=view.accounts.find(a=>a.profileUrl===book);assert.ok(target);assert.notEqual(target.identity.state,'supported');assert.equal(target.defaultSuggestion.suggested,false);assert.equal(target.identity.evidence.filter(e=>e.role==='identity_support').length,0);assert.ok(view.gaps.some(g=>g.includes('模型提议被拒')));}finally{h.db.close();}
+});

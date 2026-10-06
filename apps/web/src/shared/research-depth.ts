@@ -52,6 +52,8 @@ export function quoteHasFirstPerson(quote:string):boolean {
 /** New server-bound attribution gate; unmarked history is not relabeled. */
 export function claimAuthorialIssue(claim:{statement:string;quote:string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis}):string|null {
   if(!claim.authorialBasis)return null;
+  if(/\bsometimes\b/iu.test(claim.quote)&&/(?:经常|常常|常被|时常|总是|一直|频繁)/u.test(claim.statement)&&!/(?:\boften\b|\balways\b|\bfrequently\b)/iu.test(claim.quote))return '原文有时不能加强为经常或总是；请保留频率限定。';
+  if(/\b(?:then|briefly)\b.{0,100}\bswitched\b[\s\S]*\bnow\b/iu.test(claim.quote)&&/(?:同时|共|都).{0,12}(?:经营|运营|更新)/u.test(claim.statement)&&!/(?:曾|先后|后来|转到|转向|迁移|如今|现在|目前)/u.test(claim.statement))return '原文包含先后迁移和当前位置，不能改成同时经营；请保留先后与当前限定。';
   if(claim.authorialBasis==='page_text'&&(claim.kind==='attributed_statement'||/自述|自我介绍|自称|他称|她称|本人(?:开设|创办|创建)|\b(?:he|she)\s+(?:says|said|states|claims)|self-description/iu.test(claim.statement)))
     return '第三人称页面简介或一般页面文字不能改成本人自述；请使用页面陈述并保留来源归因，不增加创办或个人行动。';
   if(/^(?:同文|同一(?:篇|文章|论文)|上文|[Ii]n\s+the\s+same\s+(?:article|paper))/u.test(claim.statement.trim()))

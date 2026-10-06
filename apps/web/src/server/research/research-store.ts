@@ -75,6 +75,8 @@ export interface ResearchCheckpoint {
  notes?:string[];
  /** Optional on legacy checkpoints; exact materials remain outside claims. */
  independentMaterials?: IndependentAccountMaterial[];
+ /** Model-authored historical questions, never authoritative current read status. */
+ modelGapHistory?: Array<{step:number;text:string}>;
  coverageGaps?:string[];
  pages: StoredPage[]; claims: ResearchClaim[]; pendingClaims?: ResearchClaim[]; unknowns: string[]; stopReason: string | null;
 }
