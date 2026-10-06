@@ -373,3 +373,15 @@ test('raw HTTP website text cannot become a native HTTPS self-link, including a 
   const oldContext={...context};delete (oldContext as Partial<typeof context>).nativeField;
   assert.equal(verifiedNativeFieldContext(legacy,oldContext,null),false);
 });
+
+test('consistent native offset metadata cannot borrow a matching website string from the biography',async()=>{
+  for(const twitter of [null,'DifferentHandle']){
+    const url='https://synthetic-author.dev/',action={type:'github_profile' as const,url:'https://github.com/fixtureauthor'};
+    const h=harness({login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',name:'Synthetic Author',bio:`I quoted ${url} elsewhere.`,blog:url,twitter_username:twitter});
+    const page=(await h.execute(action)).pages[0]!;
+    assert.ok(verifiedNativeWebsiteDeclaration(page,action));
+    const declaration={...page.nativeWebsiteDeclaration!,fieldOffset:page.text.indexOf(url)};
+    const forged={...page,nativeWebsiteDeclaration:declaration,linkContexts:page.linkContexts!.map(context=>context.nativeField?.name==='blog'?{...context,nativeField:{...context.nativeField,offset:declaration.fieldOffset},locator:`原文第 ${declaration.fieldOffset+1} 字符`}:context)};
+    assert.equal(verifiedNativeWebsiteDeclaration(forged,action),null);
+  }
+});

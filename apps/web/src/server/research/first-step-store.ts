@@ -20,6 +20,7 @@ import type { DB } from '../db/index.js';
 import {
   asScopeVersion,
   type AllowedScope,
+  type CaseReportView,
   type RecordProvenance,
   type ResearchCase,
   type ScopeVersion,
@@ -47,6 +48,8 @@ import {
 import type { IdentityCandidate } from '../../shared/types.js';
 import type { FirstStepBinding, ResearchCheckpoint } from './research-store.js';
 import type { Store } from '../store.js';
+import {namedOwnerQuote} from './named-owner.js';
+import type {ResearchToolAction,ResearchToolResult} from './tool-contracts.js';
 
 export type FirstStepErrorCode =
   | 'run_not_found'
@@ -318,6 +321,7 @@ export class FirstStepStore {
     expectedScopeVersion: ScopeVersion;
     ref: FirstStepAccountRef;
     displayName: string | null;
+    personName?: string;
     researchSummary: string;
     researchValue: { state: 'unassessed' | 'high' | 'medium' | 'low'; rationale: string | null };
     accessCoverage: { state: 'unassessed' | 'inaccessible' | 'partial' | 'capped' | 'interface_complete'; earliestReadAt: string | null; note: string | null };
@@ -338,7 +342,8 @@ export class FirstStepStore {
         platform: input.ref.platform,
         handle: input.ref.handle,
         profileUrl: input.ref.profileUrl,
-        identitySupport: { state: 'proposed', evidenceIds: [], counterevidenceIds: [], policyVersion: 'first-step/v1', note: null },
+        identitySupport: { state: 'proposed', evidenceIds: [], counterevidenceIds: [], policyVersion: 'first-step/v1', note: null,
+          ...(input.personName?{ownerAnchor:{state:'unbound',personLabel:input.personName,policyVersion:'named-owner/v1',claims:[],counterevidenceIds:[]}}:{}) },
         userSelection: { state: 'unanswered', note: null, recordedAt: null },
         allowedScope: { state: 'none', note: null },
         researchValue: input.researchValue,
@@ -390,10 +395,12 @@ export class FirstStepStore {
         .get(input.caseId, input.accountId, input.source.url) as { source_id: string; revision: number } | undefined;
       const existingEvidence = this.db
         .prepare(
-          `SELECT id FROM research_case_evidence
-           WHERE case_id = ? AND account_id = ? AND quote = ? AND revoked_at IS NULL`
+          `SELECT e.id FROM research_case_evidence e
+           JOIN research_case_source_revisions r ON r.source_id=e.source_id AND r.revision=e.source_revision
+           WHERE e.case_id = ? AND e.account_id = ? AND e.role = ? AND e.quote = ? AND e.revoked_at IS NULL
+           AND r.original_url = ? AND r.content_hash = ?`
         )
-        .get(input.caseId, input.accountId, input.quote) as { id: string } | undefined;
+        .get(input.caseId, input.accountId, input.role, input.quote,input.source.url,input.source.contentHash) as { id: string } | undefined;
       if (found && existingEvidence) {
         return { evidenceId: existingEvidence.id, sourceId: found.source_id, sourceRevision: found.revision, duplicate: true };
       }
@@ -435,6 +442,33 @@ export class FirstStepStore {
         });
       }
       return { evidenceId: evidence.evidenceId, sourceId: revision.sourceId, sourceRevision: revision.sourceRevision, duplicate: false };
+    })();
+  }
+
+  /** Derive the named self-claim from the saved original receipt, not a model or title. */
+  recordNamedOwner(input:{ownerId:string;runId:string;caseId:string;accountId:string;expectedScopeVersion:ScopeVersion;personName:string;receiptKey:string;pageUrl:string}):void {
+    const link=this.link(input.runId),run=this.store.getRun(input.runId);
+    if(link?.caseId!==input.caseId||run?.ownerId!==input.ownerId)throw new FirstStepSelectionError('foreign_account','姓名归属回执不属于当前研究。');
+    const receipt=this.store.research.receipts(input.runId).find(row=>row.key===input.receiptKey&&row.kind==='tool'&&row.state==='completed');
+    const page=(receipt?.result as ResearchToolResult|undefined)?.pages?.find(page=>page.url===input.pageUrl);
+    const account=this.cases.listAccounts(input.ownerId,input.caseId).find(account=>account.accountId===input.accountId);
+    const observed=classifyFirstStepUrl(input.pageUrl),stored=account?.profileUrl?classifyFirstStepUrl(account.profileUrl):null;
+    if(!receipt||!page||!account||!observed.ok||!stored?.ok||observed.ref.accountKey!==stored.ref.accountKey)return;
+    const owner=namedOwnerQuote(page,receipt.request as ResearchToolAction,input.personName);
+    if(!owner)return;
+    this.db.transaction(()=>{
+      const ctx={ownerId:input.ownerId,caseId:input.caseId,accountId:input.accountId,expectedScopeVersion:input.expectedScopeVersion};
+      const hash=createHash('sha256').update(page.text).digest('hex');
+      const prior=this.cases.reportView(input.ownerId,input.caseId).sources.find(source=>source.accountId===input.accountId&&source.revisions.some(revision=>revision.originalUrl===page.url));
+      const matching=prior?.revisions.find(revision=>revision.contentHash===hash&&revision.originalUrl===page.url);
+      const revision=matching??this.cases.recordSourceRevision(ctx,{...(prior?{sourceId:prior.sourceId}:{}),author:page.author??null,originalUrl:page.url,title:page.title,publishedAt:null,retrievedAt:receipt.createdAt,locator:null,contentHash:hash,provenance:firstStepProvenance('账号姓名自述；未经独立验证。')});
+      const existing=this.cases.reportView(input.ownerId,input.caseId).evidence.find(evidence=>evidence.accountId===input.accountId&&evidence.sourceId===revision.sourceId&&evidence.sourceRevision===revision.sourceRevision&&evidence.role==='owner_declaration'&&evidence.quote===owner.quote&&evidence.revokedAt===null);
+      const evidence=existing??this.cases.addEvidence(ctx,{sourceId:revision.sourceId,sourceRevision:revision.sourceRevision,role:'owner_declaration',quote:owner.quote,locator:`原文第 ${owner.offset+1}–${owner.offset+owner.quote.length} 字符`,provenance:firstStepProvenance('原生姓名字段或第一人称姓名原文；仅为自述。')});
+      const previous=account.identitySupport.ownerAnchor;
+      const claims=previous?.personLabel===input.personName?[...previous.claims]:[];
+      if(!claims.some(claim=>claim.evidenceId===evidence.evidenceId))claims.push({evidenceId:evidence.evidenceId,kind:'owner_self_declaration',sourceReceiptKey:receipt.key,sourceContentHash:hash,quoteOffset:owner.offset,...(owner.nativeField?{nativeField:owner.nativeField}:{})});
+      const counterevidenceIds=previous?.personLabel===input.personName?previous.counterevidenceIds:[];
+      this.cases.updateAccountFacets(ctx,{identitySupport:{...account.identitySupport,ownerAnchor:{state:counterevidenceIds.length?'disputed':claims.some(claim=>claim.kind==='publisher_named_biography')?'independently_supported':'self_declared',personLabel:input.personName,policyVersion:'named-owner/v1',claims,counterevidenceIds}}});
     })();
   }
 
@@ -506,25 +540,40 @@ export class FirstStepStore {
 
   /** Re-derive dependency validity without rewriting stored evidence or facets. */
   private projectCurrentAccounts(ownerId: string, caseId: string, stored: readonly FirstStepAccountView[]): FirstStepAccountView[] {
-    const live = new Map(this.cases.reportView(ownerId, caseId).accounts.map(account => [account.accountId, account]));
+    const report=this.cases.reportView(ownerId,caseId);
+    const live = new Map(report.accounts.map(account => [account.accountId, account]));
     const evidence = this.accountEvidenceViews(ownerId, caseId);
     return stored.map(account => {
       const current = live.get(account.accountId);
       if (!current) return account;
       const valid = current.identityValidity === 'valid';
+      const ownerValid=current.ownerValidity!=='review'&&!['disputed','contradicted'].includes(current.identitySupport.ownerAnchor?.state??'unbound');
       const active = evidence.get(account.accountId) ?? [];
       return { ...account,
         identity: { ...account.identity, state: current.identitySupport.state,
           validity: valid ? 'valid' : 'review', reviewReason: current.identityReviewReason,
           evidence: active.filter(item => item.role === 'identity_support'),
           counterevidence: active.filter(item => item.role === 'identity_counterevidence'),
-          conflicts: [...account.identity.conflicts, ...valid ? [] : [current.identityReviewReason ?? '原归属依据已失效，请重新核对。']] },
-        defaultSuggestion: valid && current.identitySupport.state === 'supported' && active.some(item => item.role === 'identity_support' && current.identitySupport.evidenceIds.includes(item.evidenceId))
-          ? account.defaultSuggestion : { suggested: false, reason: valid ? '当前没有有效归属支撑，不默认推荐。' : '原归属依据已失效，不再默认推荐。' },
-        requiresIndependentScope: account.requiresIndependentScope || !valid || current.identitySupport.state !== 'supported',
+          conflicts: [...account.identity.conflicts, ...valid ? [] : [current.identityReviewReason ?? '原归属依据已失效，请重新核对。']],
+          ...this.ownerView(ownerId,caseId,account.accountId,report) },
+        defaultSuggestion: valid && ownerValid && current.identitySupport.state === 'supported' && active.some(item => item.role === 'identity_support' && current.identitySupport.evidenceIds.includes(item.evidenceId))
+          ? account.defaultSuggestion : { suggested: false, reason: !ownerValid?'姓名归属依据已失效或存在冲突，不再默认推荐。':valid ? '当前没有有效归属支撑，不默认推荐。' : '原归属依据已失效，不再默认推荐。' },
+        requiresIndependentScope: account.requiresIndependentScope || !valid || !ownerValid || current.identitySupport.state !== 'supported',
         userSelection: current.userSelection, allowedScope: current.allowedScope,
         researchValue: current.researchValue, accessCoverage: current.accessCoverage };
     });
+  }
+
+  ownerView(ownerId:string,caseId:string,accountId:string,snapshot?:CaseReportView):Pick<FirstStepAccountView['identity'],'ownerAnchor'|'ownerValidity'|'ownerReviewReason'|'ownerEvidence'> {
+    const report=snapshot??this.cases.reportView(ownerId,caseId),account=report.accounts.find(account=>account.accountId===accountId),anchor=account?.identitySupport.ownerAnchor;
+    if(!anchor)return {};
+    return {ownerAnchor:anchor,ownerValidity:account!.ownerValidity,ownerReviewReason:account!.ownerReviewReason,
+      ownerEvidence:[...anchor.claims.map(claim=>claim.evidenceId),...anchor.counterevidenceIds].flatMap(id=>{
+        const evidence=report.evidence.find(evidence=>evidence.evidenceId===id);
+        if(!evidence)return [];
+        const source=report.sources.find(source=>source.sourceId===evidence.sourceId)?.revisions.find(revision=>revision.sourceRevision===evidence.sourceRevision);
+        return [{evidenceId:evidence.evidenceId,quote:evidence.quote,sourceUrl:source?.originalUrl??'',sourceTitle:source?.title??evidence.sourceId,revoked:evidence.revokedAt!==null}];
+      })};
   }
 
   private selectionState(link: FirstStepLinkRecord, liveScopeVersion: number): FirstStepSelectionStateView {

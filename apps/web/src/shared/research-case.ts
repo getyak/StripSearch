@@ -194,6 +194,14 @@ export interface ScopeAccountSnapshot {
 
 export type IdentitySupportState = 'proposed' | 'supported' | 'disputed' | 'rejected' | 'revoked';
 
+export interface OwnerAnchor {
+  state: 'unbound' | 'self_declared' | 'independently_supported' | 'disputed' | 'contradicted';
+  personLabel: string;
+  policyVersion: 'named-owner/v1';
+  claims: Array<{evidenceId:string;kind:'owner_self_declaration'|'publisher_named_biography';sourceReceiptKey:string;sourceContentHash:string;quoteOffset:number;nativeField?:{platform:'github'|'x';nativeId:string;payloadField:'name'}}>;
+  counterevidenceIds: string[];
+}
+
 /** Identity-link evidence only; factual support never lands here. */
 export interface IdentitySupport {
   state: IdentitySupportState;
@@ -203,6 +211,8 @@ export interface IdentitySupport {
   counterevidenceIds: string[];
   policyVersion: string;
   note: string | null;
+  /** Named ownership is separate from a supported account-to-account link. */
+  ownerAnchor?: OwnerAnchor;
 }
 
 export type UserSelectionState = 'unanswered' | 'selected' | 'only_this_account' | 'not_selected';
@@ -304,7 +314,10 @@ export type EvidenceRole =
   | 'identity_support'
   | 'identity_counterevidence'
   | 'factual_support'
-  | 'factual_counterevidence';
+  | 'factual_counterevidence'
+  | 'owner_declaration'
+  | 'owner_support'
+  | 'owner_counterevidence';
 
 /** Role each reference slot accepts; enforced on every write and in the view. */
 export const IDENTITY_SUPPORT_ROLE: EvidenceRole = 'identity_support';
@@ -363,6 +376,8 @@ export interface CaseClaimView extends CaseClaim {
 export interface CaseAccountView extends AccountSelection {
   identityValidity: Validity;
   identityReviewReason: string | null;
+  ownerValidity?: Validity;
+  ownerReviewReason?: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -536,10 +551,25 @@ export function buildCaseReportView(input: CaseReportInput): CaseReportView {
     if (account.identitySupport.state === 'supported' && account.identitySupport.evidenceIds.length === 0) {
       reasons.push('支持状态缺少身份证据');
     }
+    const ownerReasons:string[]=[];
+    const owner=account.identitySupport.ownerAnchor;
+    if(owner){
+      for(const claim of owner.claims){
+        const problem=refProblem(claim.evidenceId,claim.kind==='publisher_named_biography'?'owner_support':'owner_declaration');
+        if(problem)ownerReasons.push(problem);
+        const evidence=known.get(claim.evidenceId);
+        if(evidence&&(evidence.caseId!==account.caseId||evidence.accountId!==account.accountId))ownerReasons.push('姓名归属依据属于其他账号或研究');
+        const revision=input.sources.find(source=>source.sourceId===evidence?.sourceId)?.revisions.find(revision=>revision.sourceRevision===evidence?.sourceRevision);
+        if(!revision||revision.contentHash!==claim.sourceContentHash||input.sources.find(source=>source.sourceId===evidence?.sourceId)?.latestRevision!==evidence?.sourceRevision)ownerReasons.push('姓名归属原文版本不匹配');
+      }
+      for(const id of owner.counterevidenceIds){const problem=refProblem(id,'owner_counterevidence');if(problem)ownerReasons.push(problem);}
+      if(owner.state!=='unbound'&&owner.claims.length===0&&owner.counterevidenceIds.length===0)ownerReasons.push('姓名归属状态缺少原文依据');
+    }
     return {
       ...account,
       identityValidity: reasons.length > 0 ? 'review' : 'valid',
-      identityReviewReason: reasons.length > 0 ? reasons.join('；') : null
+      identityReviewReason: reasons.length > 0 ? reasons.join('；') : null,
+      ...(owner?{ownerValidity:ownerReasons.length?'review' as const:'valid' as const,ownerReviewReason:ownerReasons.length?ownerReasons.join('；'):null}:{})
     };
   });
   // Coverage keeps its own scope provenance: an item written under an older

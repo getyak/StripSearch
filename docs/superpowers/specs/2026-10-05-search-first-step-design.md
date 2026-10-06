@@ -209,3 +209,25 @@ v10 身份导航合同：账号去重与文档读取去重分开。已读个人�
 新尝试使用按实际请求内容绑定的回执键，同一个实际文档不因用途、来源或供应商变化自动重试；失败及未知在途请求保留费用和缺口。身份读取仍最多 16 次，包括失败／在途预留，About 不另送额度。旧顺序键尝试维持旧策略，不加入新读取或改写旧回执。抓取结果以实际返回 URL 绑定正文与相对链接，另存请求／返回地址；About 跳到主页或其他作者不能算 About 已读，也不能凭跳转自动支持身份。候选账号及用户选择的键保持不变。
 
 原生 website 声明合同：GitHub `blog` 和 X `website` 保留供应商实际字段字面值、平台／稳定账号 ID、请求与返回账号、原文哈希，以及组装原文时记录的字段偏移；不以全文第一次同字符串出现的位置冒充 website 字段。HTTPS、HTTP、无协议和无效声明分别记录。HTTP／无协议声明不能改写为 HTTPS 引文、别名证明或自动身份支持，也不派发 HTTP 请求；独立观察的安全 HTTPS 入口可以另行读取，协议对应关系仍待核实。界面可以展示原始声明与限制，但不因此改变账号选择或授权范围。旧回执没有该字段时保持未评估。
+# Named owner anchors
+
+Account linkage and a named person's ownership are separate assertions. A native
+profile's actual `name` field may establish `self_declared` ownership when its
+literal name matches the name query; it never establishes independent support.
+An original first-person named introduction may supply the same limited claim.
+Titles, handles, matching domains, user choices and reciprocal account links do
+not establish named ownership. Native website fields remain website declarations.
+
+Persist owner declarations as `owner_declaration` evidence with the real source
+revision, content hash, receipt key and exact quote offset. Keep them out of
+identity-link and factual-support reference slots. Owner anchors are optional on
+legacy accounts; absent means unassessed. New anchors use `unbound`,
+`self_declared`, `independently_supported`, `disputed` or `contradicted` states.
+Independent support requires a separate named publisher biography and an
+explicitly verified publisher; a `.edu` host alone is insufficient. This release
+does not automatically grant independent support.
+
+Withdrawal or replacement of a referenced source forces current owner review
+and removes its recommendation, while preserving the stored declaration and
+selection history. Display the limitation beside the actual owner quote. A
+supported cross-platform link must not be labelled independent person validation.

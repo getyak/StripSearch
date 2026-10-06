@@ -17,7 +17,7 @@ const PAGE_ROOTS = new Set(['main', 'body', 'html']);
 
 /** A root's adjacent heading/description belongs to this branch; an
  * independent article elsewhere on the page does not. Keep a literal span. */
-function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment, branch: Tree.Node): {startOffset:number;endOffset:number} | null {
+export function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment, branch: Tree.Node): {startOffset:number;endOffset:number} | null {
   const location=branch.sourceCodeLocation;if(!location)return null;
   const index=root.childNodes.findIndex(node=>node===branch);let start=location.startOffset,end=location.endOffset;
   for(const direction of [-1,1]){
@@ -29,15 +29,24 @@ function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment, branch: Tr
     const pending:Tree.Node[]=[sibling];let independentLink=false;
     while(pending.length){const node=pending.pop()!;if('tagName' in node&&node.tagName==='a'){independentLink=true;break;}if('childNodes' in node)pending.push(...node.childNodes);}
     if(independentLink&&'tagName' in sibling&&sibling.tagName==='p'){
-      const describingNavigation='tagName' in branch&&branch.tagName==='nav'&&sibling.sourceCodeLocation&&
+      const describingNavigation=navigationBranch(branch)&&sibling.sourceCodeLocation&&
         /\b(?:about|bio(?:graphy)?|contact)\b|\b(?:this|these|following|below)\s+(?:links?|pages?|accounts?|profiles?)\b|(?:简介|关于页面|联系页面|这些链接|下面的链接)/i.test(nodeText(sibling));
       if(!describingNavigation)break;
     }
     if(!sibling.sourceCodeLocation)break;
     if(direction<0)start=sibling.sourceCodeLocation.startOffset;else end=sibling.sourceCodeLocation.endOffset;
+    if('tagName' in sibling&&/^h[1-6]$/.test(sibling.tagName))break;
    }
   }
   return start<location.startOffset||end>location.endOffset?{startOffset:start,endOffset:end}:null;
+}
+
+function navigationBranch(node:Tree.Node):boolean {
+  if(!('tagName' in node))return false;
+  if(node.tagName==='nav')return true;
+  if(node.tagName!=='div'||THIRD_PARTY.test(node.attrs.map(attr=>attr.value).join(' ')))return false;
+  const children=node.childNodes.filter(child=>child.nodeName!=='#comment'&&!(child.nodeName==='#text'&&'value' in child&&!child.value.trim()));
+  return children.length===1&&navigationBranch(children[0]!);
 }
 
 function nodeText(node:Tree.Node):string {

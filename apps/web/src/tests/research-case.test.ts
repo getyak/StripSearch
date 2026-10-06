@@ -113,6 +113,29 @@ function sourceDraft(overrides: Record<string, unknown> = {}) {
   };
 }
 
+test('named owner evidence stays separate from linkage and facts, with independent support and revocation checked',t=>{
+  const {db,store}=memoryStore();t.after(()=>db.close());
+  const record=newCase(store),account=store.cases.addAccount(ctx(record,'ignored'),draft()),write=ctx(record,account.accountId);
+  const source=store.cases.recordSourceRevision(write,sourceDraft());
+  const evidence=store.cases.addEvidence(write,{sourceId:source.sourceId,sourceRevision:source.sourceRevision,role:'owner_declaration',quote:'My name is Mira Kepler.',locator:'paragraph 1',provenance:PROVENANCE});
+  const owner={state:'self_declared' as const,personLabel:'Mira Kepler',policyVersion:'named-owner/v1' as const,claims:[{evidenceId:evidence.evidenceId,kind:'owner_self_declaration' as const,sourceReceiptKey:'actual-synthetic-receipt',sourceContentHash:source.contentHash,quoteOffset:0}],counterevidenceIds:[]};
+  store.cases.updateAccountFacets(write,{identitySupport:{...account.identitySupport,ownerAnchor:owner}});
+  assert.equal(store.cases.listAccounts(OWNER,record.caseId)[0]!.identitySupport.state,'proposed');
+  assert.throws(()=>store.cases.updateAccountFacets(write,{identitySupport:{...account.identitySupport,state:'supported',evidenceIds:[evidence.evidenceId]}}),EvidenceRoleError);
+  assert.throws(()=>store.cases.addClaim(write,{statement:'Mira is an engineer.',kind:'factual',supportIds:[evidence.evidenceId],counterevidenceIds:[],limitations:[]}),EvidenceRoleError);
+  assert.throws(()=>store.cases.updateAccountFacets(write,{identitySupport:{...account.identitySupport,ownerAnchor:{...owner,state:'independently_supported'}}}),ForeignReferenceError);
+  assert.throws(()=>store.cases.updateAccountFacets(write,{identitySupport:{...account.identitySupport,ownerAnchor:{...owner,claims:[{...owner.claims[0]!,kind:'publisher_named_biography'}]}}}),EvidenceRoleError);
+  assert.throws(()=>store.cases.updateAccountFacets(write,{identitySupport:{...account.identitySupport,ownerAnchor:{...owner,claims:[{...owner.claims[0]!,sourceContentHash:'b'.repeat(64)}]}}}),ForeignReferenceError);
+  assert.equal(store.cases.reportView(OWNER,record.caseId).accounts[0]!.ownerValidity,'valid');
+  store.cases.revokeEvidence(write,evidence.evidenceId);
+  const report=store.cases.reportView(OWNER,record.caseId);
+  assert.equal(report.accounts[0]!.ownerValidity,'review');
+  assert.equal(report.accounts[0]!.identityValidity,'valid');
+  assert.equal(report.accounts[0]!.identitySupport.ownerAnchor!.state,'self_declared','withdrawal preserves the stored historical facet');
+  assert.match(renderCaseMarkdown(report),/姓名归属.*需重新核对/);
+  assert.equal(JSON.parse(renderCaseJson(report)).accounts[0].ownerValidity,'review');
+});
+
 test('two candidates on the same platform stay independent unselected accounts', (t) => {
   const { db, store } = memoryStore();
   t.after(() => db.close());

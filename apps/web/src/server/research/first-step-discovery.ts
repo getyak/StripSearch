@@ -1450,6 +1450,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       expectedScopeVersion: frozenScopeVersion,
       ref,
       displayName: ref.handle,
+      ...(!legacyAttempt&&ctx.input.kind==='name_query'?{personName:ctx.input.value}:{}),
       researchSummary: RESEARCH_SUMMARIES[ref.materialUse],
       researchValue: { state: 'unassessed', rationale: null },
       accessCoverage: {
@@ -1495,6 +1496,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         else gaps.push(`身份依据未记录：${observation.targetUrl}`);
       }
     }
+    if(!legacyAttempt&&ctx.input.kind==='name_query')for(const entry of observed.filter(entry=>entry.retrieval==='read'&&resolveKey(entry.ref.accountKey)===resolveKey(ref.accountKey)&&entry.receiptKey)){
+      ctx.firstStep.recordNamedOwner({ownerId:ctx.ownerId,runId:ctx.runId,caseId,accountId,expectedScopeVersion:frozenScopeVersion,personName:ctx.input.value,receiptKey:entry.receiptKey!,pageUrl:entry.page.url});
+    }
     // Evidence is projected from the PERSISTED rows (with real source
     // revisions): a repeated discovery attempt keeps showing existing
     // evidence instead of losing the inspector or appending fake revisions.
@@ -1529,7 +1533,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         basisLabel: FIRST_STEP_BASIS_LABELS[assessment.basis],
         evidence: evidence.filter((item) => item.role === 'identity_support'),
         counterevidence: evidence.filter((item) => item.role === 'identity_counterevidence'),
-        conflicts: assessment.conflicts
+        conflicts: assessment.conflicts,
+        ...ctx.firstStep.ownerView(ctx.ownerId,caseId,accountId)
       },
       userSelection: { state: 'unanswered', note: null, recordedAt: null },
       allowedScope: { state: 'none', note: null },

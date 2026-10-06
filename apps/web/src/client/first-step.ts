@@ -87,7 +87,7 @@ const CATEGORY_LABELS: Record<FirstStepAccountCategory, string> = {
 };
 
 const STATE_LABELS: Record<string, string> = {
-  supported: '有归属依据',
+  supported: '原文支持账号关联',
   proposed: '可能相关',
   disputed: '存在冲突',
   rejected: '已被否定',
@@ -521,6 +521,10 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       })
     );
     card.appendChild(top);
+    if(account.identity.ownerAnchor){
+      const owner=account.identity.ownerAnchor;
+      card.appendChild(make('p',{className:'first-step-reason',text:account.identity.ownerValidity==='review'?'姓名归属依据已失效，请核对原文':owner.state==='self_declared'?'账号自述姓名一致 · 尚未独立验证':owner.state==='unbound'?'姓名归属尚未核对':owner.state==='independently_supported'?'姓名归属有独立支持':'姓名归属存在冲突，请核对'}));
+    }
     if(matchedTitle)card.appendChild(make('p',{className:'first-step-value',text:`匹配的主页标题：${matchedTitle}；归属未确认。`}));
     card.appendChild(make('p', { className: 'first-step-value', text: account.researchSummary }));
 
@@ -605,6 +609,18 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     });
     const evidenceList = make('div', {});
     evidenceList.appendChild(make('p', {className:'first-step-reason', text:`${account.identity.basisLabel}；${account.defaultSuggestion.reason}`}));
+    const owner=account.identity.ownerAnchor;
+    if(owner){
+      const labels={unbound:'姓名归属尚未核对',self_declared:'账号自述姓名与查询一致',independently_supported:'姓名归属有独立支持',disputed:'姓名归属存在冲突',contradicted:'姓名归属受到否认'};
+      evidenceList.appendChild(make('p',{className:'first-step-reason',text:account.identity.ownerValidity==='review'?'姓名归属依据需重新核对':labels[owner.state]}));
+      if(owner.state==='self_declared')evidenceList.appendChild(make('p',{className:'first-step-reason',text:'这是账号或页面的自述；尚未获得独立人物身份验证。'}));
+      for(const evidence of account.identity.ownerEvidence??[]){
+        const block=make('blockquote');
+        block.appendChild(make('p',{text:`${evidence.sourceTitle} · ${evidence.revoked?'已撤回的姓名自述':'姓名自述原文'}`}));
+        block.appendChild(make('p',{text:evidence.quote}));
+        evidenceList.appendChild(block);
+      }
+    }
     for (const declaration of account.nativeWebsiteDeclarations ?? []) {
       const block=make('div',{className:'first-step-evidence-item'});
       block.append(make('p',{text:'账号自述的网站字段'}),make('p',{text:declaration.rawLiteral}),

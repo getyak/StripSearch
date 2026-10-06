@@ -24,6 +24,7 @@
 import type {
   AllowedScope,
   IdentitySupportState,
+  OwnerAnchor,
   ResearchValue,
   UserSelection,
   AccessCoverage
@@ -1404,6 +1405,10 @@ export interface FirstStepAccountView {
     evidence: FirstStepEvidenceView[];
     counterevidence: FirstStepEvidenceView[];
     conflicts: string[];
+    ownerAnchor?: OwnerAnchor;
+    ownerValidity?: 'valid'|'review';
+    ownerReviewReason?: string|null;
+    ownerEvidence?: Array<{evidenceId:string;quote:string;sourceUrl:string;sourceTitle:string;revoked:boolean}>;
   };
   /** Persisted facets, verbatim. A suggestion never lands here. */
   userSelection: UserSelection;

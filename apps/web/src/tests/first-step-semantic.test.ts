@@ -1063,8 +1063,8 @@ test('legacy namespaced About input still replays its old canonical-root receipt
 });
 
 
-for(const tag of ['h2','p']) for(const heading of ['My colleague’s About page','This is not my About page']) test(`a citation link inside a local ${tag} cannot erase its ownership veto: ${heading}`,async()=>{
-  const text=`<main><${tag}>${heading} <a href="https://citation-synthetic.dev/">reference</a></${tag}><nav><a href="about">About</a></nav></main>`;
+for(const wrapper of ['','div']) for(const tag of ['h2','p']) for(const heading of ['My colleague’s About page','This is not my About page']) test(`a citation link inside a local ${tag} cannot erase its ownership veto (${wrapper||'direct'}): ${heading}`,async()=>{
+  const text=`<main><${tag}>${heading} <a href="https://citation-synthetic.dev/">reference</a></${tag}>${wrapper?'<div>':''}<nav><a href="about">About</a></nav>${wrapper?'</div>':''}</main>`;
   const h=harness({kind:'homepage_url',value:home},{read:url=>[originalPage(url,url===home?text:url===home+'about'?`<p>My GitHub: <a href="${github}">GitHub</a></p>`:'<p>Original unrelated citation.</p>')]});
   try{
     const view=await discoverFirstStep(h.ctx);
@@ -1073,8 +1073,8 @@ for(const tag of ['h2','p']) for(const heading of ['My colleague’s About page'
   }finally{h.db.close();}
 });
 
-test('a separate colleague paragraph with its own account link cannot veto an adjacent About navigation',async()=>{
-  const text='<main><p>A colleague: <a href="https://github.com/other-author">Morgan</a>.</p><nav><a href="about">About</a></nav></main>';
+for(const heading of ['', '<h2>About me</h2>']) test(`a separate colleague paragraph with its own account link cannot veto an adjacent About navigation${heading?' after its own heading':''}`,async()=>{
+  const text=`<main><p>A colleague: <a href="https://github.com/other-author">${heading?'About Morgan':'Morgan'}</a>.</p>${heading}<nav><a href="about">About</a></nav></main>`;
   const h=harness({kind:'homepage_url',value:home},{read:url=>[originalPage(url,url===home?text:'<p>I build compilers.</p>')]});
   try{await discoverFirstStep(h.ctx);assert.ok(h.reads.includes(home+'about'));}finally{h.db.close();}
 });
@@ -1092,5 +1092,33 @@ for(const model of [false,true]) test(`a forged HTTP-to-HTTPS native context can
     assert.equal(view.accounts.some(account=>account.profileUrl===home&&account.identity.state==='supported'),false);
     assert.deepEqual(view.accounts.find(account=>account.profileUrl===github)!.nativeWebsiteDeclarations,[declaration]);
     assert.equal(view.gaps.some(gap=>gap.includes('HTTPS')),true);
+  }finally{h.db.close();}
+});
+
+test('name-first discovery persists separate owner self-claims and invalidates only their current recommendation after withdrawal',async()=>{
+  const tools=createResearchTools({exaApiKey:null,tikhubApiKey:null,firecrawlApiKey:null,githubToken:null,timeoutMs:100,maxBytes:100000,
+    transport:{async fetch(){return new Response(JSON.stringify({login:'mira-k',id:123456,html_url:github,name:'Mira Kepler',bio:'Original biography.',blog:home}));}}});
+  const native=(await tools.execute({type:'github_profile',url:github},new AbortController().signal)).pages[0]!;
+  const h=harness({kind:'name_query',value:'Mira Kepler'},{search:()=>[page(github,'Mira Kepler')],read:url=>[url===github?native:originalPage(url,`<p>My name is Mira Kepler. My GitHub: <a href="${github}">GitHub</a></p>`)]});
+  try{
+    const view=await discoverFirstStep(h.ctx),account=view.accounts.find(account=>account.profileUrl===github)!;
+    assert.equal(account.identity.state,'supported');
+    assert.equal(account.identity.ownerAnchor?.state,'self_declared');
+    const claim=account.identity.ownerAnchor!.claims[0]!;
+    const report=h.store.cases.reportView(h.ownerId,view.caseId),evidence=report.evidence.find(evidence=>evidence.evidenceId===claim.evidenceId)!;
+    assert.equal(evidence.role,'owner_declaration');
+    assert.equal(account.identity.evidence.some(evidence=>evidence.evidenceId===claim.evidenceId),false);
+    assert.equal(report.claims.length,0,'ownership does not manufacture a factual claim');
+    assert.equal(account.userSelection.state,'unanswered');
+    const stored=JSON.stringify(h.firstStep.currentDiscovery(h.runId)!.view);
+    h.store.cases.revokeEvidence({ownerId:h.ownerId,caseId:view.caseId,accountId:account.accountId,expectedScopeVersion:view.selection.scopeVersion as import('../shared/research-case.js').ScopeVersion},claim.evidenceId);
+    const projected=h.firstStep.getFirstStepView(h.ownerId,h.runId)!;
+    assert.ok(projected.mode==='first_step');
+    const current=projected.view.accounts.find(item=>item.accountId===account.accountId)!;
+    assert.equal(current.identity.ownerValidity,'review');
+    assert.equal(current.defaultSuggestion.suggested,false);
+    assert.equal(current.requiresIndependentScope,true);
+    assert.equal(current.identity.ownerEvidence![0]!.revoked,true);
+    assert.equal(JSON.stringify(h.firstStep.currentDiscovery(h.runId)!.view),stored,'the historical discovery stays immutable');
   }finally{h.db.close();}
 });

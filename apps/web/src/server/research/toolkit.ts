@@ -61,6 +61,8 @@ export function verifiedNativeWebsiteDeclaration(page:ResearchPage,action:Resear
     typeof declaration.rawLiteral!=='string'||!Number.isInteger(declaration.fieldOffset)||declaration.fieldOffset<0||
     page.text.slice(declaration.fieldOffset,declaration.fieldOffset+declaration.rawLiteral.length)!==declaration.rawLiteral) return null;
   try {
+    const remainder=page.text.slice(declaration.fieldOffset+declaration.rawLiteral.length);
+    if(remainder&&!(account.platform==='github'&&/^\ntwitter_username: [A-Za-z0-9_]{1,15}$/.test(remainder)&&page.linkContexts?.some(context=>context.nativeField?.name==='twitter_username'&&context.nativeField.offset===page.text.length-remainder.length+1&&verifiedNativeFieldContext(page,context,null))))return null;
     const requestedHandle=account.platform==='github'?extractGitHubHandle(publicUrl(action.url)):xHandle(action.url);
     const returnedHandle=account.platform==='github'?extractGitHubHandle(publicUrl(page.url)):xHandle(page.url);
     if(!requestedHandle||!returnedHandle||requestedHandle.toLowerCase()!==account.handle.toLowerCase()||returnedHandle!==account.handle) return null;
@@ -102,6 +104,11 @@ function assembleProfile(prefix: Array<string | null>, website: string | null, s
   };
   const websiteOffset = append(website), suffixOffset = append(suffix);
   return {content,websiteOffset,suffixOffset};
+}
+
+function nativeName(account:ResearchAccount,requestedUrl:string,raw:unknown,original:string):ResearchPage['nativeNameDeclaration'] {
+  if(typeof raw!=='string'||!raw.trim()||raw!==text(raw,200)||original.slice(0,raw.length)!==raw)return undefined;
+  return {platform:account.platform,nativeId:account.id,requestedUrl,returnedProfileUrl:account.profileUrl,payloadField:'name',rawLiteral:raw,fieldOffset:0,sourceContentHash:createHash('sha256').update(original).digest('hex')};
 }
 function comparable(url: string): string { const parsed = new URL(publicUrl(url)); parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/'; return parsed.href; }
 function isXHost(host: string): boolean { return host === 'x.com' || host.endsWith('.x.com') || host === 'twitter.com' || host.endsWith('.twitter.com'); }
@@ -300,13 +307,14 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (type === 'social_profile') {
       const website = typeof target.data.website === 'string' && target.data.website.trim() ? target.data.website : null;
       const {content,websiteOffset} = assembleProfile([text(target.data.name, 200), retainText(target.data.desc)], website);
+      const nameDeclaration=nativeName(target.account,url,target.data.name,content);
       const declaration = website ? nativeWebsiteDeclaration(target.account,url,'website',website,content,websiteOffset) : null;
       const context = declaration?.publicHttpsUrl ? nativeProfileLinkContext(content, website!, websiteOffset) : null;
       if (context) {context.url = declaration!.publicHttpsUrl!;context.nativeField={name:'website',offset:websiteOffset,nativeId:target.account.id};}
       // The requested-vs-returned handle and the stable native id are already
       // verified above: this proof is the only attestation of a case alias.
       const aliasProof: ResearchAliasProof = { kind: 'native_profile', platform: 'x', nativeId: target.account.id, requestedUrl: url, returnedUrl: target.account.profileUrl };
-      return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [declaration?.publicHttpsUrl]), linkContexts: context ? [context] : [], ...(declaration ? {nativeWebsiteDeclaration:declaration} : {}), aliasProof, limitations: ['账号资料是账号自述；不自动证明跨平台身份。', ...(declaration && declaration.protocol !== 'https' ? ['网站字段为原始声明；未取得可派发的安全 HTTPS 自链，不推定协议等价或账号归属。'] : [])] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
+      return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [declaration?.publicHttpsUrl]), linkContexts: context ? [context] : [], ...(declaration ? {nativeWebsiteDeclaration:declaration} : {}), ...(nameDeclaration?{nativeNameDeclaration:nameDeclaration}:{}), aliasProof, limitations: ['账号资料是账号自述；不自动证明跨平台身份。', ...(declaration && declaration.protocol !== 'https' ? ['网站字段为原始声明；未取得可派发的安全 HTTPS 自链，不推定协议等价或账号归属。'] : [])] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
     }
     if (!Array.isArray(data.timeline)) fail('公开帖子返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
@@ -340,6 +348,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const account: ResearchAccount = { platform: 'github', handle: login, id, profileUrl: returnedUrl };
     const website = typeof body.blog === 'string' && body.blog.trim() ? body.blog : null;
     const {content,websiteOffset,suffixOffset} = assembleProfile([text(body.name, 200), retainText(body.bio), text(body.company, 200)], website, twitterUsername ? `twitter_username: ${twitterUsername}` : null);
+    const nameDeclaration=nativeName(account,raw,body.name,content);
     // The requested-vs-returned handle and the stable native id are already
     // verified above: this proof is the only attestation of a case alias.
     const aliasProof: ResearchAliasProof = { kind: 'native_profile', platform: 'github', nativeId: id, requestedUrl: raw, returnedUrl };
@@ -348,7 +357,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (context) {context.url = declaration!.publicHttpsUrl!;context.nativeField={name:'blog',offset:websiteOffset,nativeId:id};}
     const twitterContext=twitterUsername?nativeUsernameLinkContext(content,twitterUsername,`https://x.com/${twitterUsername}`,suffixOffset):null;
     if(twitterContext)twitterContext.nativeField={name:'twitter_username',offset:suffixOffset,nativeId:id};
-    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [declaration?.publicHttpsUrl, twitterUsername ? `https://x.com/${twitterUsername}` : null]), linkContexts: [context,twitterContext].filter((item): item is NonNullable<typeof item> => item !== null), ...(declaration ? {nativeWebsiteDeclaration:declaration} : {}), aliasProof, limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。', ...(declaration && declaration.protocol !== 'https' ? ['网站字段为原始声明；未取得可派发的安全 HTTPS 自链，不推定协议等价或账号归属。'] : [])] }], bytes, 0);
+    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [declaration?.publicHttpsUrl, twitterUsername ? `https://x.com/${twitterUsername}` : null]), linkContexts: [context,twitterContext].filter((item): item is NonNullable<typeof item> => item !== null), ...(declaration ? {nativeWebsiteDeclaration:declaration} : {}), ...(nameDeclaration?{nativeNameDeclaration:nameDeclaration}:{}), aliasProof, limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。', ...(declaration && declaration.protocol !== 'https' ? ['网站字段为原始声明；未取得可派发的安全 HTTPS 自链，不推定协议等价或账号归属。'] : [])] }], bytes, 0);
   }
   return { async execute(action, signal) {
     signal.throwIfAborted();

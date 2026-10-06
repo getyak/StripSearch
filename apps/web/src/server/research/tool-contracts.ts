@@ -1,5 +1,6 @@
 import type { HttpTransport } from '../adapters/types.js';
 import type { NativeWebsiteDeclaration } from '../../shared/native-website.js';
+import type { NativeNameDeclaration } from './named-owner.js';
 export type ResearchToolAction =
  | { type: 'search'; query: string; numResults?: number; provider?: 'bluesky'; includeDomains?: readonly string[] }
  | { type: 'read' | 'firecrawl' | 'social_profile' | 'social_posts' | 'github_profile'; url: string };
@@ -50,6 +51,7 @@ export interface ResearchPage {
  documentBinding?: { requestedUrl: string; returnedUrl: string };
  /** Original native declaration; neither a verified website nor transport permission. */
  nativeWebsiteDeclaration?: NativeWebsiteDeclaration;
+ nativeNameDeclaration?: NativeNameDeclaration;
 }
 export interface ResearchToolResult {
  pages: ResearchPage[]; requests: number; bytes: number;
