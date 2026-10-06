@@ -1,4 +1,5 @@
 import { researchDepthCoverage, claimEvidenceIssue } from '../shared/research-depth.js';
+import { classifyFirstStepUrl } from '../shared/first-step-discovery.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
@@ -647,6 +648,13 @@ export class Store {
       .filter(({ claim }) => !policyRejected.includes(claim)&&sources.some(source =>
         source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote)));
     if (anchorRevoked) sources.forEach(source => excluded.add(source.sourceKey));
+    const binding=checkpoint?.firstStep;
+    const currentCase=binding?this.cases.getCase(run.ownerId,binding.caseId):null;
+    const independentAccounts=binding&&currentCase?.scopeVersion===binding.scopeVersion?new Set(this.cases.listAccounts(run.ownerId,binding.caseId).filter(account=>binding.independentAccountIds.includes(account.accountId)&&account.userSelection.state==='only_this_account'&&account.allowedScope.state!=='none').flatMap(account=>{const ref=classifyFirstStepUrl(account.profileUrl);return ref.ok?[ref.ref.accountKey]:[];})):new Set<string>();
+    const accountMaterials=(checkpoint?.independentMaterials??[]).filter(material=>{
+      const page=checkpoint?.pages.find(page=>page.sourceKey===material.sourceKey),account=classifyFirstStepUrl(material.sourceUrl);
+      return !anchorRevoked&&account.ok&&independentAccounts.has(account.ref.accountKey)&&page?.url===material.sourceUrl&&(page.retrieval==='read'||page.retrieval==='profile')&&sources.some(source=>source.sourceKey===material.sourceKey&&!source.excluded)&&Number.isSafeInteger(material.quoteOffset)&&material.quoteOffset>=0&&material.quote.length>=3&&page.text.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(page.text).digest('hex')===material.sourceContentHash;
+    });
     const observations = this.listObservations(run.id).filter(observation=>!isPolicyRejected(observation.statement,observation.sourceKeys)).map(observation=>({...observation,sourceKeys:projectedKeys(observation.statement,observation.sourceKeys)})).map(observation => ({ ...observation,
       validity: identityChanged ? 'review' as const : validityFor(observation.sourceKeys, excluded),
       reviewReason: identityChanged ? identityReason : reviewReason(observation.sourceKeys, excluded)
@@ -696,7 +704,7 @@ export class Store {
       usage: run.usage,
       reviewCount: countReviewItems(observations, answer),
       ...(checkpoint ? {
-        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns, coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
+        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns, ...(checkpoint.independentMaterials?{accountMaterials}:{}), coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
         ...(checkpoint.anchorUrl && identity.status === 'resolved' ? {
           personObject: {
             schemaVersion: 'stripsearch/person/v1' as const,

@@ -1,4 +1,5 @@
 import { isPublicHttpsUrl } from './validation.js';
+import { readableSourceText } from './source-text.js';
 import type {
   CanonicalAnswerSection,
   CanonicalObservation,
@@ -147,6 +148,10 @@ export function renderMarkdown(view: CanonicalView): string {
     lines.push('');
   }
 
+  if (view.research?.accountMaterials?.length) {
+    lines.push('## 独立账号的原文片段', '', '以下是所选账号的原文材料，未独立核实内容，也未并入人物结论。', '');
+    for (const material of view.research.accountMaterials) lines.push(`> ${escapeInline(readableSourceText(material.quote))}${cite([material.sourceKey])}`, '');
+  }
   if (view.observations.length > 0) {
     lines.push('## 观察项');
     lines.push('');

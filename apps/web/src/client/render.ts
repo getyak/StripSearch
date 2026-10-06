@@ -189,6 +189,15 @@ export function renderReport(
     container.appendChild(sectionEl);
   });
 
+  if (view.research?.accountMaterials?.length) {
+    const section=make('section',{className:'report-section report-account-materials'});
+    section.append(make('h3',{text:'独立账号的原文片段'}),make('p',{className:'limit-note',text:'以下是所选账号的原文材料，未独立核实内容，也未并入人物结论。'}));
+    for(const [index,material] of view.research.accountMaterials.entries()){
+      const quote=make('blockquote',{text:readableSourceText(material.quote)});
+      quote.appendChild(citationButton(material.sourceKey,`account-material-${index}`,material.sourceUrl,handlers));section.appendChild(quote);
+    }
+    container.appendChild(section);
+  }
   if (view.observations.length > 0) {
     const details = make('details', { className: 'report-observations' });
     details.open = observationsOpen;

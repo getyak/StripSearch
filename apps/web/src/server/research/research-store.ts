@@ -1,6 +1,6 @@
 import type { ResearchFacet, ClaimAuthorialBasis } from '../../shared/research-depth.js';
 import type { DB } from '../db/index.js';
-import type { IdentityCandidate, IdentityDraft, ResearchBudget, ResearchBudgetLimits } from '../../shared/types.js';
+import type { IdentityCandidate, IdentityDraft, ResearchBudget, ResearchBudgetLimits, IndependentAccountMaterial } from '../../shared/types.js';
 import type { ResearchPage, ResearchToolAction } from './tool-contracts.js';
 
 /**
@@ -73,6 +73,8 @@ export interface ResearchCheckpoint {
  /** Present only for first-step runs; frozen at selection submission. */
  firstStep?: FirstStepBinding;
  notes?:string[];
+ /** Optional on legacy checkpoints; exact materials remain outside claims. */
+ independentMaterials?: IndependentAccountMaterial[];
  coverageGaps?:string[];
  pages: StoredPage[]; claims: ResearchClaim[]; pendingClaims?: ResearchClaim[]; unknowns: string[]; stopReason: string | null;
 }

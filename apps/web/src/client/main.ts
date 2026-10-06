@@ -760,6 +760,7 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       if (next) state.run.state = next;
       renderHeader();
       renderActivityPanel();
+      renderReportView();
       renderHistoryRail();
       if (next && isTerminalState(next)) scheduleSnapshotRefresh(runId, epoch);
       break;

@@ -131,6 +131,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   let clusterId: string | null = null;
   let saving = false;
   let errorText = '';
+  let selectionNotice = '';
   let status = 'loading';
   let submitKey: string | null = null;
   let submitIntent: string | null = null;
@@ -202,7 +203,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const others = make('details', {className:'first-step-other-people', attrs:{'data-detail-key':'other-people'}});
     others.appendChild(make('summary', {text:`其它人物或主页线索（${String(otherCount)}）`}));
     clusterBox.dataset.single = recommendedOnly || view.clusters.length === 1 ? 'true' : 'false';
-    clusterBox.dataset.compact = recommendedOnly ? 'true' : 'false';
+    clusterBox.dataset.compact = clusterId !== null ? 'true' : 'false';
     if (recommendedOnly) clusterBox.appendChild(make('p',{className:'muted',text:'建议目标 · 可展开其它候选更换；点击继续才会提交。'}));
     for (const cluster of view.clusters) {
       const destination = prominentIds.has(cluster.clusterId) ? clusterBox : others;
@@ -215,9 +216,11 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
           click: () => {
             clusterId = cluster.clusterId;
             // Changing the person cannot grant reading a different person's accounts.
+            let removed = 0;
             for (const [id, decision] of draft) {
-              if (decision.selection === 'selected' && !cluster.accountIds.includes(id)) decision.selection = 'not_selected';
+              if (decision.selection === 'selected' && !cluster.accountIds.includes(id)) { decision.selection = 'not_selected'; removed++; }
             }
+            selectionNotice = removed > 0 ? `已更换目标，移除 ${String(removed)} 个不属于此分组的账号选择。独立账号范围仍保留。` : '';
             render();
           }
         }
@@ -239,7 +242,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       const excerpt = previewLead?.quote ?? cluster.anchorBasis?.quote;
       const excerptSource = previewLead?.sourceUrl ?? cluster.anchorBasis?.sourceUrl;
       if (excerpt) {
-        const previewLength = compact ? 80 : 180;
+        const previewLength = chosen && !compact ? 120 : 80;
         button.appendChild(make('small', { className: 'first-step-lead', text: `原文摘录：“${excerptText(excerpt).slice(0,previewLength)}${excerptText(excerpt).length>previewLength?'…':''}”` }));
         if (excerptSource && (!compact || shortUrl(excerptSource) !== shortUrl(cluster.anchorUrl))) button.appendChild(make('small', { className: 'first-step-lead-source', text: `来源：${shortUrl(excerptSource)}` }));
       }
@@ -304,6 +307,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         ? chosen.accountIds.includes(account.accountId)
         : account.identity.state === 'supported' || account.defaultSuggestion.suggested;
     const mainAccounts = view.accounts.filter(inMain);
+    const otherLinkedAccounts = chosen === null ? [] : view.accounts.filter(account => !inMain(account) && account.identity.state === 'supported' && !account.requiresIndependentScope);
+    const otherLinkedIds = new Set(otherLinkedAccounts.map(account => account.accountId));
     const namedLabels = new Map<string,string>();
     if (chosen && view.input.kind === 'name_query') {
       for (const cluster of matchingClusters) {
@@ -318,12 +323,17 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const linkedLeads=view.accounts.filter(account=>!inMain(account)&&!namedIds.has(account.accountId)&&account.requiresIndependentScope&&account.identity.state!=='rejected'&&!account.identity.nativeIdConflict&&account.identity.counterevidence.length===0&&
       chosen!==null&&(account.profileLinkSources??[]).some(source=>chosen.accountIds.includes(source.accountId)));
     const linkedLeadIds=new Set(linkedLeads.map(account=>account.accountId));
-    const secondaryAccounts = view.accounts.filter((account) => !inMain(account)&&!namedIds.has(account.accountId)&&!linkedLeadIds.has(account.accountId));
+    const secondaryAccounts = view.accounts.filter((account) => !inMain(account)&&!namedIds.has(account.accountId)&&!linkedLeadIds.has(account.accountId)&&!otherLinkedIds.has(account.accountId));
     const cardsBox = make('section', { className: 'first-step-accounts', attrs: { 'aria-label': '公开账号候选' } });
     if (mainAccounts.length === 0 && view.clusters.length > 0) {
       cardsBox.appendChild(make('p', { className: 'muted', text: '请先确认目标人物；这个人的公开账号会显示在这里。' }));
     }
     cardsBox.appendChild(renderGroups(mainAccounts));
+    if (otherLinkedAccounts.length > 0) {
+      const separate = make('section', {className:'first-step-other-linked',attrs:{'aria-label':'其它分组的账号，单独研究'}});
+      separate.append(make('h3',{text:`其它分组的账号 · 单独研究（${String(otherLinkedAccounts.length)}）`}),make('p',{className:'muted',text:'这些账号已有原文链接依据，但尚未关联到所选人物分组。默认不选；勾选后仅研究该账号，不并入此人的身份结论。'}),renderGroups(otherLinkedAccounts));
+      cardsBox.appendChild(separate);
+    }
     if(linkedLeads.length>0){
       const linked=make('section',{className:'first-step-profile-links first-step-name-matches',attrs:{'aria-label':'该主页发现的账号，归属待核对'}});
       linked.append(make('h3',{text:`该主页发现的账号 · 归属待核对（${String(linkedLeads.length)}）`}),make('p',{className:'muted',text:'这些账号入口出现在已读主页的外链中，链接本身不能证明归属。默认不选；勾选后仅研究该账号，不并入人物身份结论。'}),renderGroups(linkedLeads));
@@ -337,10 +347,10 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     if (secondaryAccounts.length > 0 || (view.relatedLeads ?? []).length > 0) {
       const secondary = make('details', { className: 'first-step-related', attrs: { 'data-detail-key': 'related-leads' } });
       secondary.appendChild(
-        make('summary', { text: `其它线索（未确认 / 不并入人物结论）（${String(secondaryAccounts.length + (view.relatedLeads ?? []).length)}）` })
+        make('summary', { text: `其它账号线索（${String(secondaryAccounts.length)}） · 材料链接（${String((view.relatedLeads ?? []).length)}）` })
       );
       secondary.appendChild(
-        make('p', { className: 'muted', text: '保留的真实线索；默认不勾选、不并入人物结论，可单独以独立账号范围研究。' })
+        make('p', { className: 'muted', text: '未确认 / 不并入人物结论。保留的真实线索默认不勾选，可单独以独立账号范围研究。' })
       );
       secondary.appendChild(renderGroups(secondaryAccounts));
       if ((view.relatedLeads ?? []).length > 0) {
@@ -420,6 +430,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       })
     );
     if (errorText) footer.appendChild(make('p', { className: 'error-text', text: errorText, attrs: { role: 'alert' } }));
+    if (selectionNotice) footer.appendChild(make('p', { className: 'muted first-step-selection-notice', text: selectionNotice, attrs: { role: 'status' } }));
     const primary = make('button', {
       className: 'button primary first-step-primary',
       text: count > 0 ? `确认目标，研究已选 ${String(count)} 个账号` : '确认目标，研究已选账号',
@@ -473,6 +484,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
 
   const renderCard = (account: FirstStepAccountView, matchedTitle?:string): HTMLElement => {
     const decision = decisionFor(account);
+    const requiresIndependentScope = account.requiresIndependentScope || clusterId !== null && !view?.clusters.find(cluster => cluster.clusterId === clusterId)?.accountIds.includes(account.accountId);
     const checked = decision.selection === 'selected' || decision.selection === 'only_this_account';
     const card = make('div', {
       className: `first-step-card${checked ? ' checked' : ''}${decision.excluded ? ' excluded' : ''}`
@@ -480,7 +492,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const applyChecked = (next: boolean): void => {
       if (decision.excluded) return;
       if (next) {
-        decision.selection = account.requiresIndependentScope ? 'only_this_account' : 'selected';
+        decision.selection = requiresIndependentScope ? 'only_this_account' : 'selected';
       } else {
         decision.selection = 'not_selected';
       }
@@ -528,7 +540,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     if(matchedTitle)card.appendChild(make('p',{className:'first-step-value',text:`匹配的主页标题：${matchedTitle}；归属未确认。`}));
     card.appendChild(make('p', { className: 'first-step-value', text: account.researchSummary }));
 
-    card.appendChild(make('p', { className: 'first-step-boundary', text: `当前边界：${account.accessLabel}${account.requiresIndependentScope ? '；需要独立账号范围' : ''}` }));
+    card.appendChild(make('p', { className: 'first-step-boundary', text: `当前边界：${account.accessLabel}${requiresIndependentScope ? '；需要独立账号范围' : ''}` }));
 
     const actions = make('div', { className: 'first-step-row-actions' });
     if (!decision.excluded && !view?.selection.submitted) {
@@ -547,7 +559,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
           }
         })
       );
-      if (account.requiresIndependentScope && !decision.excluded) {
+      if (requiresIndependentScope && !decision.excluded) {
         actions.appendChild(
           make('button', {
             className: 'text-button',
@@ -728,7 +740,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         const belongs = next.clusters.find(c => c.clusterId === clusterId)?.accountIds.includes(account.accountId) ?? false;
         const suggested = initialSnapshot && belongs && account.defaultSuggestion.suggested && account.identity.state === 'supported' && !account.requiresIndependentScope;
         const persisted = next.selection.submitted && next.selection.selectedAccountIds.includes(account.accountId);
-        draft.set(account.accountId, { selection: persisted ? (account.requiresIndependentScope ? 'only_this_account' : 'selected') : suggested ? 'selected' : 'unanswered', excluded: next.selection.excludedAccountIds.includes(account.accountId) });
+        draft.set(account.accountId, { selection: persisted ? (account.userSelection.state === 'only_this_account' ? 'only_this_account' : 'selected') : suggested ? 'selected' : 'unanswered', excluded: next.selection.excludedAccountIds.includes(account.accountId) });
       }
     }
     status = 'ready';

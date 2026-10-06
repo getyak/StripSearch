@@ -238,7 +238,11 @@ export interface ResearchBudget {
 }
 export interface ResearchMetadata {
  phase: string; steps: number; budget: ResearchBudget; stopReason: string | null; unresolved: string[]; coverage?: ResearchFacetCoverage[];
+ /** Exact original excerpts from an explicitly independent account scope.
+  * These are materials, never verified claims or named-person conclusions. */
+ accountMaterials?: IndependentAccountMaterial[];
 }
+export interface IndependentAccountMaterial { sourceKey:string; sourceUrl:string; quote:string; quoteOffset:number; sourceContentHash:string }
 export interface PersonObject {
  schemaVersion: 'stripsearch/person/v1';
  person: { id: string; displayName: string; profileUrl: string };

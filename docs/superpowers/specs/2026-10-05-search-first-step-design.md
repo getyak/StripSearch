@@ -235,3 +235,25 @@ Withdrawal or replacement of a referenced source forces current owner review
 and removes its recommendation, while preserving the stored declaration and
 selection history. Display the limitation beside the actual owner quote. A
 supported cross-platform link must not be labelled independent person validation.
+
+## Independent account materials and source citations
+
+Accounts supported in another person cluster remain visible as separate,
+unchecked account scopes. Choosing them cannot merge the clusters. Changing
+the target removes person-bound selections outside the new cluster and reports
+the removal; explicitly independent scopes remain selected.
+
+Fresh research checkpoints retain proposed exact excerpts from independently
+selected accounts in `independentMaterials`, with source key, original URL,
+content hash and literal offset. These excerpts are materials, not verified
+claims, coverage or Person Object evidence. Canonical JSON, Markdown, HTML and
+the Web report display them separately with the same caveat and source access.
+Current scope, source withdrawal/replacement and original quote bindings are
+checked before display. Legacy checkpoints without this field keep their old
+records. Raw excerpts no longer become limitations on new runs.
+
+A leading `S<n>` or `[S<n>]` citation to the claim's actual source may label a
+statement without appearing in the quote. Other source IDs, inline IDs and
+new English names remain subject to literal-term checks. Approximate time
+statements retain their approximation; lexical eligibility is not semantic
+support. Do not replay a historical failed run to manufacture new acceptance.

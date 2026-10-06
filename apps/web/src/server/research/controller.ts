@@ -114,6 +114,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const checkpoint:ResearchCheckpoint=persisted??{phase:'identity',steps:0,startedAt:launched,elapsedMs:0,anchorUrl:normalizeResearchUrl(run.seedUrl),identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null};
  checkpoint.limits??={...limits};
  if(options.firstStepScope)checkpoint.quoteRolePolicy??='preserve_actor/v1';
+ if(options.firstStepScope&&checkpoint.steps===0&&checkpoint.claims.length===0&&!checkpoint.pendingClaims)checkpoint.independentMaterials??=[];
  // Historical checkpoints did not persist retrieval provenance. Recover it only
  // from a completed, matching action receipt; missing proof stays unread.
  for(const page of checkpoint.pages){
@@ -384,7 +385,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      const page=activePages.find(p=>p.sourceKey===claim.sourceKey);
      const key=page?(options.firstStepScope?.accountKeyOf(page.url)??null):null;
      if(key&&options.firstStepScope?.independentAccountKeys.has(key)){
-      checkpoint.notes=[...new Set([...(checkpoint.notes??[]),`独立账号材料（未并入人物结论）：${claim.quote}`])];
+      if(checkpoint.independentMaterials){
+       const material={sourceKey:claim.sourceKey,sourceUrl:page!.url,quote:claim.quote,quoteOffset:page!.text.indexOf(claim.quote),sourceContentHash:createHash('sha256').update(page!.text).digest('hex')};
+       if(!checkpoint.independentMaterials.some(item=>item.sourceKey===material.sourceKey&&item.quote===material.quote&&item.sourceContentHash===material.sourceContentHash))checkpoint.independentMaterials.push(material);
+      }else checkpoint.notes=[...new Set([...(checkpoint.notes??[]),`独立账号材料（未并入人物结论）：${claim.quote}`])];
       return false;
      }
      return true;

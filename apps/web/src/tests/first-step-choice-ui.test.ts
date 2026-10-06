@@ -159,12 +159,42 @@ test('same-name candidates stay clearly selectable: choosing a cluster moves its
     assert.equal(mainCards.length, 1, "the chosen candidate's accounts are the main choices");
     const secondary = container.querySelector<HTMLDetailsElement>('details.first-step-related')!;
     assert.equal(secondary.open, false);
-    assert.equal(secondary.querySelectorAll('.first-step-card').length, 2, 'the other same-name lead and the colleague stay available, collapsed');
+    assert.equal(secondary.querySelectorAll('.first-step-card').length, 1, 'the unconfirmed colleague stays available, collapsed');
+    const separate = container.querySelector('.first-step-other-linked')!;
+    assert.equal(separate.querySelectorAll('.first-step-card').length, 1, 'the other supported group stays visible with independent scope');
+    assert.equal(separate.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked, false);
+    assert.match(separate.textContent ?? '', /不并入此人的身份结论/);
     assert.match(secondary.textContent ?? '', /未确认 \/ 不并入人物结论/);
   } finally {
     fixture.db.close();
     env.document.body.replaceChildren();
   }
+});
+
+test('an explicitly checked account from another supported group reaches the real store only as an independent scope',async()=>{
+  const fixture=seedFirstStep({accounts:[
+    {url:'https://github.com/linzhou',supportedBy:{sourceUrl:'https://lantern.dev/about'}},
+    {url:'https://x.com/linzhou',supportedBy:{sourceUrl:'https://kepler.dev/about'}}
+  ]});
+  fixture.republish(view=>({...view,clusters:[cluster('primary','林舟',view.accounts[0]!.accountId,[view.accounts[0]!.accountId]),cluster('other','林舟',view.accounts[1]!.accountId,[view.accounts[1]!.accountId])]}));
+  const container=env.document.createElement('div');env.document.body.appendChild(container);
+  const api=panelApi(fixture);
+  api.getFirstStepDiscovery=async()=>({...await panelApi(fixture).getFirstStepDiscovery(fixture.run.id),runRevision:fixture.store.getRun(fixture.run.id)!.revision});
+  api.submitFirstStepSelection=async(_id,payload)=>({selection:fixture.firstStep.applyFirstStepSelection(fixture.run.ownerId,fixture.run.id,payload,'actual-independent-ui')});
+  const panel=createFirstStepPanel({api,container,runId:fixture.run.id});
+  try{
+    await panel.refresh();container.querySelector<HTMLButtonElement>('.first-step-cluster')!.click();
+    const separate=container.querySelector('.first-step-other-linked')!;
+    assert.match(separate.querySelector('h3')!.textContent??'',/单独研究/);
+    const checkbox=separate.querySelector<HTMLInputElement>('input[type="checkbox"]')!;assert.equal(checkbox.checked,false);
+    checkbox.click();assert.equal(panel.selectedCount(),1);assert.equal(fixture.firstStep.selectionBinding(fixture.run.id),null);
+    container.querySelector<HTMLButtonElement>('.first-step-primary')!.click();await new Promise(resolve=>setTimeout(resolve,0));
+    const binding=fixture.firstStep.selectionBinding(fixture.run.id)!;assert.ok(binding);
+    assert.deepEqual(binding.independentAccountIds,[fixture.accountIdFor(1)]);
+    assert.equal(fixture.store.cases.listAccounts(fixture.run.ownerId,fixture.caseId).find(a=>a.accountId===fixture.accountIdFor(0))!.allowedScope.state,'none');
+    await panel.refresh();assert.equal(container.querySelector<HTMLInputElement>('.first-step-other-linked input[type="checkbox"]')!.checked,true);
+    assert.match(container.querySelector('.first-step-other-linked')!.textContent??'',/范围已提交|需要独立账号范围/);
+  }finally{panel.destroy();fixture.close();container.remove();}
 });
 
 function cluster(clusterId: string, displayName: string, anchorAccountId: string, accountIds: string[]): FirstStepPersonClusterView {

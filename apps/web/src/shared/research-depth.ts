@@ -65,12 +65,13 @@ export function claimAuthorialIssue(claim:{statement:string;quote:string;kind?:s
     const number=digits[match[1]!]??match[1]!;
     if(new RegExp(`(?:${number}年(?:多|以上)|(?:超过|至少)${number}年)`,'u').test(claim.statement))return '原文约数不能扩写成超过、至少或多年限定；请保留约数的范围。';
   }
+  if(/(?:~\s*|\b(?:about|approximately)\s+)(?:(?:a|one|1)\s+)?week\b/iu.test(claim.quote)&&/[一1](?:周|星期)前/u.test(claim.statement)&&!/(?:约|大概|大致|差不多|左右|前后).{0,8}[一1](?:周|星期)|[一1](?:周|星期).{0,5}(?:左右|前后)/u.test(claim.statement))return '原文约一周不能改成精确一周前；请保留约数的限定。';
   if(/\bbe\s+like\b/iu.test(claim.quote)&&/成为/.test(claim.statement))return '原文的像某人一样不能扩写为成为该人；请保留比较与愿望的限定。';
   return null;
 }
 
 /** Conservative mixed-language lexical eligibility, never semantic support. */
-export function claimLiteralTermIssue(claim:{statement:string;quote:string;facet?:ResearchFacet;sourceReadKind?:string;sourceReadUrl?:string;quoteLexicalPolicy?:'literal_terms/v1'}):string|null {
+export function claimLiteralTermIssue(claim:{statement:string;quote:string;sourceKey?:string;facet?:ResearchFacet;sourceReadKind?:string;sourceReadUrl?:string;quoteLexicalPolicy?:'literal_terms/v1'}):string|null {
   if(!claim.quoteLexicalPolicy)return null;
   const quote=claim.quote.replace(/<[^>]*>/g,' ');
   if(/^(?:同一(?:帖|条帖文)|[Ii]n\s+the\s+same\s+post)/u.test(claim.statement.trim()))return '每条陈述必须独立指明来源与范围；不能用同一帖跨条目代指，分组与导出不会维持该代指。';
@@ -78,6 +79,9 @@ export function claimLiteralTermIssue(claim:{statement:string;quote:string;facet
   if(/\bfirst\s+(?:\w+\s+){0,4}(?:course|class)\b/iu.test(quote)&&/首位.{0,16}课程/u.test(claim.statement))return '原文首门课程不能改写为首位课程设计者；请保留课程与人物的不同限定。';
   if(!/\p{Script=Han}/u.test(claim.statement))return null;
   let statement=claim.statement;
+  // A bound, leading source citation labels the claim; it is not a named fact
+  // from the quotation. Other source IDs and terms remain subject to the guard.
+  if(claim.sourceKey&&/^S[1-9]\d*$/.test(claim.sourceKey))statement=statement.trimStart().replace(new RegExp(`^(?:\\[${claim.sourceKey}\\]|${claim.sourceKey})(?=\\s|[：:，,]|帖|来源|页面|中)`),' ');
   if(claim.sourceReadUrl){try{
    const source=new URL(claim.sourceReadUrl);
    statement=statement.replace(/https?:\/\/[^\s，。；：）)\]「」『』“”‘’"'`<>]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s，。；：）)\]「」『』“”‘’"'`<>]*)?/giu,token=>{
@@ -101,7 +105,7 @@ export function claimPreferenceRoleIssue(claim:{statement:string;quote:string;qu
  return humanPreference&&!machinePreference.test(quote)&&machinePreference.test(claim.statement)?'原文偏好主体是人类，不能将面向或来自机器的输入/输出改成机器自身偏好；请保留判断主体与方向。':null;
 }
 
-export function claimEvidenceIssue(claim: { statement: string; quote: string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis;sourceReadKind?:string;sourceReadUrl?:string;quoteLexicalPolicy?:'literal_terms/v1';quoteRolePolicy?:'preserve_actor/v1' }, policy?: 'exact_quote/v1'): string | null {
+export function claimEvidenceIssue(claim: { statement: string; quote: string;sourceKey?:string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis;sourceReadKind?:string;sourceReadUrl?:string;quoteLexicalPolicy?:'literal_terms/v1';quoteRolePolicy?:'preserve_actor/v1' }, policy?: 'exact_quote/v1'): string | null {
   return claimScopeIssue(claim) ?? (policy === 'exact_quote/v1' ? claimQuotedYearIssue(claim) ?? claimAuthorialIssue(claim) ?? claimLiteralTermIssue(claim) ?? claimPreferenceRoleIssue(claim) : null);
 }
 
