@@ -141,7 +141,7 @@ export function renderReport(
   if (view.identity.status !== 'resolved' && view.identity.note && !['queued','researching'].includes(view.state)) {
     header.appendChild(make('p', { className: 'identity-note', text: view.identity.note }));
   } else if (view.identity.profileUrl) {
-    header.appendChild(make('p', { className: 'identity-note', text: '基于该账号及本次读取的公开资料。' }));
+    header.appendChild(make('p', { className: 'identity-note', text: '基于本次选定范围内已读取的公开资料。' }));
   }
   container.appendChild(header);
   if (view.answer.length === 0 && (view.state === 'queued' || view.state === 'researching')) {

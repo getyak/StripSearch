@@ -48,7 +48,7 @@ function draft(page:StoredPage,anchor:string|null,scope?:ResearchOptions['firstS
  const independent=!!(key&&scope?.independentAccountKeys.has(key));
  const selected=!!(key&&scope?.selectedAccountKeys?.has(key));
  return {key:page.sourceKey,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,excerptLocator:page.retrieval==='search'?'搜索发现材料，尚未回读原文':'公开页面文本',
- identityLabel:independent?'独立账号范围：尚未证明与其他账号同人':page.url===anchor?'所选公开主页':selected?'已选人物账号范围；归属依据见第一步':'来源归属未独立验证',identityConfirmed:page.url===anchor&&!independent,fetchStatus:page.text?'ok':'inaccessible',
+ identityLabel:independent?'独立账号范围：尚未证明与其他账号同人':page.url===anchor?(scope?'所选公开主页；归属依据见第一步':'所选公开主页'):selected?'已选人物账号范围；归属依据见第一步':'来源归属未独立验证',identityConfirmed:!scope&&page.url===anchor&&!independent,fetchStatus:page.text?'ok':'inaccessible',
  limits:[...page.limitations,...independent?['独立账号材料：只作该账号自身记录，不并入同一人物结论。']:page.url===anchor?['主页内容由该账号维护；不代表跨平台身份已核实。']:selected?['来自已确认研究范围的账号；账号自述不等于内容已独立证实。']:['与研究对象的关系需结合原文核对，不因同名自动合并。']]};}
 function stillActivePagesOf(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint):StoredPage[]{
  return checkpoint.pages.filter(page=>store.isResearchSourceActive(run.id,page.sourceKey,run.ownerId));
@@ -189,8 +189,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const verificationPolicy=mode==='verify'&&checkpoint.quoteSupportPolicy==='exact_quote/v1'?'exact_quote/v1':null;
     const attributionPolicy=mode==='verify'?checkpoint.quoteAttributionPolicy:null;
-    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
-    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
+    const lexicalPolicy=mode==='verify'?checkpoint.quoteLexicalPolicy:null;
+    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}${lexicalPolicy?':literal_terms_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
+    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
     if(old){if(old.state==='failed')throw new ProviderError('provider_bad_response','模型请求已有已结算失败回执，不自动重放。');return old.result as Awaited<ReturnType<typeof invokeDeepSeek>>;}
     try{const result=await invokeDeepSeek(options.transport,options.deepseekApiKey,request);
      const usage=parseMessagesUsage(result.body);
@@ -228,9 +229,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    claims=claims.map(c=>{
     const page=stillActivePages().find(p=>p.sourceKey===c.sourceKey);
     const nativeAuthor=page?.retrieval==='read'&&page.kind==='work'&&!!page.account?.id&&!!page.author&&page.author.toLowerCase()===page.account.handle.toLowerCase();
-    return {...c,authorialBasis:quoteHasFirstPerson(c.quote)?'quote_first_person' as const:nativeAuthor?'native_authored_post' as const:'page_text' as const};
+    return {...c,authorialBasis:quoteHasFirstPerson(c.quote)?'quote_first_person' as const:nativeAuthor?'native_authored_post' as const:'page_text' as const,quoteLexicalPolicy:'literal_terms/v1' as const,sourceReadKind:page?.kind,sourceReadUrl:page?.url};
    });
-   checkpoint.pendingClaims=claims;checkpoint.quoteSupportPolicy='exact_quote/v1';checkpoint.quoteAttributionPolicy='quote_attribution/v1';save();
+   checkpoint.pendingClaims=claims;checkpoint.quoteSupportPolicy='exact_quote/v1';checkpoint.quoteAttributionPolicy='quote_attribution/v1';checkpoint.quoteLexicalPolicy='literal_terms/v1';save();
   }
   progress('verifying');
   let checked:unknown;
@@ -256,9 +257,13 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   const approved=claims.filter((c,index)=>supported.has(index)&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null).map(c=>({...c,verified:true}));
   const retained=options.firstStepScope?checkpoint.claims.filter(c=>c.verified===true&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null&&stillActivePages().some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))):[];
   checkpoint.claims=[...new Map([...retained,...approved].map(c=>[digest({...c,verified:undefined}),c])).values()];delete checkpoint.pendingClaims;checkpoint.steps++;
-  for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)}`);
-  if(Array.isArray(checked.rejected))for(const item of checked.rejected)if(object(item)&&typeof item.reason==='string')checkpoint.unknowns.push(sanitizeText(item.reason,500));
   const feedback=[...(checked.rejected as Array<{index:number;reason:string}>).map(item=>({claim:claims[item.index]!,reason:sanitizeText(item.reason,500)})),...scopeRejected.map(claim=>({claim,reason:claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)!}))];
+  if(checkpoint.quoteLexicalPolicy){
+   checkpoint.verificationHistory=[...(checkpoint.verificationHistory??[]),{step:checkpoint.steps,policy:checkpoint.quoteLexicalPolicy,rejections:feedback}];
+  }else{
+   for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)}`);
+   if(Array.isArray(checked.rejected))for(const item of checked.rejected)if(object(item)&&typeof item.reason==='string')checkpoint.unknowns.push(sanitizeText(item.reason,500));
+  }
   if(options.firstStepScope&&feedback.length&&(checkpoint.claimRepairRounds??0)<2){
    const remaining=remainingOf(limits.modelCalls,store.research.budget(run.id,limits).modelCalls);
    if((remaining===null||remaining>=2)&&(limits.modelCalls===0||checkpoint.steps<=limits.modelCalls-2)){
@@ -267,6 +272,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     store.addEvent(run.id,'stage',{key:`claim_repair:${checkpoint.claimRepairRounds}`,label:'按原文修正未通过核验的陈述',status:'active'});
     return null;
    }
+  }
+  if(checkpoint.quoteLexicalPolicy&&feedback.length){
+   for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)}`);
+   if(rejectedIndexes.length)checkpoint.unknowns.push(`最终核验仍有 ${rejectedIndexes.length} 条提案未获得完整支持，未作为结论；原提案及拒绝理由保存在核验历史与实际回执。`);
   }
   const coverage=researchDepthCoverage(checkpoint.claims,new Set(stillActivePages().filter(p=>(p.retrieval==='read'||p.retrieval==='profile')).map(p=>p.sourceKey)));
   // Five facets with evidence never prove all-platform or full-history

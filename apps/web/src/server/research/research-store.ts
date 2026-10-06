@@ -21,7 +21,7 @@ export function inspectWindow(page:{sourceKey:string;url:string;text:string},off
  const text=page.text.slice(start,start+size);
  return {sourceKey:page.sourceKey,url:page.url,offset:start,length:text.length,textLength,text};
 }
-export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis'; facet?: ResearchFacet; verified?: boolean; authorialBasis?:ClaimAuthorialBasis }
+export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis'; facet?: ResearchFacet; verified?: boolean; authorialBasis?:ClaimAuthorialBasis;quoteLexicalPolicy?:'literal_terms/v1';sourceReadKind?:ResearchPage['kind'];sourceReadUrl?:string }
 /** Frozen first-step selection binding; fetch work may only read these accounts. */
 export interface FirstStepBinding {
  caseId: string; discoveryRevision: number; scopeVersion: number;
@@ -45,9 +45,12 @@ export interface ResearchCheckpoint {
  quoteSupportPolicy?: 'exact_quote/v1';
  /** New dispatched attribution contract; historical verifier receipts stay distinct. */
  quoteAttributionPolicy?: 'quote_attribution/v1';
+ quoteLexicalPolicy?: 'literal_terms/v1';
  /** Bounded synthesis correction; rejected material is feedback, never evidence. */
  claimRepairRounds?: number;
  verificationFeedback?: Array<{claim:ResearchClaim;reason:string}>;
+ /** New lexical-policy checks, separate from current unresolved research gaps. */
+ verificationHistory?: Array<{step:number;policy:'literal_terms/v1';rejections:Array<{claim:ResearchClaim;reason:string}>}>;
  /** Last bounded model validation feedback; never source evidence. */
  planFeedback?: string;
  planValidationFailures?: number;

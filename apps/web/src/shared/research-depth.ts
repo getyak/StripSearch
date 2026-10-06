@@ -69,8 +69,25 @@ export function claimAuthorialIssue(claim:{statement:string;quote:string;kind?:s
   return null;
 }
 
-export function claimEvidenceIssue(claim: { statement: string; quote: string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis }, policy?: 'exact_quote/v1'): string | null {
-  return claimScopeIssue(claim) ?? (policy === 'exact_quote/v1' ? claimQuotedYearIssue(claim) ?? claimAuthorialIssue(claim) : null);
+/** Conservative mixed-language lexical eligibility, never semantic support. */
+export function claimLiteralTermIssue(claim:{statement:string;quote:string;facet?:ResearchFacet;sourceReadKind?:string;sourceReadUrl?:string;quoteLexicalPolicy?:'literal_terms/v1'}):string|null {
+  if(!claim.quoteLexicalPolicy)return null;
+  const quote=claim.quote.replace(/<[^>]*>/g,' ');
+  if(/^(?:同一(?:帖|条帖文)|[Ii]n\s+the\s+same\s+post)/u.test(claim.statement.trim()))return '每条陈述必须独立指明来源与范围；不能用同一帖跨条目代指，分组与导出不会维持该代指。';
+  if(claim.facet==='work'&&claim.sourceReadKind==='profile'&&!(/\b(?:I|we|he|she)\s+(?:(?:have|has|had|am|is|are|was|were|did|personally|independently|also|now)\s+){0,3}(?:wrote|writ(?:e|es|ing)|built|build(?:s|ing)?|creat(?:e|es|ed|ing)|found(?:ed|s|ing)?|design(?:ed|s|ing)?|develop(?:ed|s|ing)?|implement(?:ed|s|ing)?|author(?:ed|s|ing)?|led|lead(?:s|ing)?|instruct(?:ed|s|ing)?|releas(?:e|es|ed|ing)|publish(?:ed|es|ing)?)\b|(?:我|本人|他|她)(?:们)?(?:曾|亲自|独立)?(?:编写|开发|设计|创办|创建|发布|带领)/iu.test(quote)))return '主页或索引描述未绑定明确个人创作/贡献动作；不能填作品行动维度，请保留页面描述或引用实际作品的贡献原文。';
+  if(/\bfirst\s+(?:\w+\s+){0,4}(?:course|class)\b/iu.test(quote)&&/首位.{0,16}课程/u.test(claim.statement))return '原文首门课程不能改写为首位课程设计者；请保留课程与人物的不同限定。';
+  if(!/\p{Script=Han}/u.test(claim.statement))return null;
+  let statement=claim.statement;
+  if(claim.sourceReadUrl){try{const source=new URL(claim.sourceReadUrl);statement=statement.replaceAll(source.href,' ').replaceAll(source.hostname,' ');}catch{/* An invalid stored source cannot exempt any term. */}}
+  const stem=(term:string)=>(term.length>3&&/[^s]s$/i.test(term)||/^[A-Z]{2,}s$/u.test(term))?term.slice(0,-1).toLowerCase():term.toLowerCase();
+  const terms=(text:string)=>(text.replace(/([a-z])\s+(?=\d)/giu,'$1').match(/\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*\b/gu)??[]);
+  const words=new Set(terms(quote).map(stem));
+  const missing=terms(statement).filter(term=>term.length>1&&!words.has(stem(term)));
+  return missing.length?'陈述包含本条引文没有的英文命名词；不能从其它段落、条目或元数据补入，请缩短陈述或选择完整连续原文后重新核验。':null;
+}
+
+export function claimEvidenceIssue(claim: { statement: string; quote: string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis;sourceReadKind?:string;sourceReadUrl?:string;quoteLexicalPolicy?:'literal_terms/v1' }, policy?: 'exact_quote/v1'): string | null {
+  return claimScopeIssue(claim) ?? (policy === 'exact_quote/v1' ? claimQuotedYearIssue(claim) ?? claimAuthorialIssue(claim) ?? claimLiteralTermIssue(claim) : null);
 }
 
 /** Evidence availability, never a percentage or a claim of complete history. */
