@@ -32,6 +32,10 @@ test('a literal first-person named introduction supplies self-declaration only',
 
 for(const original of [
   '<h1>Mira Kepler</h1><p>Compiler engineer.</p>',
+  '```\n<p>My name is Mira Kepler.</p>\n```',
+  '    <p>My name is Mira Kepler.</p>',
+  '`<p>My name is Mira Kepler.</p>`',
+  '> <p>My name is Mira Kepler.</p>',
   '<blockquote><p>My name is Mira Kepler.</p></blockquote>',
   '<section><h2>My colleague’s biography</h2><p>My name is Mira Kepler.</p></section>',
   '<main><h2>My colleague’s biography <a href="https://citation-synthetic.dev/">reference</a></h2><p>My name is Mira Kepler.</p></main>',

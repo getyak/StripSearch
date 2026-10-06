@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractOriginalLinkContexts, nativeProfileLinkContext } from '../server/research/link-context.js';
+import { extractOriginalLinkContexts, extractOriginalLiteralLinkContexts, nativeProfileLinkContext } from '../server/research/link-context.js';
 import { createResearchTools } from '../server/research/toolkit.js';
 import { linkRoleFromContext } from '../shared/first-step-discovery.js';
 
@@ -59,6 +59,20 @@ test('HTML and Markdown self links share visible-text and quotation restrictions
  const context=extractOriginalLinkContexts(attribute,'https://fixture-author.dev/')[0]!;
  assert.equal(context.surface,'unknown');
  assert.notEqual(linkRoleFromContext({...context,targetUrl:url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');
+});
+
+test('Markdown code and quotation spans cannot grant either literal or linked ownership',()=>{
+ const url='https://github.com/fixture-profile',home='https://fixture-author.dev/';
+ for(const content of [`My GitHub: ${url}`,`My GitHub: [My account](${url})`,`My GitHub: <a href="${url}">My account</a>`]){
+  for(const text of ['```\n'+content+'\n```','~~~\n'+content+'\n~~~','    '+content,'`'+content+'`','> '+content]){
+   const contexts=[...extractOriginalLinkContexts(text,home),...extractOriginalLiteralLinkContexts(text,home,url)];
+   assert.ok(contexts.length,text);
+   for(const context of contexts)assert.notEqual(linkRoleFromContext({...context,targetUrl:url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section',text);
+  }
+ }
+ for(const text of [`My GitHub: [My account](${url})`,`My GitHub:\n- [My account](${url})`]){
+  const context=extractOriginalLinkContexts(text,home)[0]!;assert.equal(context.surface,'authorial');
+ }
 });
 
 test('rel-me local attribution does not borrow unrelated prose from the page root', () => {

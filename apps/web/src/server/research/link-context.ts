@@ -1,4 +1,5 @@
 import { parse, parseFragment, type DefaultTreeAdapterTypes as Tree } from 'parse5';
+import {fromMarkdown} from 'mdast-util-from-markdown';
 import { classifyLinkContext, isExplicitDenialQuote } from '../../shared/first-step-discovery.js';
 import type { ResearchLinkContext } from './tool-contracts.js';
 
@@ -14,6 +15,23 @@ function resolveLink(raw: string, base: string): string | null {
 const BLOCKS = new Set(['p', 'li', 'nav', 'footer', 'header', 'section', 'div', 'main']);
 const THIRD_PARTY = /(?:activity|timeline|feed|comment|recommend|suggest|reshare|repost|quote|people-also|related-post)/i;
 const PAGE_ROOTS = new Set(['main', 'body', 'html']);
+
+type MarkdownNode={type:string;position?:{start:{offset?:number};end:{offset?:number}};children?:MarkdownNode[]};
+const markdownRanges=new Map<string,Array<{start:number;end:number}>>();
+export function restrictedMarkdownAt(original:string,offset:number):boolean {
+ let ranges=markdownRanges.get(original);
+ if(!ranges){
+  ranges=[];const pending:MarkdownNode[]=[fromMarkdown(original)];
+  while(pending.length){
+   const node=pending.pop()!;
+   if(['code','inlineCode','blockquote'].includes(node.type)&&node.position?.start.offset!==undefined&&node.position.end.offset!==undefined)ranges.push({start:node.position.start.offset,end:node.position.end.offset});
+   if(node.children)pending.push(...node.children);
+  }
+  if(markdownRanges.size>=8)markdownRanges.delete(markdownRanges.keys().next().value!);
+  markdownRanges.set(original,ranges);
+ }
+ return ranges.some(range=>offset>=range.start&&offset<range.end);
+}
 
 function restrictedIdentityContainer(node:Tree.Element):boolean {
  return ['script','style','template','noscript','title','code','pre','blockquote','q','cite'].includes(node.tagName)||node.attrs.some(a=>['hidden','inert'].includes(a.name)||a.name==='aria-hidden'&&a.value.trim().toLowerCase()==='true'||a.name==='style'&&/display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)/iu.test(a.value));
@@ -97,7 +115,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
     let semanticVeto: {startOffset:number;endOffset:number} | null = null;
     let ancestor: Tree.Node | null = node.parentNode;
     let branch: Tree.Node = node;
-    let thirdParty = false;
+    let thirdParty = restrictedMarkdownAt(original,node.sourceCodeLocation.startOffset);
     let socialControls = false;
     while (ancestor && 'tagName' in ancestor) {
       const attrs = ancestor.attrs.map(attr => `${attr.name}=${attr.value}`).join(' ');
@@ -146,7 +164,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
     const next = original.indexOf('\n\n', index + match[0].length);
     const end = next < 0 ? original.length : next;
     const quote = original.slice(start, end);
-    const thirdParty = /^\s*>/m.test(quote) || THIRD_PARTY.test(quote);
+    const thirdParty = restrictedMarkdownAt(original,index) || /^\s*>/m.test(quote) || THIRD_PARTY.test(quote);
     const textSurface=originalTextSurfaceAt(root,index);
     contexts.push({ url, quote, targetOffset:index-start, locator: `Markdown 原文第 ${String(start + 1)}–${String(end)} 字符`,
       binding: 'markdown_link', surface: thirdParty||textSurface==='third_party' ? 'third_party' : quote.length > 8000||textSurface==='unknown' ? 'unknown' : 'authorial' });
@@ -165,7 +183,7 @@ export function extractOriginalLiteralLinkContexts(original:string,base:string,u
   if(node.nodeName!=='#text'||!('value' in node)||!node.sourceCodeLocation||!node.value.includes(url.replace(/\/+$/,'')))continue;
   const location=node.sourceCodeLocation,literal=original.slice(location.startOffset,location.endOffset),at=literal.indexOf(url.replace(/\/+$/,''));
   if(at<0)continue;
-  let block:Tree.Element|null=null,ancestor:Tree.Node|null=node.parentNode,branch:Tree.Node=node,restricted=false,veto:{startOffset:number;endOffset:number}|null=null;
+  let block:Tree.Element|null=null,ancestor:Tree.Node|null=node.parentNode,branch:Tree.Node=node,restricted=restrictedMarkdownAt(original,location.startOffset+at),veto:{startOffset:number;endOffset:number}|null=null;
   while(ancestor&&'tagName' in ancestor){
    const attrs=ancestor.attrs.map(a=>`${a.name}=${a.value}`).join(' ');
    restricted ||= ancestor.tagName==='a'||restrictedIdentityContainer(ancestor)||THIRD_PARTY.test(attrs);

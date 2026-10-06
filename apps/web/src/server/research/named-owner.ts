@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {parse,type DefaultTreeAdapterTypes as Tree} from 'parse5';
 import type {ResearchPage,ResearchToolAction} from './tool-contracts.js';
 import {classifyFirstStepUrl,isUntrustedInstructionText,isExplicitDenialQuote,classifyLinkContext} from '../../shared/first-step-discovery.js';
-import {adjacentRootSpan} from './link-context.js';
+import {adjacentRootSpan,restrictedMarkdownAt} from './link-context.js';
 
 export interface NativeNameDeclaration {
   platform:'github'|'x';nativeId:string;requestedUrl:string;returnedProfileUrl:string;
@@ -52,6 +52,7 @@ export function namedOwnerQuote(page:ResearchPage,action:ResearchToolAction,pers
     if('tagName' in node&&restrictedElement(node))continue;
     if('childNodes' in node)pending.unshift(...node.childNodes);
     if(!('tagName' in node)||!['p','h1','h2'].includes(node.tagName)||!node.sourceCodeLocation)continue;
+    if(restrictedMarkdownAt(page.text,node.sourceCodeLocation.startOffset))continue;
     const text=introductionText(node);if(text===null)continue;
     const normalized=normalizedPersonName(text),name=normalizedPersonName(personName);
     const escaped=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
