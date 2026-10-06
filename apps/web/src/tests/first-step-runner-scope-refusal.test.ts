@@ -155,11 +155,11 @@ test('a model proposal onto an inert out-of-scope link is an honest gap and rese
   const receipts = f.store.research.receipts(f.run.id);
   assert.ok(receipts.every((receipt) => receipt.state !== 'inflight'));
   assert.ok(!receipts.some((receipt) => JSON.stringify(receipt.request).includes(INERT_URL)), 'no receipt exists for the refused proposal');
-  assert.equal(f.store.research.budget(f.run.id).toolCalls, 2);
+  assert.equal(f.store.research.budget(f.run.id).toolCalls, f.initialToolCalls + 2);
 });
 
 test('mid-seed scope withdrawal stops safely and preserves the original source without late material', async (t) => {
-  const f = fixture([{ url: THIRD_URL, supportedBy: { sourceUrl: HOME_URL, quote: 'My depot: https://lantern-depot-fixture.org/.' } }]);
+  const f = fixture([{ url: THIRD_URL, supportedBy: { sourceUrl: HOME_URL, quote: 'My website: https://lantern-depot-fixture.org/.' } }]);
   t.after(() => f.close());
   select(f);
   const { calls, tools } = recordingTools((action) => {
@@ -232,7 +232,7 @@ test('model-step scope withdrawal refuses the late result and pauses with the ex
   assert.equal(f.store.listObservations(f.run.id).length, 0, 'no new claims');
   assert.ok(run.limitations.some((line) => line.includes('冻结范围')));
   const receipts = f.store.research.receipts(f.run.id);
-  assert.equal(receipts.length, 3, 'seed reads plus the one dispatched attempt');
+  assert.equal(receipts.length, f.initialToolCalls + 3, 'discovery originals plus seed reads and the one dispatched attempt');
   assert.ok(receipts.every((receipt) => receipt.state !== 'inflight'));
   // The dispatched request is metered honestly; its refused result is not a success.
   assert.equal(f.store.research.budget(f.run.id).estimatedUsd, 0.003);
@@ -263,7 +263,7 @@ test('a model-step dispatch attempted after withdrawal is refused unbilled and s
   assert.equal(planCalls, 1);
   assert.equal(calls.length, 2, 'the refused dispatch never reaches the provider');
   const receipts = f.store.research.receipts(f.run.id);
-  assert.equal(receipts.length, 2, 'the rejected predispatch action leaves no receipt');
+  assert.equal(receipts.length, f.initialToolCalls + 2, 'discovery originals plus seed reads; the rejected predispatch action leaves no receipt');
   assert.ok(receipts.every((receipt) => receipt.state !== 'inflight'));
   const view = f.store.buildCanonicalView(run);
   assert.equal(view.sources.length, 2, 'only the two completed seed reads landed');
@@ -312,7 +312,7 @@ test('an undiscovered URL in a batch never dispatches or aborts the permitted br
   const receipts = f.store.research.receipts(f.run.id);
   assert.ok(receipts.every((receipt) => receipt.state !== 'inflight'));
   assert.ok(!receipts.some((receipt) => JSON.stringify(receipt.request).includes('https://never-discovered-fixture.org/')), 'no receipt exists for the refused proposal');
-  assert.equal(f.store.research.budget(f.run.id).toolCalls, 3);
+  assert.equal(f.store.research.budget(f.run.id).toolCalls, f.initialToolCalls + 3);
 });
 
 test('malformed nested batch gets counted feedback without dispatching any part of the rejected proposal', async (t) => {
@@ -356,7 +356,7 @@ test('malformed nested batch gets counted feedback without dispatching any part 
   const receipts = f.store.research.receipts(f.run.id);
   assert.ok(receipts.every((receipt) => receipt.state !== 'inflight'));
   assert.ok(!receipts.some((receipt) => JSON.stringify(receipt.request).includes(INERT_URL)), 'no receipt exists for the refused proposal');
-  assert.equal(f.store.research.budget(f.run.id).toolCalls, 2);
+  assert.equal(f.store.research.budget(f.run.id).toolCalls, f.initialToolCalls + 2);
 });
 
 
@@ -382,7 +382,7 @@ test('broad Fetch search is refused without paid dispatch and selected originals
  }};
  const runner=runnerFor(f,tools,planner);t.after(()=>runner.stopAll());const run=await runToTerminal(f,runner);
  assert.equal(run.stopReason,'limited_evidence');assert.equal(calls.length,2);assert.ok(calls.every(a=>a.type!=='search'));
- assert.ok(f.store.research.receipts(f.run.id).every(r=>(r.request as {type?:string}).type!=='search'));assert.equal(f.store.research.budget(f.run.id).toolCalls,2);
+ assert.ok(f.store.research.receipts(f.run.id).every(r=>(r.request as {type?:string}).type!=='search'));assert.equal(f.store.research.budget(f.run.id).toolCalls,f.initialToolCalls+2);
  assert.equal(f.store.listObservations(f.run.id)[0]?.statement,CLAIM);
 });
 
@@ -391,7 +391,7 @@ test('repeated malformed plans stop after three corrections even with no global 
  const planner:ResearchPlanner={async decide(){plans++;return {action:'batch',actions:[{action:'batch',actions:[]}]};}};
  const runner=runnerFor(f,tools,planner,{...LIMITS,modelCalls:0});t.after(()=>runner.stopAll());const run=await runToTerminal(f,runner);
  assert.equal(plans,3);assert.equal(run.stopReason,'invalid_decision');assert.equal(run.state,'partial');assert.equal(f.store.listObservations(f.run.id).length,0);
- assert.equal(f.store.research.checkpoint(f.run.id)?.planValidationFailures,3);assert.equal(f.store.research.budget(f.run.id).toolCalls,2);
+ assert.equal(f.store.research.checkpoint(f.run.id)?.planValidationFailures,3);assert.equal(f.store.research.budget(f.run.id).toolCalls,f.initialToolCalls+2);
 });
 
 test('a later unknown inspect reference refuses the entire proposal before a permitted paid read', async (t) => {

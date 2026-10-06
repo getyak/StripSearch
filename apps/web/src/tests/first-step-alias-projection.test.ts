@@ -298,7 +298,7 @@ test('verifyAliasProjection rejects forged, cross-platform, non-profile and cros
 test('existing cases keep prior choices and exclusions untouched and never merge aliases', async () => {
   const f = seedFirstStep({
     accounts: [
-      { url: 'https://fixture-linzhou.org/', supportedBy: { sourceUrl: 'https://fixture-linzhou.org/about', quote: 'My GitHub: https://github.com/fixture-linzhou.' } },
+      { url: 'https://fixture-linzhou.org/', supportedBy: { sourceUrl: 'https://fixture-linzhou.org/about', quote: 'My website: https://fixture-linzhou.org/' } },
       { url: 'https://github.com/fixture-linzhou' }
     ]
   });

@@ -154,7 +154,8 @@ test('refused predispatch proposals never bill and never raise the real operator
       return { action: 'finish', claims: [{ sourceKey: sourceKeyFor(input, HOME_URL), quote: HOME_TEXT, statement: CLAIM, kind: 'page_statement' }] };
     }
   };
-  const limits: ResearchBudgetLimits = { toolCalls: 3, modelCalls: 8, inputTokens: 150000, outputTokens: 16000, elapsedMs: 0 };
+  // Freeze the total ceiling including the already completed discovery original.
+  const limits: ResearchBudgetLimits = { toolCalls: f.initialToolCalls + 3, modelCalls: 8, inputTokens: 150000, outputTokens: 16000, elapsedMs: 0 };
   const runner = new Runner({
     store: f.store,
     config: { researchLimits: limits, exaApiKey: null, deepseekApiKey: null, firecrawlApiKey: null, tikhubApiKey: null, githubToken: null } as AppConfig,
@@ -176,10 +177,10 @@ test('refused predispatch proposals never bill and never raise the real operator
   assert.equal(calls.length, 3, 'two seed reads plus one real read; the refused and the capped dispatch never reach the provider');
   assert.ok(!calls.some((call) => 'url' in call && call.url === INERT_URL), 'the refused target is never fetched');
   const receipts = f.store.research.receipts(f.run.id);
-  assert.equal(receipts.length, 3);
+  assert.equal(receipts.length, f.initialToolCalls + 3);
   assert.ok(receipts.every((receipt) => receipt.state !== 'inflight'));
   const budget = f.store.research.budget(f.run.id);
-  assert.equal(budget.toolCalls, 3, 'the refused proposal is unbilled and the configured ceiling is unchanged');
+  assert.equal(budget.toolCalls, limits.toolCalls, 'the refused proposal is unbilled and the configured ceiling is unchanged');
   assert.equal(budget.unknownCost, false);
   assert.ok(run.limitations.some((line) => line.includes(INERT_URL)), 'the refusal gap stays visible');
   assert.ok(run.limitations.some((line) => line.includes('额度已用完')), 'the exhausted cap stays visible');

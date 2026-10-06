@@ -90,3 +90,15 @@ test('missing completed original makes historical generated plaintext proof revi
   assert.equal(JSON.stringify(f.store.cases.reportView(f.run.ownerId,f.caseId).evidence),before);
  }finally{f.close();}
 });
+
+for(const heading of ['', 'My colleague', 'Not my account; impersonator'])test(`complete mixed HTML/plain original keeps attribution context: ${heading||'self'}`,()=>{
+ const quote=`My GitHub: ${book}`,text=`<section>${heading?`<h2>${heading}</h2>`:''}<p>My website: <a href="${home}">Home</a></p>\n\n${quote}</section>`;
+ const f=seedFirstStep({accounts:[{url:home},{url:book,supportedBy:{sourceUrl:home,quote}}]});
+ try{
+  f.db.prepare('UPDATE research_case_source_revisions SET content_hash=? WHERE original_url=?').run(createHash('sha256').update(text).digest('hex'),home);
+  f.store.research.reserve(f.run.id,'mixed-original','tool',{type:'read',url:home},{inputTokens:0,outputTokens:0});
+  f.store.research.settle(f.run.id,'mixed-original',{pages:[{url:home,text,links:[book],kind:'profile',retrieval:'read'}]},{inputTokens:0,outputTokens:0});
+  const view=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(view.mode!=='first_step')throw Error('mode');
+  assert.equal(view.view.accounts.find(a=>a.profileUrl===book)!.identity.validity,heading?'review':'valid');
+ }finally{f.close();}
+});

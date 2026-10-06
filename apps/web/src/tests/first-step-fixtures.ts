@@ -59,6 +59,8 @@ export interface SeededFirstStep {
   accountViewFor(index: number): FirstStepAccountView;
   /** Simulate a new discovery revision (e.g. a manual hint expansion). */
   republish(mutate?: (view: FirstStepDiscoveryView) => FirstStepDiscoveryView): number;
+  /** Completed synthetic discovery reads already counted before Fetch. */
+  initialToolCalls: number;
   close(): void;
 }
 
@@ -161,6 +163,11 @@ export function seedFirstStep(options: SeedOptions): SeededFirstStep {
     now: '2026-10-05T00:00:00.000Z'
   });
   const scopeVersion = asScopeVersion(1);
+  // Several observations from one synthetic page share one immutable original
+  // and one completed receipt, just as the actual coordinator does.
+  const supportQuote=(seed:SeedAccountInput)=>seed.supportedBy?.quote??`<p>My profile: <a href="${seed.url}">My account</a></p>`;
+  const originals=new Map<string,string>();
+  for(const seed of options.accounts){if(seed.supportedBy){const url=seed.supportedBy.sourceUrl;originals.set(url,[originals.get(url),supportQuote(seed)].filter(Boolean).join('\n\n'));}}
   const views: FirstStepAccountView[] = [];
   const accountIds: string[] = [];
   for (const seed of options.accounts) {
@@ -179,7 +186,7 @@ export function seedFirstStep(options: SeedOptions): SeededFirstStep {
     });
     const evidenceIds: string[] = [];
     if (seed.supportedBy) {
-      const quote=seed.supportedBy.quote ?? `<p>My profile: <a href="${seed.url}">My account</a></p>`;
+      const quote=supportQuote(seed), original=originals.get(seed.supportedBy.sourceUrl)!;
       const recorded = firstStep.recordIdentityObservation({
         ownerId,
         caseId,
@@ -190,7 +197,7 @@ export function seedFirstStep(options: SeedOptions): SeededFirstStep {
           title: '合成来源',
           author: null,
           retrievedAt: '2026-10-05T00:00:00.000Z',
-          contentHash: createHash('sha256').update(quote).digest('hex'),
+          contentHash: createHash('sha256').update(original).digest('hex'),
           locator: 'Accounts 区'
         },
         role: 'identity_support',
@@ -198,9 +205,9 @@ export function seedFirstStep(options: SeedOptions): SeededFirstStep {
         evidenceLocator: 'Accounts 区'
       });
       evidenceIds.push(recorded.evidenceId);
-      const receiptKey=`synthetic-original-${accountId}`;
+      const receiptKey=`synthetic-original-${createHash('sha256').update(seed.supportedBy.sourceUrl).digest('hex')}`;
       store.research.reserve(run.id,receiptKey,'tool',{type:'read',url:seed.supportedBy.sourceUrl},{inputTokens:0,outputTokens:0});
-      store.research.settle(run.id,receiptKey,{pages:[{url:seed.supportedBy.sourceUrl,title:'Synthetic original',text:quote,kind:'profile',retrieval:'read',links:[seed.url],limitations:[],publishedAt:null}]},{inputTokens:0,outputTokens:0});
+      store.research.settle(run.id,receiptKey,{pages:[{url:seed.supportedBy.sourceUrl,title:'Synthetic original',text:original,kind:'profile',retrieval:'read',links:[seed.url],limitations:[],publishedAt:null}]},{inputTokens:0,outputTokens:0,estimatedUsd:0});
     }
     if (seed.deniedBy) {
       firstStep.recordIdentityObservation({
@@ -282,6 +289,7 @@ export function seedFirstStep(options: SeedOptions): SeededFirstStep {
     plan,
     discoveryRevision: published.discoveryRevision,
     accountIds,
+    initialToolCalls: store.research.budget(run.id).toolCalls,
     accountIdFor: (index) => accountIds[index]!,
     accountViewFor: (index) => views[index]!,
     republish(mutate) {

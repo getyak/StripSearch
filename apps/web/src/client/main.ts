@@ -759,6 +759,7 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       const next = (payload as { state?: CanonicalView['state'] } | null)?.state;
       if (next) state.run.state = next;
       renderHeader();
+      renderRunSummary();
       renderActivityPanel();
       renderReportView();
       renderHistoryRail();
@@ -772,6 +773,7 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       if (typeof data?.revision === 'number' && Number.isInteger(data.revision)) state.run.revision = data.revision;
       state.run.state = 'needs_input';
       renderHeader();
+      renderRunSummary();
       renderNeedsPanel();
       break;
     }
@@ -1053,6 +1055,7 @@ function renderRunSummary(): void {
     const phases: Record<string, string> = { resolving: '正在核对人物身份。', identity: '正在核对人物身份。', identity_resolution: '正在核对人物身份。', searching: '正在发现原作、账号线索与反证。', planning: '正在按研究问题安排下一批资料。', reading: '正在读取原文与讨论上下文。', verifying: '正在独立核验断言与出处。', researching: '正在阅读公开资料，核对相关证据。', collecting: '正在阅读公开资料，核对相关证据。', synthesizing: '正在整理有出处的发现。', validating: '正在核对报告与出处。' };
     message = phases[research.phase] ?? '正在阅读与核对公开资料。';
   }
+  if (!message && run?.state === 'researching') message = '正在查找和核对公开资料。';
   setText(els.statusSummary, message);
   show(els.statusSummary, Boolean(message));
   if (research?.coverage) {
