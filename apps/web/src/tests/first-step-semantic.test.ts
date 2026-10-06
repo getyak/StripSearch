@@ -1073,6 +1073,12 @@ for(const tag of ['h2','p']) for(const heading of ['My colleague’s About page'
   }finally{h.db.close();}
 });
 
+test('a separate colleague paragraph with its own account link cannot veto an adjacent About navigation',async()=>{
+  const text='<main><p>A colleague: <a href="https://github.com/other-author">Morgan</a>.</p><nav><a href="about">About</a></nav></main>';
+  const h=harness({kind:'homepage_url',value:home},{read:url=>[originalPage(url,url===home?text:'<p>I build compilers.</p>')]});
+  try{await discoverFirstStep(h.ctx);assert.ok(h.reads.includes(home+'about'));}finally{h.db.close();}
+});
+
 for(const model of [false,true]) test(`a forged HTTP-to-HTTPS native context cannot support an account${model?' through a model proposal':''}`,async()=>{
   const tools=createResearchTools({exaApiKey:null,tikhubApiKey:null,firecrawlApiKey:null,githubToken:null,timeoutMs:100,maxBytes:100000,
     transport:{async fetch(){return new Response(JSON.stringify({login:'mira-k',id:123456,html_url:github,name:'Mira Kepler',bio:'Original biography.',blog:'http://mira-kepler.dev/'}));}}});

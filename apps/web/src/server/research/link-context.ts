@@ -28,12 +28,23 @@ function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment, branch: Tr
     if(!('tagName' in sibling)&&sibling.nodeName!=='#text')break;
     const pending:Tree.Node[]=[sibling];let independentLink=false;
     while(pending.length){const node=pending.pop()!;if('tagName' in node&&node.tagName==='a'){independentLink=true;break;}if('childNodes' in node)pending.push(...node.childNodes);}
-    if(independentLink&&'tagName' in sibling&&sibling.tagName==='p'&&'tagName' in branch&&branch.tagName==='p')break;
+    if(independentLink&&'tagName' in sibling&&sibling.tagName==='p'){
+      const describingNavigation='tagName' in branch&&branch.tagName==='nav'&&sibling.sourceCodeLocation&&
+        /\b(?:about|bio(?:graphy)?|contact)\b|\b(?:this|these|following|below)\s+(?:links?|pages?|accounts?|profiles?)\b|(?:简介|关于页面|联系页面|这些链接|下面的链接)/i.test(nodeText(sibling));
+      if(!describingNavigation)break;
+    }
     if(!sibling.sourceCodeLocation)break;
     if(direction<0)start=sibling.sourceCodeLocation.startOffset;else end=sibling.sourceCodeLocation.endOffset;
    }
   }
   return start<location.startOffset||end>location.endOffset?{startOffset:start,endOffset:end}:null;
+}
+
+function nodeText(node:Tree.Node):string {
+  // Text nodes preserve the local caption without reading another branch.
+  const pending:Tree.Node[]=[node];let text='';
+  while(pending.length){const item=pending.shift()!;if(item.nodeName==='#text'&&'value' in item)text+=item.value;if('childNodes' in item)pending.unshift(...item.childNodes);}
+  return text;
 }
 
 /** Retain actual HTML anchors and their original containing span. No source executes. */
