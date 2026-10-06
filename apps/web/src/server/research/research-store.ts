@@ -1,7 +1,7 @@
 import type { ResearchFacet, ClaimAuthorialBasis } from '../../shared/research-depth.js';
 import type { DB } from '../db/index.js';
 import type { IdentityCandidate, IdentityDraft, ResearchBudget, ResearchBudgetLimits } from '../../shared/types.js';
-import type { ResearchPage } from './tool-contracts.js';
+import type { ResearchPage, ResearchToolAction } from './tool-contracts.js';
 
 /**
  * Legacy finite totals for direct controller calls and historical replay
@@ -21,7 +21,7 @@ export function inspectWindow(page:{sourceKey:string;url:string;text:string},off
  const text=page.text.slice(start,start+size);
  return {sourceKey:page.sourceKey,url:page.url,offset:start,length:text.length,textLength,text};
 }
-export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis'; facet?: ResearchFacet; verified?: boolean; authorialBasis?:ClaimAuthorialBasis;quoteLexicalPolicy?:'literal_terms/v1';sourceReadKind?:ResearchPage['kind'];sourceReadUrl?:string }
+export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis'; facet?: ResearchFacet; verified?: boolean; authorialBasis?:ClaimAuthorialBasis;quoteLexicalPolicy?:'literal_terms/v1';quoteRolePolicy?:'preserve_actor/v1';sourceReadKind?:ResearchPage['kind'];sourceReadUrl?:string }
 /** Frozen first-step selection binding; fetch work may only read these accounts. */
 export interface FirstStepBinding {
  caseId: string; discoveryRevision: number; scopeVersion: number;
@@ -46,6 +46,10 @@ export interface ResearchCheckpoint {
  /** New dispatched attribution contract; historical verifier receipts stay distinct. */
  quoteAttributionPolicy?: 'quote_attribution/v1';
  quoteLexicalPolicy?: 'literal_terms/v1';
+ quoteRolePolicy?: 'preserve_actor/v1';
+ /** Attempt/proposal history is not automatically a current evidence gap. */
+ proposalRejections?: Array<{step:number;index:number;sourceKey:string|null;reason:string}>;
+ actionFailures?: Array<{step:number;action:ResearchToolAction;code:string}>;
  /** Bounded synthesis correction; rejected material is feedback, never evidence. */
  claimRepairRounds?: number;
  verificationFeedback?: Array<{claim:ResearchClaim;reason:string}>;

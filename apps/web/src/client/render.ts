@@ -33,6 +33,7 @@ export interface SourceHandlers {
 
 export interface StageView {
   key: string;
+  observedSeq?: number;
   index: number;
   total: number;
   label: string;
@@ -433,6 +434,7 @@ export function stagesFromEvents(events: RunEventRecord[]): StageView[] {
     total = Math.max(total, typeof payload.total === 'number' ? payload.total : 0);
     map.set(payload.key, {
       key: payload.key,
+      observedSeq: event.seq,
       index: typeof payload.index === 'number' ? payload.index : 0,
       total: typeof payload.total === 'number' ? payload.total : total,
       label: typeof payload.label === 'string' ? payload.label : payload.key,
@@ -458,15 +460,17 @@ export function renderActivity(
   const total = stages[0]?.total ?? 0;
   const done = stages.filter((stage) => stage.status === 'done').length;
   const running = state === 'researching' || state === 'queued';
+  const currentStage = running ? stages.filter(stage=>stage.status==='active').reduce<StageView|undefined>((latest,stage)=>!latest||(stage.observedSeq??stage.index)>=(latest.observedSeq??latest.index)?stage:latest,undefined) : undefined;
   if (stages.length === 0) {
     list.appendChild(make('p', { className: 'stage-empty', text: '还没有可观察的研究步骤。' }));
   } else {
     for (const stage of stages) {
       const item = make('div', { className: 'stage-item enter' });
-      item.dataset.status = stage.status;
+      const isRecord = openEnded && stage.status === 'active' && stage !== currentStage;
+      item.dataset.status = isRecord ? 'record' : stage.status;
       item.appendChild(make('span', { className: 'stage-index', text: String(stage.index + 1).padStart(2, '0') }));
       item.appendChild(make('span', { className: 'stage-label', text: stage.label }));
-      item.appendChild(make('span', { className: 'stage-tag', text: openEnded && !running && stage.status === 'active' ? '过程记录' : STAGE_TAGS[stage.status] }));
+      item.appendChild(make('span', { className: 'stage-tag', text: isRecord ? '过程记录' : STAGE_TAGS[stage.status] }));
       if (stage.detail) item.appendChild(make('span', { className: 'stage-detail', text: stage.detail }));
       list.appendChild(item);
     }
@@ -478,7 +482,7 @@ export function renderActivity(
   progressBar.setAttribute('aria-valuenow', String(done));
   progressBar.setAttribute('aria-valuetext', `${done} / ${total || 0} 步已完成`);
   progressText.textContent = openEnded ? `${stages.length} 条过程记录` : `${done} / ${total || 0}`;
-  activityState.textContent = running ? [...stages].reverse().find((stage) => stage.status === 'active')?.label ?? stateLabel(state) : stateLabel(state);
+  activityState.textContent = running ? currentStage?.label ?? stateLabel(state) : stateLabel(state);
   indicator.hidden = !running;
 }
 

@@ -158,6 +158,14 @@ test('open-ended terminal research shows process records without claiming active
  assert.equal(text.textContent,'1 条过程记录');assert.equal(stateEl.textContent,'部分完成');assert.equal(indicator.hidden,true);assert.equal(bar.hidden,true);assert.match(list.textContent!,/过程记录/);assert.doesNotMatch(list.textContent!,/正在查看/);
 });
 
+test('open-ended progress identifies one current activity without declaring earlier attempts successful',()=>{
+ const list=domContainer(),fill=domContainer(),bar=domContainer(),text=domContainer(),stateEl=domContainer(),indicator=domContainer();
+ const stages=[{index:0,total:0,key:'read',label:'读取资料',status:'active' as const,detail:null},{index:1,total:0,key:'verify',label:'核验引文',status:'active' as const,detail:null}];
+ renderActivity(list,fill,bar,text,stateEl,indicator,stages,'researching',true);
+ assert.equal(list.querySelectorAll('.stage-tag')[0]!.textContent,'过程记录');assert.equal(list.querySelectorAll('.stage-tag')[1]!.textContent,'正在查看');assert.doesNotMatch(list.textContent!,/已完成/);assert.equal(stateEl.textContent,'核验引文');assert.equal(bar.hidden,true);assert.equal(list.querySelectorAll('[data-status="active"]').length,1);
+ const chronological=stagesFromEvents([{seq:1,type:'stage',payload:{index:8,key:'read',label:'读取资料',status:'active'},createdAt:''},{seq:2,type:'stage',payload:{key:'repair',label:'修正陈述',status:'active'},createdAt:''}]);renderActivity(list,fill,bar,text,stateEl,indicator,chronological,'researching',true);assert.equal(stateEl.textContent,'修正陈述');assert.equal(list.querySelectorAll('[data-status="active"]').length,1);assert.equal(list.querySelector('[data-status="active"] .stage-label')!.textContent,'修正陈述');
+});
+
 // Long lists stay complete while keyboard users enter them once.
 test('3200 sources remain reachable through one roving keyboard entry', () => {
   const container = domContainer();

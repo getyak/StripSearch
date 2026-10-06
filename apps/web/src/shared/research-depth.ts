@@ -92,8 +92,17 @@ export function claimLiteralTermIssue(claim:{statement:string;quote:string;facet
   return missing.length?'陈述包含本条引文没有的英文命名词；不能从其它段落、条目或元数据补入，请缩短陈述或选择完整连续原文后重新核验。':null;
 }
 
-export function claimEvidenceIssue(claim: { statement: string; quote: string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis;sourceReadKind?:string;sourceReadUrl?:string;quoteLexicalPolicy?:'literal_terms/v1' }, policy?: 'exact_quote/v1'): string | null {
-  return claimScopeIssue(claim) ?? (policy === 'exact_quote/v1' ? claimQuotedYearIssue(claim) ?? claimAuthorialIssue(claim) ?? claimLiteralTermIssue(claim) : null);
+/** Eligibility for explicit preference-role reversals, never general entailment. */
+export function claimPreferenceRoleIssue(claim:{statement:string;quote:string;quoteRolePolicy?:'preserve_actor/v1'}):string|null {
+ if(!claim.quoteRolePolicy)return null;
+ const quote=claim.quote.replace(/<[^>]*>/g,' ');
+ const humanPreference=/\bhuman[-\s]preferred\b|人类(?:所)?偏好/iu.test(quote);
+ const machinePreference=/\b(?:AI(?:s)?|LLM(?:s)?|models?|systems?)(?:'s)?[-\s]+(?:preferred|prefers?|prefer)\b|(?:AI|LLM|模型|系统|人工智能|机器)\s*(?:自身|自己)?\s*(?:的|所)?\s*偏好/iu;
+ return humanPreference&&!machinePreference.test(quote)&&machinePreference.test(claim.statement)?'原文偏好主体是人类，不能将面向或来自机器的输入/输出改成机器自身偏好；请保留判断主体与方向。':null;
+}
+
+export function claimEvidenceIssue(claim: { statement: string; quote: string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis;sourceReadKind?:string;sourceReadUrl?:string;quoteLexicalPolicy?:'literal_terms/v1';quoteRolePolicy?:'preserve_actor/v1' }, policy?: 'exact_quote/v1'): string | null {
+  return claimScopeIssue(claim) ?? (policy === 'exact_quote/v1' ? claimQuotedYearIssue(claim) ?? claimAuthorialIssue(claim) ?? claimLiteralTermIssue(claim) ?? claimPreferenceRoleIssue(claim) : null);
 }
 
 /** Evidence availability, never a percentage or a claim of complete history. */

@@ -53,13 +53,27 @@ function draft(page:StoredPage,anchor:string|null,scope?:ResearchOptions['firstS
 function stillActivePagesOf(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint):StoredPage[]{
  return checkpoint.pages.filter(page=>store.isResearchSourceActive(run.id,page.sourceKey,run.ownerId));
 }
+function currentReadFailureGaps(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint,pages:StoredPage[]):string[]{
+ const completed=store.research.receipts(run.id).filter(r=>r.kind==='tool'&&r.state==='completed');
+ return [...new Set((checkpoint.actionFailures??[]).filter(f=>{
+  const action=f.action;if(action.type==='search')return true;
+  return !completed.some(r=>{
+   if(!object(r.request)||!object(r.result)||!Array.isArray(r.result.pages))return false;
+   const native=action.type==='social_posts'||action.type==='social_profile'||action.type==='github_profile';
+   if(native&&(r.request.type!==action.type||r.request.url!==action.url))return false;
+   if(!native&&!['read','firecrawl','social_posts'].includes(String(r.request.type)))return false;
+   return r.result.pages.some((p:unknown)=>object(p)&&typeof p.text==='string'&&p.text.trim().length>0&&(action.type==='social_posts'?p.kind==='work':p.url===action.url)&&pages.some(active=>active.url===p.url&&active.text===retainText(p.text)&&active.kind===p.kind&&(action.type==='social_posts'||active.retrieval==='read'||native)));
+  });
+ }).map(f=>`当前未取得相应原文：${f.action.type==='search'?'检索':f.action.url}（${f.action.type}，${f.code}）；该次尝试与费用保存在实际回执，不代表资料不存在。`))];
+}
 function scopeGapsOf(store:Store,run:RunRecord,checkpoint:ResearchCheckpoint){
  const pages=stillActivePagesOf(store,run,checkpoint);
  return {pages,
   discoveryOnly:pages.filter(p=>p.retrieval==='search'),
   unread:[...new Set(pages.flatMap(p=>p.links))].filter(url=>!pages.some(p=>p.url===url)),
   truncated:pages.filter(p=>p.textTruncated),
-  unresolved:[...checkpoint.unknowns,...(checkpoint.coverageGaps??[])]};
+  readFailureGaps:currentReadFailureGaps(store,run,checkpoint,pages),
+  unresolved:[...checkpoint.unknowns,...(checkpoint.coverageGaps??[]),...currentReadFailureGaps(store,run,checkpoint,pages)]};
 }
 export interface ResearchReportContext {
  store:Store;run:RunRecord;checkpoint:ResearchCheckpoint;limits:ResearchBudgetLimits;
@@ -89,7 +103,7 @@ export function buildResearchReport(context:ResearchReportContext,reason:string,
  const budget=store.research.budget(run.id,limits);
  const identity=checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates};
  return {state,identity:scopeStop&&checkpoint.identity?{...identity,note:`${identity.note?`${identity.note} `:''}冻结范围已失效或撤回（${reason}）：已读材料保留待复核，不能据此继续人物结论。`}:identity,sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl,context.firstStepScope)),observations,
-  answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[],...scopeStop?['冻结范围已失效或撤回：如需继续，请通过现有第一步流程以新的范围重新开始研究。']:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
+  answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...scope.readFailureGaps,...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[],...scopeStop?['冻结范围已失效或撤回：如需继续，请通过现有第一步流程以新的范围重新开始研究。']:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
 }
 
 export async function runResearch(options:ResearchOptions):Promise<ProviderResult>{
@@ -99,6 +113,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const launched=Date.now();
  const checkpoint:ResearchCheckpoint=persisted??{phase:'identity',steps:0,startedAt:launched,elapsedMs:0,anchorUrl:normalizeResearchUrl(run.seedUrl),identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null};
  checkpoint.limits??={...limits};
+ if(options.firstStepScope)checkpoint.quoteRolePolicy??='preserve_actor/v1';
  // Historical checkpoints did not persist retrieval provenance. Recover it only
  // from a completed, matching action receipt; missing proof stays unread.
  for(const page of checkpoint.pages){
@@ -118,7 +133,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const signal=AbortSignal.any([options.signal,deadline.signal]);
  const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);options.firstStepScope?.assertCurrent?.();if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
  const save=()=>{active();checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);};
- const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':'读取相关资料',status:'active'});};
+ const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':phase==='verifying'?'核验引文与陈述':'读取相关资料',status:'active'});};
  const stillActivePages=()=>stillActivePagesOf(store,run,checkpoint);
  // Concrete scoped articles keep their observed URL. Legacy normalization
  // removes trailing slashes for anchor keys and is not a transport alias proof.
@@ -184,14 +199,15 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   active();const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
   if(checkpoint.inspect&&!activePages.some(p=>p.sourceKey===checkpoint.inspect!.sourceKey))delete checkpoint.inspect;
   if(checkpoint.inspectWindows)checkpoint.inspectWindows=checkpoint.inspectWindows.filter(w=>activePages.some(p=>p.sourceKey===w.sourceKey)).slice(0,4);
-  const decision=await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
+  const decision=await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages,unknowns:[...checkpoint.unknowns,...currentReadFailureGaps(store,run,checkpoint,activePages)]},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
     active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const verificationPolicy=mode==='verify'&&checkpoint.quoteSupportPolicy==='exact_quote/v1'?'exact_quote/v1':null;
     const attributionPolicy=mode==='verify'?checkpoint.quoteAttributionPolicy:null;
     const lexicalPolicy=mode==='verify'?checkpoint.quoteLexicalPolicy:null;
-    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}${lexicalPolicy?':literal_terms_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
-    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
+    const rolePolicy=checkpoint.quoteRolePolicy;
+    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}${lexicalPolicy?':literal_terms_v1':''}${rolePolicy?':preserve_actor_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
+    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{}),...(rolePolicy?{rolePolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
     if(old){if(old.state==='failed')throw new ProviderError('provider_bad_response','模型请求已有已结算失败回执，不自动重放。');return old.result as Awaited<ReturnType<typeof invokeDeepSeek>>;}
     try{const result=await invokeDeepSeek(options.transport,options.deepseekApiKey,request);
      const usage=parseMessagesUsage(result.body);
@@ -229,9 +245,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    claims=claims.map(c=>{
     const page=stillActivePages().find(p=>p.sourceKey===c.sourceKey);
     const nativeAuthor=page?.retrieval==='read'&&page.kind==='work'&&!!page.account?.id&&!!page.author&&page.author.toLowerCase()===page.account.handle.toLowerCase();
-    return {...c,authorialBasis:quoteHasFirstPerson(c.quote)?'quote_first_person' as const:nativeAuthor?'native_authored_post' as const:'page_text' as const,quoteLexicalPolicy:'literal_terms/v1' as const,sourceReadKind:page?.kind,sourceReadUrl:page?.url};
+    return {...c,authorialBasis:quoteHasFirstPerson(c.quote)?'quote_first_person' as const:nativeAuthor?'native_authored_post' as const:'page_text' as const,quoteLexicalPolicy:'literal_terms/v1' as const,quoteRolePolicy:'preserve_actor/v1' as const,sourceReadKind:page?.kind,sourceReadUrl:page?.url};
    });
-   checkpoint.pendingClaims=claims;checkpoint.quoteSupportPolicy='exact_quote/v1';checkpoint.quoteAttributionPolicy='quote_attribution/v1';checkpoint.quoteLexicalPolicy='literal_terms/v1';save();
+   checkpoint.pendingClaims=claims;checkpoint.quoteSupportPolicy='exact_quote/v1';checkpoint.quoteAttributionPolicy='quote_attribution/v1';checkpoint.quoteLexicalPolicy='literal_terms/v1';checkpoint.quoteRolePolicy='preserve_actor/v1';save();
   }
   progress('verifying');
   let checked:unknown;
@@ -359,7 +375,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      return {sourceKey:raw.sourceKey,quote:raw.quote,statement,kind:kind as ResearchClaim['kind'],section:section as ResearchClaim['section'],...(facet?{facet:facet as ResearchFacet}:{})};
      } catch(error) {
       if(!options.firstStepScope||!(error instanceof ResearchStop)||error.code!=='invalid_evidence')throw error;
-      checkpoint.unknowns.push(`第 ${index+1} 条结论未通过原文引用校验，未发布；其余合法条目仍须独立核验。`);
+      checkpoint.proposalRejections=[...(checkpoint.proposalRejections??[]),{step:checkpoint.steps,index,sourceKey:object(raw)&&typeof raw.sourceKey==='string'?raw.sourceKey:null,reason:'invalid_evidence'}];
       return null;
      }
     }).filter((claim):claim is ResearchClaim=>claim!==null).filter(claim=>{
@@ -462,7 +478,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      if(options.signal.aborted||deadline.signal.aborted)throw error;
      // A known adapter failure is a gap in this branch, not the end of all research.
      // Its settled attempt is retained and never retried automatically.
-     if(error instanceof ProviderError){outcomes.push({action:action.type,target,status:error.code});checkpoint.unknowns.push(`资料分支未读成功：${action.type==='search'?'检索':action.url}（${error.code}）；不代表无资料。`);save();continue;}
+     if(error instanceof ProviderError){outcomes.push({action:action.type,target,status:error.code});if(options.firstStepScope)checkpoint.actionFailures=[...(checkpoint.actionFailures??[]),{step:checkpoint.steps,action:{...action},code:error.code}];else checkpoint.unknowns.push(`资料分支未读成功：${action.type==='search'?'检索':action.url}（${error.code}）；不代表无资料。`);save();continue;}
      // A per-target scope refusal is fail-closed but not fatal: the refused
      // target was never fetched, the honest gap stays visible, and planning
      // continues under the same model/tool/elapsed caps with retained material.
