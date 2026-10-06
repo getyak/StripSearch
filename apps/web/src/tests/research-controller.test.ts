@@ -345,3 +345,54 @@ test('identical source excerpts at shifted offsets do not buy more unlimited pla
  const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,tools:{async execute(){return {pages:[{...profile,text:'a'.repeat(10000)}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(){assert.ok(++rounds<5);return {action:'inspect',sourceKey:'S1',offset:rounds-1};}}});
  assert.equal(rounds,2);assert.equal(result.stopReason,'no_new_evidence');assert.equal(store.research.checkpoint(run.id)?.pages[0]?.text.length,10000);db.close();
 });
+
+
+test('all four batch inspect windows persist, reach next planner and exclude revoked sources',async()=>{
+ const {db,store,run}=setup();let round=0,calls=0;
+ const other={...interview,url:'https://fixture.test/other',text:'Another exact original.'};
+ const long={...interview,text:'A'.repeat(4000)+'B'.repeat(4000)};
+ await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,
+ tools:{async execute(action){calls++;return {pages:[action.type==='github_profile'?{...profile,links:[interview.url,other.url]}:action.type!=='search'&&action.url===other.url?other:long],requests:1,bytes:8000,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){
+  if(++round===1)return {action:'batch',actions:[{action:'read',url:interview.url},{action:'read',url:other.url}]};
+  if(round===2)return {action:'batch',actions:[{action:'inspect',sourceKey:'S1',offset:0},{action:'inspect',sourceKey:'S2',offset:0},{action:'inspect',sourceKey:'S2',offset:4000},{action:'inspect',sourceKey:'S3',offset:0}]};
+  const {buildResearchPrompt}=await import('../server/research/planner.js');const data=JSON.parse(buildResearchPrompt(input));
+  if(round===3){
+   assert.equal(data.inspects.length,4);assert.equal(data.inspects[1].text,'A'.repeat(4000));assert.equal(data.inspects[2].text,'B'.repeat(4000));assert.equal(data.inspects[3].text,other.text);
+   assert.equal(store.research.checkpoint(run.id)!.inspectWindows!.length,4);
+   assert.ok(store.research.checkpoint(run.id)!.inspectWindows!.every(w=>!('text' in w)));
+   store.setSourceExcluded(run.id,'S2',true);return {action:'catalog',offset:0};
+  }
+  assert.deepEqual(data.inspects.map((w:{sourceKey:string})=>w.sourceKey),['S1','S3']);
+  return {action:'finish',claims:[]};
+ }}});
+ assert.equal(calls,3);assert.equal(store.research.checkpoint(run.id)!.pages.find(p=>p.sourceKey==='S2')!.text,long.text);
+ assert.deepEqual(store.research.checkpoint(run.id)!.inspectWindows!.map(w=>w.sourceKey),['S1','S3']);db.close();
+});
+for(const total of [0,10])test(`scoped undiscovered reads get one correction then stop without dispatch under model cap ${total}`,async()=>{
+ const {db,store,run}=setup();let round=0,calls=0;
+ const result=await runResearch({store,run,limits:{...unlimited,modelCalls:total},signal:new AbortController().signal,
+ firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(){calls++;return {pages:[profile],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){
+  assert.ok(++round<=2);if(round===2){assert.equal(input.checkpoint.lastBatchOutcomes![0]!.status,'url_not_discovered');assert.equal(input.checkpoint.noProgressBatches,1);}
+  return {action:'read',url:`https://fixture.test/unobserved-${round}`};
+ }}});
+ assert.equal(calls,1);assert.equal(round,2);assert.equal(result.stopReason,'no_new_evidence');
+ assert.equal(store.research.receipts(run.id).filter(r=>r.kind==='tool').length,1);assert.equal(store.research.checkpoint(run.id)!.limits!.modelCalls,total);db.close();
+});
+
+for(const total of [0,10])test(`scoped empty discovered pages stop after two attempts under model cap ${total}`,async()=>{
+ const {db,store,run}=setup();let round=0,calls=0;
+ const urls=[1,2,3].map(i=>`https://fixture.test/empty-${i}`);
+ const result=await runResearch({store,run,limits:{...unlimited,modelCalls:total},signal:new AbortController().signal,
+ firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(action){calls++;return {pages:[action.type==='github_profile'?{...profile,links:urls}:{...interview,url:urls[calls-2]!,text:'  ',links:[]}],requests:1,bytes:10,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){
+  assert.ok(++round<=2);if(round===2){assert.equal(input.checkpoint.lastBatchOutcomes![0]!.status,'no_new_material');assert.equal(input.checkpoint.noProgressBatches,1);}
+  return {action:'read',url:urls[round-1]!};
+ }}});
+ assert.equal(calls,3);assert.equal(round,2);assert.equal(result.stopReason,'no_new_evidence');
+ assert.equal(store.research.checkpoint(run.id)!.pages.length,3);assert.equal(store.research.checkpoint(run.id)!.noProgressBatches,2);
+ assert.equal(store.research.receipts(run.id).filter(r=>r.kind==='tool').length,3);db.close();
+});

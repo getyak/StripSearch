@@ -48,6 +48,11 @@ export interface ResearchCheckpoint {
  limits?: ResearchBudgetLimits;
  /** Latest locally inspected source window (an excerpt scope window, not full text). */
  inspect?: {sourceKey:string;offset:number};
+ /** Current flat batch's descriptors only; text is rebuilt from active pages. */
+ inspectWindows?: Array<{sourceKey:string;offset:number}>;
+ /** Controller observations, never original source evidence. */
+ lastBatchOutcomes?: Array<{action:string;target:string;status:string}>;
+ noProgressBatches?: number;
  catalog?: {offset:number;linkOffset:number;unknownOffset:number};
  localWindows?:string[];
  anchorUrl: string | null; identity: IdentityDraft | null; candidates: IdentityCandidate[];

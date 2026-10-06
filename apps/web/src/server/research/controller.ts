@@ -176,6 +176,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const ask=async(mode:'plan'|'verify',claims?:ResearchClaim[]):Promise<unknown>=>{
   active();const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
   if(checkpoint.inspect&&!activePages.some(p=>p.sourceKey===checkpoint.inspect!.sourceKey))delete checkpoint.inspect;
+  if(checkpoint.inspectWindows)checkpoint.inspectWindows=checkpoint.inspectWindows.filter(w=>activePages.some(p=>p.sourceKey===w.sourceKey)).slice(0,4);
   const decision=await planner.decide({mode,claims,question:run.question,checkpoint:{...checkpoint,pages:activePages},remainingTools:remainingOf(limits.toolCalls,budget.toolCalls),remainingModels:remainingOf(limits.modelCalls,budget.modelCalls)},signal,async request=>{
     active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
@@ -371,6 +372,8 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     else {const url=normalizeResearchUrl(action.url);if(!url||(!options.firstStepScope&&!allowedUrls().has(url)))throw new ResearchStop('url_not_discovered');}
    }
    let madeProgress=false;
+   const outcomes:NonNullable<ResearchCheckpoint['lastBatchOutcomes']>=[];
+   if(planned.some(p=>p.kind==='inspect'))checkpoint.inspectWindows=[];
    const localWindows=new Set(checkpoint.localWindows??[]);
    for(const step of planned){
     active();
@@ -379,7 +382,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      const maxLinks=Math.max(0,...activePages.slice(offset,offset+12).map(p=>p.links.length-1));
      const selected={offset,linkOffset:Math.min(step.linkOffset,maxLinks),unknownOffset:Math.min(step.unknownOffset,Math.max(0,checkpoint.unknowns.length-1))};
      const signature='catalog:'+digest({pages:stillActivePages().slice(selected.offset,selected.offset+12).map(p=>({key:p.sourceKey,text:p.text.slice(0,600),links:p.links.slice(selected.linkOffset,selected.linkOffset+20)})),unknowns:checkpoint.unknowns.slice(selected.unknownOffset,selected.unknownOffset+30)});
-     if(!localWindows.has(signature)){localWindows.add(signature);checkpoint.catalog=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];save();}
+     const fresh=!localWindows.has(signature);
+     if(fresh){localWindows.add(signature);checkpoint.catalog=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];save();}
+     outcomes.push({action:'catalog',target:String(offset),status:fresh?'new_window':'already_seen'});
      continue;
     }
     if(step.kind==='inspect'){
@@ -390,36 +395,48 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      if(!stillActivePages().some(p=>p.sourceKey===step.sourceKey))throw new ResearchStop('source_revoked');
      const selected={sourceKey:page.sourceKey,offset:Math.min(step.offset,page.text.length)};
      const signature='inspect:'+digest({sourceKey:selected.sourceKey,text:page.text.slice(selected.offset,selected.offset+4000)});
-     if(!localWindows.has(signature)){localWindows.add(signature);checkpoint.inspect=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];}
+     const fresh=!localWindows.has(signature);
+     if(fresh){localWindows.add(signature);checkpoint.inspect=selected;madeProgress=true;checkpoint.localWindows=[...localWindows];}
+     checkpoint.inspectWindows!.push(selected);
+     outcomes.push({action:'inspect',target:`${selected.sourceKey}:${selected.offset}`,status:fresh?'new_window':'already_seen'});
      save();continue;
     }
     const action=step.action;
     if(limits.toolCalls>0&&store.research.budget(run.id,limits).toolCalls>=limits.toolCalls){checkpoint.unknowns.push('本批读取额度已用完，剩余线索未读；保留分析与独立核验机会。');break;}
     const discoveredFrom=dependencies(action);
     const signature=digest(action);
-    if(seen.has(signature)){checkpoint.unknowns.push('同一资料动作已执行，不重复付费；需要选择新的证据线索。');continue;}
-    seen.add(signature);madeProgress=true;progress(action.type==='search'?'searching':'reading');
+    const target=action.type==='search'?action.query:action.url;
+    if(seen.has(signature)){checkpoint.unknowns.push('同一资料动作已执行，不重复付费；需要选择新的证据线索。');outcomes.push({action:action.type,target,status:'already_attempted'});continue;}
+    seen.add(signature);if(!options.firstStepScope)madeProgress=true;progress(action.type==='search'?'searching':'reading');
+    const before=new Map(stillActivePages().map(p=>[p.url,p]));
     try{const result=await perform(action);
      if(discoveredFrom.length&&!discoveredFrom.some(key=>store.isResearchSourceActive(run.id,key,run.ownerId)))throw new ResearchStop('source_revoked');
-     ingest(result,action,discoveredFrom);}
+     ingest(result,action,discoveredFrom);
+     const fresh=result.pages.some(p=>{
+      const url=normalizeResearchUrl(p.url);const next=checkpoint.pages.find(item=>item.url===url);const prior=url?before.get(url):undefined;
+      return !!next&&((next.text.trim().length>0&&next.text!==prior?.text)||next.links.some(link=>!prior?.links.includes(link)));
+     });
+     madeProgress ||= fresh;outcomes.push({action:action.type,target,status:fresh?'new_material':'no_new_material'});}
     catch(error){
      if(options.signal.aborted||deadline.signal.aborted)throw error;
      // A known adapter failure is a gap in this branch, not the end of all research.
      // Its settled attempt is retained and never retried automatically.
-     if(error instanceof ProviderError){checkpoint.unknowns.push(`资料分支未读成功：${action.type==='search'?'检索':action.url}（${error.code}）；不代表无资料。`);save();continue;}
+     if(error instanceof ProviderError){outcomes.push({action:action.type,target,status:error.code});checkpoint.unknowns.push(`资料分支未读成功：${action.type==='search'?'检索':action.url}（${error.code}）；不代表无资料。`);save();continue;}
      // A per-target scope refusal is fail-closed but not fatal: the refused
      // target was never fetched, the honest gap stays visible, and planning
      // continues under the same model/tool/elapsed caps with retained material.
-     if(error instanceof ResearchStop&&error.code==='url_not_discovered'&&options.firstStepScope){checkpoint.unknowns.push(`拒绝未在已读资料中发现的地址：${action.type==='search'?'检索':action.url}；未发送请求。请只选择目录中已观察到且属于所选账号的链接，或检查已存原文。`);save();continue;}
+     if(error instanceof ResearchStop&&error.code==='url_not_discovered'&&options.firstStepScope){outcomes.push({action:action.type,target,status:'url_not_discovered'});checkpoint.unknowns.push(`拒绝未在已读资料中发现的地址：${action.type==='search'?'检索':action.url}；未发送请求。请只选择目录中已观察到且属于所选账号的链接，或检查已存原文。`);save();continue;}
      if(error instanceof FirstStepSelectionError&&error.code==='out_of_scope'){
+      outcomes.push({action:action.type,target,status:'out_of_scope'});
       const dispatched=scopeRefusalRecord(error)?.dispatched===true;
       checkpoint.unknowns.push(`范围外目标拒绝${dispatched?'入库':'读取'}（${error.detail}）；${dispatched?'请求已发生，实际用量保留，返回材料未入库':'未发送请求'}，缺口保留，已读材料不变。`);save();continue;
      }
      throw error;
     }
    }
+   checkpoint.lastBatchOutcomes=outcomes;checkpoint.noProgressBatches=madeProgress?0:(checkpoint.noProgressBatches??0)+1;
    checkpoint.steps++;save();
-   if(!madeProgress&&limits.modelCalls===0)return finish(limits.toolCalls>0&&store.research.budget(run.id,limits).toolCalls>=limits.toolCalls?'budget_exhausted':'no_new_evidence','partial');
+   if(!madeProgress&&(options.firstStepScope?checkpoint.noProgressBatches>=2:limits.modelCalls===0))return finish(limits.toolCalls>0&&store.research.budget(run.id,limits).toolCalls>=limits.toolCalls?'budget_exhausted':'no_new_evidence','partial');
    } catch(error) {
     if(!options.firstStepScope||!(error instanceof ResearchStop)||!['invalid_decision','invalid_evidence','url_not_discovered'].includes(error.code))throw error;
     // Validate the whole proposal before dispatch. Corrective planning is a

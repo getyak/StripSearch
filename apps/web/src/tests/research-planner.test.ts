@@ -79,3 +79,15 @@ test('a timeline cannot push other selected accounts out of default context and 
  assert.equal(data.sourceCatalog.mode,'selected_accounts_and_recent');assert.equal(data.sourceCatalog.offset,null);assert.deepEqual(data.sourceCatalog.sourceKeys,data.sources.map((p:{sourceKey:string})=>p.sourceKey));assert.equal(JSON.stringify(checkpoint),original);
  const requested=JSON.parse(buildResearchPrompt({question:'Fixture',checkpoint:{...checkpoint,catalog:{offset:50,linkOffset:0,unknownOffset:0}},remainingTools:8,remainingModels:8}));assert.equal(requested.sources[0].sourceKey,pages[50]!.sourceKey);assert.equal(requested.sourceCatalog.offset,50);assert.equal(requested.sourceCatalog.mode,undefined);
 });
+
+
+test('batch descriptor text is rebuilt and scoped instead of trusting cached or outside text',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');const {classifyFirstStepUrl}=await import('../shared/first-step-discovery.js');
+ const url='https://fixture-window-author.dev/';const ref=classifyFirstStepUrl(url);assert.ok(ref.ok);
+ const page={sourceKey:'S1',url,title:'Fixture',text:'EXACT_WINDOW',kind:'profile' as const,publishedAt:null,links:[],limitations:[]};
+ const checkpoint={phase:'planning',steps:2,startedAt:0,elapsedMs:0,anchorUrl:url,identity:null,candidates:[],pages:[page,{...page,sourceKey:'S2',url:'https://other-window-author.dev/',text:'OUTSIDE_SCOPE'}],claims:[],unknowns:[],stopReason:null,
+ inspectWindows:[{sourceKey:'S1',offset:0,text:'FAKE_CACHE'},{sourceKey:'S2',offset:0},{sourceKey:'REVOKED',offset:0},{sourceKey:'S1',offset:-1}],firstStep:{caseId:'case',scopeVersion:1,discoveryRevision:1,selectedAccountIds:['a'],independentAccountIds:[],clusterId:'c',displayName:'Fixture',anchorUrl:url,accountKeys:{[ref.ref.accountKey]:'a'},accounts:[{accountId:'a',accountKey:ref.ref.accountKey,profileUrl:url,allowedScope:'public_history' as const,independent:false,accessCoverage:'read'}]}};
+ const data=JSON.parse(buildResearchPrompt({question:'Fixture',checkpoint,remainingTools:5,remainingModels:5}));
+ assert.equal(data.inspects.length,1);assert.equal(data.inspects[0].text,page.text);assert.equal(data.inspects[0].offset,0);assert.equal(data.inspects[0].excerpt,true);assert.equal(data.inspect.text,page.text);assert.doesNotMatch(JSON.stringify(data.inspects),/FAKE_CACHE|OUTSIDE_SCOPE/);
+ assert.doesNotMatch(data.firstStepScope.planningInstruction,/at most6 planning steps/);
+});
