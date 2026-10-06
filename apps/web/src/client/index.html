@@ -17,10 +17,10 @@
     <header class="site-nav">
       <div class="container nav-inner">
         <a class="brand" href="#/" id="brand-home" data-nav-home aria-label="StripSearch 首页">
-          <span class="brand-mark" aria-hidden="true">SS</span>
+          <span class="brand-mark" aria-hidden="true">S<span>S</span></span>
           <span>StripSearch</span>
         </a>
-        <nav class="nav-links" aria-label="主要导航"><a href="#example">了解报告</a></nav>
+        <nav class="nav-links" aria-label="主要导航"><a href="#example">产品</a><a href="#boundaries">研究方法</a><a href="#pricing">价格</a></nav>
         <div class="nav-actions">
           <button class="button" type="button" id="open-auth" hidden>登录 / 注册</button>
           <div class="user-menu" id="user-menu" hidden>
@@ -39,12 +39,13 @@
       <main id="main">
         <!-- ============ HOME ============ -->
         <div id="view-home">
-          <section class="home-hero" aria-labelledby="hero-title">
-            <div class="home-band home-hero-inner">
-              <div class="hero-copy">
-                <p class="hero-kicker">PUBLIC LIVES. OPEN CONTEXT.</p>
-                <h1 id="hero-title">看见<br />名字之外。</h1>
-                <p class="hero-lead">输入一个名字或公开主页链接，沿着公开材料追溯来源，分清哪些有据可查、哪些还不能下结论。</p>
+          <section class="home-journey home-band" id="example" aria-label="从线索到理解">
+            <div class="journey-story">
+              <section class="journey-chapter hero-copy" data-journey-step="1" aria-labelledby="hero-title">
+                <div class="chapter-copy">
+                  <p class="hero-kicker">理解一个人，从公开材料开始。</p>
+                  <h1 id="hero-title">看见名字之外。<br /><span>沿着证据理解。</span></h1>
+                  <p class="hero-lead">输入姓名或公开用户名，确认身份关系，让每一项理解都有来处。</p>
                 <div class="composer-wrap">
                   <form class="composer" id="research-form" novalidate>
                     <div class="composer-body">
@@ -65,107 +66,105 @@
                   </form>
                   <div class="entry-help"><button class="clear-input" type="button" id="open-example">填入公开主页示例</button><span class="helper">提交后开始，资料将保存到你的账号。</span></div>
                 </div>
-              </div>
-
-              <div class="artifact" id="home-artifact" data-stage="4" aria-labelledby="artifact-title">
-                <div class="artifact-head">
-                  <p class="artifact-caption">原创合成演示 · 非实时研究</p>
-                  <h2 id="artifact-title">Lantern · 2025.06 更新记录</h2>
-                  <p class="artifact-context" id="artifact-context">结论 · [S1] 更新记录 · 2025 年 6 月</p>
                 </div>
-                <div class="artifact-path" aria-hidden="true"><span></span></div>
-                <div class="artifact-controls">
-                  <div class="artifact-stages" id="artifact-stages" hidden role="group" aria-label="演示步骤">
-                    <button class="artifact-stage-btn" type="button" data-stage-button="1">捕捉</button>
-                    <button class="artifact-stage-btn" type="button" data-stage-button="2">发现</button>
-                    <button class="artifact-stage-btn" type="button" data-stage-button="3">整理</button>
-                    <button class="artifact-stage-btn" type="button" data-stage-button="4">理解</button>
-                  </div>
-                  <div class="artifact-playback">
-                    <button class="button primary" type="button" id="demo-play" hidden>看一次研究，如何发生</button>
-                    <button class="button" type="button" id="demo-toggle" hidden>暂停</button>
-                    <button class="button ghost" type="button" id="demo-jump" hidden>直接看结果</button>
-                    <button class="button ghost" type="button" id="demo-replay" hidden>重新播放</button>
-                  </div>
-                  <p class="artifact-status" id="demo-status" role="status"></p>
+                <div class="journey-slot" data-stage-slot="1">
+                  <section class="journey-panel seed-panel" data-journey-panel="1" aria-label="输入线索 · 合成示例">
+                    <div class="seed-intro"><span class="seed-monogram" aria-hidden="true">林</span><p>新的研究<strong>从一条公开线索开始。</strong></p></div>
+                    <div class="seed-query"><span class="panel-label">姓名或公开用户名</span><strong>@linzhou</strong><span class="seed-arrow" aria-hidden="true">↗</span></div>
+                    <div class="seed-question"><p class="panel-label">你想了解什么？</p><p>林舟做过哪些作品？<br />公开材料能告诉我们什么？</p></div>
+                    <div class="seed-sources"><span>姓名</span><span>公开主页</span><span>研究问题</span></div>
+                    <p class="panel-footnote">一条线索是起点，身份仍需要核对。</p>
+                  </section>
+                  <p class="synthetic-caption">原创合成示例 · 非实时研究</p>
                 </div>
-                <div class="artifact-rows">
-                  <div class="artifact-seed" id="artifact-seed">
-                    <span class="artifact-label">研究起点</span>
-                    <strong>林舟</strong>
-                    <span class="artifact-note">合成人物 · 项目主页线索</span>
-                  </div>
-                  <div class="artifact-strips" id="artifact-strips">
-                    <span class="artifact-label">来源</span>
-                    <p class="artifact-note" id="artifact-strip-empty" hidden>来源尚未出现。</p>
-                    <button class="artifact-strip" type="button" id="artifact-source-strip" hidden aria-expanded="false" aria-controls="artifact-source-detail">[S1] Lantern 2025.06 更新记录 · 2025 年 6 月</button>
-                    <div class="artifact-source-detail" id="artifact-source-detail">
-                      <p><span class="artifact-label">原文</span>“新增离线阅读与本地索引。”</p>
-                      <p><span class="artifact-label">日期</span>2025 年 6 月 · 原创合成更新记录</p>
-                      <p><span class="artifact-label">能说明</span>更新记录宣布了离线阅读与本地索引功能。</p>
-                      <p><span class="artifact-label">还不能证明</span>由某个人独立完成，或实际使用效果。</p>
+              </section>
+              <section class="journey-chapter" data-journey-step="2" aria-labelledby="identity-chapter-title">
+                <div class="chapter-copy">
+                  <p class="chapter-kicker">确认身份关系</p>
+                  <h2 id="identity-chapter-title">先找到这个人，<br />再连接他的资料。</h2>
+                  <p class="chapter-lead">公开主页、账号与作品逐渐连接。同名的人分开保留，关系不明确时，等你确认。</p>
+                  <div class="chapter-aside"><strong>名字相同，不代表是同一个人。</strong><p>资料属于谁，与资料说得对不对，分别核查。</p></div>
+                </div>
+                <div class="journey-slot" data-stage-slot="2">
+                  <section class="journey-panel identity-panel" data-journey-panel="2" aria-label="身份关系 · 合成示例">
+                    <div class="identity-person"><span class="seed-monogram" aria-hidden="true">林</span><div><p class="panel-label">研究对象 · 合成人物</p><h3>林舟 <span>@linzhou</span></h3></div></div>
+                    <p class="relation-label">沿公开主页连接的材料</p>
+                    <div class="relation-tree">
+                      <div class="relation-row"><span class="relation-symbol" aria-hidden="true">↗</span><div><strong>公开项目主页</strong><small>种子线索</small></div><span class="relation-state">已选起点</span></div>
+                      <div class="relation-row"><span class="relation-symbol" aria-hidden="true">↳</span><div><strong>Lantern</strong><small>主页链接的项目</small></div><span class="relation-state">互链线索</span></div>
+                      <div class="relation-row relation-unresolved"><span class="relation-symbol" aria-hidden="true">?</span><div><strong>另一位「林舟」</strong><small>同名候选 · 保持独立</small></div><span class="relation-state unresolved">待确认</span></div>
                     </div>
-                  </div>
-                  <div class="artifact-stage-area" id="artifact-stage-area">
-                    <section class="artifact-stage" data-stage="1" aria-labelledby="artifact-stage-1-title">
-                      <p class="artifact-label">01 / 捕捉</p>
-                      <h3 id="artifact-stage-1-title">从一个名字或主页开始。</h3>
-                      <p>先确认这条公开线索指向的是谁；同名不自动合并。</p>
-                    </section>
-                    <section class="artifact-stage" data-stage="2" aria-labelledby="artifact-stage-2-title">
-                      <p class="artifact-label">02 / 发现</p>
-                      <h3 id="artifact-stage-2-title">让来源出现。</h3>
-                      <p>[S1] 出自公开更新记录：Lantern · 2025 年 6 月。出处与日期随材料一起保留。</p>
-                    </section>
-                    <section class="artifact-stage" data-stage="3" aria-labelledby="artifact-stage-3-title">
-                      <p class="artifact-label">03 / 整理</p>
-                      <h3 id="artifact-stage-3-title">把材料放回时间线。</h3>
-                      <p>2025 年 6 月 · 更新记录写明新增功能。没有材料的时段保持空白，不做补写。</p>
-                    </section>
-                    <section class="artifact-stage" data-stage="4" aria-labelledby="artifact-stage-4-title">
-                      <p class="artifact-label">04 / 理解</p>
-                      <h3 id="artifact-stage-4-title">结论有支持，也有未知。</h3>
-                      <blockquote>“新增离线阅读与本地索引。”</blockquote>
-                      <p><strong>能说明：</strong>更新记录宣布了离线阅读与本地索引功能。</p>
-                      <p><strong>还不能证明：</strong>这份记录不能证明由某个人独立完成，也不能说明实际使用效果。</p>
-                    </section>
-                  </div>
+                    <p class="panel-footnote">这里只展示合成关系；真实研究仍需核对身份。</p>
+                  </section>
+                  <p class="synthetic-caption">原创合成示例 · 非实时研究</p>
                 </div>
-
-              </div>
+              </section>
+              <section class="journey-chapter" data-journey-step="3" aria-labelledby="evidence-chapter-title">
+                <div class="chapter-copy">
+                  <p class="chapter-kicker">沿证据形成理解</p>
+                  <h2 id="evidence-chapter-title">读到结论。<br />也看得见它的来处。</h2>
+                  <p class="chapter-lead">作品、行动与公开表达进入同一份报告。出处在旁边展开，有支持的事实、可能的解释与未知，各在其位。</p>
+                  <div class="chapter-aside"><strong>有材料的地方展开，没有的地方留白。</strong><p>保留相反证据；来源撤回后，依赖它的判断也需复核。</p></div>
+                </div>
+                <div class="journey-slot" data-stage-slot="3">
+                  <section class="journey-panel evidence-panel" data-journey-panel="3" aria-label="证据与理解 · 合成示例">
+                    <div class="demo-report">
+                      <p class="panel-label">林舟 / 作品研究</p><h3>关于 Lantern，<br />我们知道什么？</h3>
+                      <div class="report-fact"><span class="report-category">有材料支持</span><p>2025 年 6 月，更新记录宣布了离线阅读与本地索引功能。<button type="button" id="home-citation" aria-controls="home-source" aria-expanded="false">[S1]</button></p></div>
+                      <div class="report-unknown"><span class="report-category">还不确定</span><p>林舟的具体贡献与实际使用效果，需要更多材料。</p></div>
+                      <p class="report-inference">可能的解释，应与已支持事实分开呈现。</p>
+                    </div>
+                    <aside class="demo-inspector" aria-label="出处检查器">
+                      <div class="inspector-eyebrow"><span>出处</span><span>[S1]</span></div><h4>Lantern 更新记录</h4><p class="source-date">2025 年 6 月</p>
+                      <blockquote>“新增离线阅读<br />与本地索引。”</blockquote>
+                      <p class="source-limit">能说明：记录宣布了功能。<br />还不能证明：个人独立贡献。</p>
+                      <details id="home-source"><summary>核查这份材料 <span aria-hidden="true">+</span></summary><div><p><strong>原文：</strong>“新增离线阅读与本地索引。”</p><p><strong>来源：</strong>2025 年 6 月原创合成更新记录。</p><p><strong>限制：</strong>不能证明由某个人独立完成，也不能说明实际使用效果。</p></div></details>
+                    </aside>
+                  </section>
+                  <p class="synthetic-caption">原创合成示例 · 非实时研究</p>
+                </div>
+              </section>
             </div>
+            <aside class="journey-visual" id="journey-visual" aria-label="连续研究工作区 · 合成示例" hidden>
+              <div class="journey-window" id="home-artifact" data-stage="1">
+                <div class="window-toolbar"><span class="window-brand">StripSearch</span><span id="journey-context">新的研究</span><span class="window-mark" aria-hidden="true">↗</span></div>
+                <ol class="journey-phases" aria-label="研究阶段"><li data-phase="1">输入线索</li><li data-phase="2">身份关系</li><li data-phase="3">证据与理解</li></ol>
+                <div class="journey-stage-host" id="journey-stage-host"></div>
+                <p class="synthetic-caption">原创合成示例 · 非实时研究</p>
+              </div>
+            </aside>
           </section>
 
-          <section class="home-proof" id="example" aria-labelledby="example-title">
+          <section class="home-export" aria-label="报告格式">
+            <div class="home-band export-inner"><p>同一份研究。<br /><strong>以你需要的形式带走。</strong></p><ul aria-label="支持的导出格式"><li>Markdown</li><li>JSON</li><li>HTML</li><li>PDF</li></ul><p class="export-note">换一种格式，<br />不改变事实与出处。</p></div>
+          </section>
+
+          <section class="home-method home-band" aria-labelledby="method-title">
+            <div class="method-heading"><p class="chapter-kicker">为理解而研究</p><h2 id="method-title">少一点先入为主。<br />多一点上下文。</h2><p>采访前、读完作品后，或整理自己的公开经历时，从材料出发。</p></div>
+            <div class="method-notes"><article><span class="method-glyph" aria-hidden="true">↗</span><h3>从作品读懂行动</h3><p>把项目、贡献与公开表达放回时间里，分清自述与有支持的事实。</p></article><article><span class="method-glyph" aria-hidden="true">↔</span><h3>让相反证据也有位置</h3><p>发现冲突就保留冲突。信息不充分时，明确写下还不知道什么。</p></article><article><span class="method-glyph" aria-hidden="true">↶</span><h3>理解可以被修订</h3><p>核查出处，排除不适用的材料，让依赖它的结论重新接受检验。</p></article></div>
+          </section>
+
+          <section class="home-pricing" id="pricing" aria-labelledby="pricing-title">
             <div class="home-band">
-              <h2 id="example-title">观点有声音。<br />理解有来处。</h2>
-              <div class="proof-pair">
-                <div class="proof-col">
-                  <p class="proof-index">01 / 原始材料</p>
-                  <p class="proof-heading">2025 年 6 月<br />Lantern 更新记录</p>
-                  <p class="proof-note">合成材料中的时间、行动和原话。</p>
-                  <blockquote class="proof-original"><span>[S1] 更新记录原文</span><p>“新增离线阅读与本地索引。”</p></blockquote>
-                </div>
-                <div class="proof-col">
-                  <p class="proof-index">02 / 研究片段</p>
-                  <p class="proof-heading">沿着公开材料，<br />理解一段脉络。</p>
-                  <p class="proof-note">点击一句话的出处，回到支持它的材料。</p>
-                  <p class="proof-claim">更新记录宣布了离线阅读与本地索引功能。</p>
-                  <details class="proof-evidence">
-                    <summary>[S1] 这句话的依据</summary>
-                    <div>
-                      <p>原文：“新增离线阅读与本地索引。”</p>
-                      <p>日期：2025 年 6 月 · 原创合成更新记录。</p>
-                      <p>能说明：功能已在更新记录中宣布。</p>
-                      <p>还不能证明：由某个人独立完成，或实际使用效果。</p>
-                    </div>
-                  </details>
-                  <p class="artifact-caption">原创合成演示 · 非实时研究</p>
-                </div>
+              <div class="pricing-heading"><div><p class="chapter-kicker">订阅与价格</p><h2 id="pricing-title">选择适合你的<br />研究方式。</h2></div><p>从开源自托管开始。<br />个人与团队订阅正在筹备，<br />付费计费尚未开放。</p></div>
+              <div class="pricing-grid">
+                <article class="plan plan-current"><p class="plan-overline">现在可用</p><h3>开源自托管</h3><p class="plan-description">自己部署，使用自己的服务配置。</p><p class="plan-price">免费<span>开源代码</span></p><p class="plan-cost">模型、API 与服务器费用另计。</p><a class="button primary" href="https://github.com/cubxxw/StripSearch#部署" target="_blank" rel="noopener noreferrer">查看部署说明 <span aria-hidden="true">↗</span></a><ul><li>本地 Web alpha</li><li>按账号隔离研究记录</li><li>带出处的报告与四种导出</li></ul></article>
+                <article class="plan"><p class="plan-overline">筹备中</p><h3>个人订阅</h3><p class="plan-description">为持续研究公开作品的人而设计。</p><p class="plan-price pending">定价待公布</p><p class="plan-cost">尚未开放订阅或收款。</p><details class="plan-details"><summary>了解方案 <span aria-hidden="true">+</span></summary><p>计划提供托管研究体验。具体额度、计费方式与开放时间待确定，当前不会创建订阅。</p></details><ul><li>托管体验为规划方向</li><li>能力与额度以正式发布为准</li><li>发布前公布价格与费用边界</li></ul></article>
+                <article class="plan"><p class="plan-overline">筹备中</p><h3>团队订阅</h3><p class="plan-description">为需要共同核查材料的团队探索。</p><p class="plan-price pending">定价待公布</p><p class="plan-cost">尚未开放订阅或收款。</p><details class="plan-details"><summary>了解方案 <span aria-hidden="true">+</span></summary><p>团队协作与集中管理仍在规划；当前 alpha 不提供共享团队空间、团队计费或服务承诺。</p></details><ul><li>协作与权限机制待验证</li><li>团队计费尚未接入</li><li>上线范围以验证结果为准</li></ul></article>
               </div>
             </div>
           </section>
-          <details class="container scope-note" id="boundaries"><summary>公开资料，有据可查。</summary><p>用于理解公开作品、准备采访和授权自我研究。保留出处、相反证据与未知；不提供私人位置追踪或匿名身份揭露。</p></details>
+
+          <section class="home-faq home-band" id="boundaries" aria-labelledby="faq-title">
+            <div><p class="chapter-kicker">使用之前</p><h2 id="faq-title">一些值得<br />说清楚的事。</h2></div>
+            <div class="faq-list">
+              <details><summary>滚动中的研究是真实运行吗？<span aria-hidden="true">+</span></summary><p>这是原创合成示例，滚动不会发起研究。只有提交上方输入后，才进入当前部署的真实研究流程。</p></details>
+              <details><summary>同名账号会自动合并吗？<span aria-hidden="true">+</span></summary><p>不会。同名候选与身份归属应分别核查；资料关联到一个人，也不代表资料中的每项说法已经得到支持。</p></details>
+              <details><summary>没有足够材料时会怎样？<span aria-hidden="true">+</span></summary><p>保留有限发现、冲突和未知。没有材料的时段不会被补写，推测也不能变成已支持的事实。</p></details>
+              <details><summary>可以在哪里使用？订阅开放了吗？<span aria-hidden="true">+</span></summary><p>当前提供可自托管的 Web alpha。个人与团队付费订阅尚未开放；第三方工具的实际覆盖、访问与效果需分别验证。</p></details>
+              <details><summary>哪些资料可以用于研究？<span aria-hidden="true">+</span></summary><p>用于公开职业作品、采访准备与授权自我研究。普通个人的材料需要明确授权；不提供私人位置追踪、匿名身份揭露或访问控制绕过。</p></details>
+            </div>
+          </section>
         </div>
 
         <!-- ============ APP ============ -->

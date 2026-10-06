@@ -90,7 +90,7 @@ const state: AppState = {
 const api = new ApiClient();
 const auth = createAuthController(api);
 // Homepage motion is isolated from the research/auth/review flows: it only
-// renders the synthetic home artifact and never touches the API.
+// drives the local scroll narrative and never touches the API.
 const homeMotion = createHomeMotion();
 
 const FOLLOWUP_PROMPTS = [
