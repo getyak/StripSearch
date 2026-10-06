@@ -202,10 +202,12 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const others = make('details', {className:'first-step-other-people', attrs:{'data-detail-key':'other-people'}});
     others.appendChild(make('summary', {text:`其它人物或主页线索（${String(otherCount)}）`}));
     clusterBox.dataset.single = recommendedOnly || view.clusters.length === 1 ? 'true' : 'false';
+    clusterBox.dataset.compact = recommendedOnly ? 'true' : 'false';
     if (recommendedOnly) clusterBox.appendChild(make('p',{className:'muted',text:'建议目标 · 可展开其它候选更换；点击继续才会提交。'}));
     for (const cluster of view.clusters) {
       const destination = prominentIds.has(cluster.clusterId) ? clusterBox : others;
       const chosen = clusterId === cluster.clusterId;
+      const compact = recommendedOnly && chosen;
       const button = make('button', {
         className: `first-step-cluster${chosen ? ' chosen' : ''}`,
         attrs: { type: 'button', 'aria-pressed': chosen ? 'true' : 'false', 'data-focus-key': `cluster-${cluster.clusterId}` },
@@ -237,8 +239,9 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       const excerpt = previewLead?.quote ?? cluster.anchorBasis?.quote;
       const excerptSource = previewLead?.sourceUrl ?? cluster.anchorBasis?.sourceUrl;
       if (excerpt) {
-        button.appendChild(make('small', { className: 'first-step-lead', text: `原文摘录：“${excerptText(excerpt).slice(0,180)}${excerptText(excerpt).length>180?'…':''}”` }));
-        if (excerptSource) button.appendChild(make('small', { className: 'first-step-lead-source', text: `来源：${shortUrl(excerptSource)}` }));
+        const previewLength = compact ? 80 : 180;
+        button.appendChild(make('small', { className: 'first-step-lead', text: `原文摘录：“${excerptText(excerpt).slice(0,previewLength)}${excerptText(excerpt).length>previewLength?'…':''}”` }));
+        if (excerptSource && (!compact || shortUrl(excerptSource) !== shortUrl(cluster.anchorUrl))) button.appendChild(make('small', { className: 'first-step-lead-source', text: `来源：${shortUrl(excerptSource)}` }));
       }
       if (cluster.conflicts.length > 0) {
         button.appendChild(make('small', { className: 'first-step-conflict', text: cluster.conflicts.join('；') }));
@@ -506,7 +509,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       make('div', {
         children: [
           make('span', { className: 'first-step-platform', text: account.platformLabel }),
-          make('span', { className: 'first-step-handle', text: [account.handle ? `@${account.handle}` : '', shortUrl(account.profileUrl)].filter(Boolean).join(' · ') })
+          make('span', { className: 'first-step-handle', text: [account.handle && account.handle !== shortUrl(account.profileUrl) ? `@${account.handle}` : '', shortUrl(account.profileUrl)].filter(Boolean).join(' · ') })
         ]
       })
     );
