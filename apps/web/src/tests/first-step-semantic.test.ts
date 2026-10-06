@@ -1168,3 +1168,10 @@ for(const variant of ['encoded','relative'])test(`actual discovery keeps a legit
  const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[own,page(target,'Mira Kepler')],read:url=>url===home?[own]:[page(target,'Synthetic profile.')],propose:async()=>({proposals:[],leads:[]})});
  try{const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===target)!;assert.ok(account);assert.equal(account.identity.state,'supported');if(variant==='encoded')assert.equal(account.defaultSuggestion.suggested,true);assert.ok(account.identity.evidence.some(e=>e.role==='identity_support'));}finally{h.db.close();}
 });
+
+for(const phrase of ['我的账号在','My GitHub profile is at'])test(`actual target-local ownership preserves a locative declaration: ${phrase}`,async()=>{
+ const text=`<p>${phrase}<a href="${github}">GitHub</a></p>`;
+ const own=page(home,text,{links:[github],linkContexts:extractOriginalLinkContexts(text,home)});
+ const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[own,page(github,'Mira Kepler')],read:url=>url===home?[own]:[page(github,'Synthetic profile.')],propose:async()=>({proposals:[],leads:[]})});
+ try{const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===github)!;assert.equal(account.identity.state,'supported');assert.ok(account.identity.evidence.some(e=>e.role==='identity_support'));}finally{h.db.close();}
+});

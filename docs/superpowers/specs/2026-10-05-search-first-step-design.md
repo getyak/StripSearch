@@ -273,3 +273,5 @@ scope for further research when budget allows. A linked book's authorship
 cannot borrow unrelated find-me text to establish ownership of its host.
 Sentence excerpt locators bind the trimmed literal UTF-16 span (1-based display,
 inclusive end), without changing source bytes or historical receipts.
+
+Current identity dependencies are rechecked in the read-only projection, atomic selection and Fetch guard. Completed original tool results bind source URL and full content hash; target-specific extraction and unchanged quotes are judged under the current semantic guard. A historical supported facet cannot bypass that guard. Failed dependencies show review and require independent account scope; historical evidence, selections and reports stay intact. Current conflicts suppress default suggestions. Source linkage and named ownership remain separate.

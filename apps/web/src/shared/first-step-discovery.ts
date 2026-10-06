@@ -1170,7 +1170,7 @@ export function linkRoleFromContext(input: {
     const tail=marker?readable.slice(marker.index!+marker[0].length).trim():null;
     // A preceding self-link can extend through a simple link list, but new
     // prose/action after it starts another relationship, not an owned list.
-    if(tail!==null&&!/^(?:(?:on|at|and|or|here|below|profiles?|accounts?|pages?|links?|channels?|websites?|blogs?|newsletters?)\b|网站|博客|频道|主页|账号|通讯|[\s:：,，.;/＆&()\-–—])*$/iu.test(tail))localQuote='';
+    if(tail!==null&&!/^(?:(?:on|at|and|or|is|are|here|below|profiles?|accounts?|pages?|links?|channels?|websites?|blogs?|newsletters?)\b|网站|博客|频道|主页|账号|通讯|在|和|与|或|以及|位于|[\s:：,，.;/＆&()\-–—])*$/iu.test(tail))localQuote='';
   }
   const context=classifyLinkContext(localQuote);
   if(input.binding==='html_rel_me'&&input.surface==='authorial'&&input.sourceIsOwnProfilePage&&!input.sourceIsRestrictedSurface&&!input.sourceIsSocialPlatform){

@@ -3,6 +3,7 @@ import { classifyFirstStepUrl } from '../shared/first-step-discovery.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
+import {identitySemanticReviewAccounts} from './research/identity-semantic-validity.js';
 import { CompletionStore } from './research/completion-store.js';
 import type {
   AnswerSectionDraft,
@@ -617,10 +618,12 @@ export class Store {
     const merged = new Set(binding.selectedAccountIds.filter(id => !binding.independentAccountIds.includes(id)));
     if (merged.size === 0) return true;
     if (!this.cases.getCase(ownerId, binding.caseId)) return false;
-    const current = new Map(this.cases.reportView(ownerId, binding.caseId).accounts.map(account => [account.accountId, account]));
+    const report=this.cases.reportView(ownerId,binding.caseId);
+    const semanticReview=identitySemanticReviewAccounts(this.db,report);
+    const current = new Map(report.accounts.map(account => [account.accountId, account]));
     return [...new Set(binding.identityDependencyAccountIds ?? merged)].every(id => {
       const account = current.get(id);
-      return account && account.identityValidity === 'valid' && !['disputed', 'rejected', 'revoked'].includes(account.identitySupport.state);
+      return account && !semanticReview.has(id) && account.identityValidity === 'valid' && !['disputed', 'rejected', 'revoked'].includes(account.identitySupport.state);
     });
   }
 

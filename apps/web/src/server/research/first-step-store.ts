@@ -16,6 +16,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import {identitySemanticReviewAccounts} from './identity-semantic-validity.js';
 import type { DB } from '../db/index.js';
 import {
   asScopeVersion,
@@ -542,24 +543,27 @@ export class FirstStepStore {
   /** Re-derive dependency validity without rewriting stored evidence or facets. */
   private projectCurrentAccounts(ownerId: string, caseId: string, stored: readonly FirstStepAccountView[]): FirstStepAccountView[] {
     const report=this.cases.reportView(ownerId,caseId);
+    const semanticReview=identitySemanticReviewAccounts(this.db,report);
     const live = new Map(report.accounts.map(account => [account.accountId, account]));
     const evidence = this.accountEvidenceViews(ownerId, caseId);
     return stored.map(account => {
       const current = live.get(account.accountId);
       if (!current) return account;
-      const valid = current.identityValidity === 'valid';
+      const semanticReason=semanticReview.has(account.accountId)?'当前归属语义核验未通过；旧证据与选择保留，请独立研究该账号或重新确认关联。':null;
+      const valid = current.identityValidity === 'valid'&&!semanticReason;
+      const conflicted=account.identity.conflicts.length>0||current.identitySupport.counterevidenceIds.length>0;
       const ownerValid=current.ownerValidity!=='review'&&!['disputed','contradicted'].includes(current.identitySupport.ownerAnchor?.state??'unbound');
       const active = evidence.get(account.accountId) ?? [];
       return { ...account,
         identity: { ...account.identity, state: current.identitySupport.state,
-          validity: valid ? 'valid' : 'review', reviewReason: current.identityReviewReason,
+          validity: valid ? 'valid' : 'review', reviewReason: semanticReason??current.identityReviewReason,
           evidence: active.filter(item => item.role === 'identity_support'),
           counterevidence: active.filter(item => item.role === 'identity_counterevidence'),
-          conflicts: [...account.identity.conflicts, ...valid ? [] : [current.identityReviewReason ?? '原归属依据已失效，请重新核对。']],
+          conflicts: [...new Set([...account.identity.conflicts, ...valid ? [] : [semanticReason??current.identityReviewReason ?? '原归属依据已失效，请重新核对。']])],
           ...this.ownerView(ownerId,caseId,account.accountId,report) },
-        defaultSuggestion: valid && ownerValid && current.identitySupport.state === 'supported' && active.some(item => item.role === 'identity_support' && current.identitySupport.evidenceIds.includes(item.evidenceId))
-          ? account.defaultSuggestion : { suggested: false, reason: !ownerValid?'姓名归属依据已失效或存在冲突，不再默认推荐。':valid ? '当前没有有效归属支撑，不默认推荐。' : '原归属依据已失效，不再默认推荐。' },
-        requiresIndependentScope: account.requiresIndependentScope || !valid || !ownerValid || current.identitySupport.state !== 'supported',
+        defaultSuggestion: valid && ownerValid && !conflicted && current.identitySupport.state === 'supported' && active.some(item => item.role === 'identity_support' && current.identitySupport.evidenceIds.includes(item.evidenceId))
+          ? account.defaultSuggestion : { suggested: false, reason: conflicted?'归属存在冲突或反向依据，不再默认推荐。':!ownerValid?'姓名归属依据已失效或存在冲突，不再默认推荐。':valid ? '当前没有有效归属支撑，不默认推荐。' : '原归属依据已失效，不再默认推荐。' },
+        requiresIndependentScope: account.requiresIndependentScope || conflicted || !valid || !ownerValid || current.identitySupport.state !== 'supported',
         userSelection: current.userSelection, allowedScope: current.allowedScope,
         researchValue: current.researchValue, accessCoverage: current.accessCoverage };
     });
