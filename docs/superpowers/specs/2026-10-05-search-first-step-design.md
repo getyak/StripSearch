@@ -86,7 +86,7 @@
 
 旧缓存的当前语义投影同样绑定实际 completed 请求地址、返回原文与全文 hash；地址不同须有经核验的实际同文档/原生别名回执。HTML 属性文字不能作为可见自述；literal URL 也须绑定实际可见文字节点，script、隐藏节点、引用/活动流不能授予人物范围。旧原文、旧判断与失败证据保持可读，不回写为新规则已通过。后置谓语须为完整声明；问句、条件句、书籍名称或书签用途不能升级归属。
 
-Markdown 使用 `mdast-util-from-markdown@2.0.2` 的原始位置语法树识别代码块、行内代码和引用范围；这些范围里的 HTML 链接、Markdown 链接和 literal URL 共用受限规则，不能成为人物归属。解析不改原文，不生成替代引文；普通自链与列表保留。依赖与语法依据见[官方库](https://github.com/syntax-tree/mdast-util-from-markdown)和[CommonMark](https://spec.commonmark.org/0.31.2/)。
+Markdown 使用 `mdast-util-from-markdown@2.0.2` 的原始位置语法树识别代码块、行内代码和引用范围；这些范围里的 HTML 链接、Markdown 链接和 literal URL 共用受限规则，不能成为人物归属。完整 HTML 文档按 HTML 语义解释，排版缩进不是 Markdown 代码；Markdown 链接须对应真实 AST link 节点，不能从 HTML 或代码节点正则制造。解析不改原文，不生成替代引文；普通自链与列表保留。依赖与语法依据见[官方库](https://github.com/syntax-tree/mdast-util-from-markdown)和[CommonMark](https://spec.commonmark.org/0.31.2/)。
 
 1. **输入与冻结。** 复用分类与路线契约，冻结 inputRevision、registryVersion/hash、policyVersion 和允许外发范围。自然姓名是 name_query，不是 username。完整问题与单独姓名线索分开，用户问题不直接拿来拼 profile URL。
 2. **宽召回。** 姓名/实际观察别名的普通网页检索、个人站/机构资料、适用平台路线。初始波至少覆盖已具备能力的锚点、作品、表达/内容路线；只有供应商不支持、预算/授权不足等真实回执才可跳过。不要以首个 LinkedIn 命中提前停下。初始波范围在请求前冻结，不按结果好坏删义务。

@@ -21,7 +21,7 @@ export function inspectWindow(page:{sourceKey:string;url:string;text:string},off
  const text=page.text.slice(start,start+size);
  return {sourceKey:page.sourceKey,url:page.url,offset:start,length:text.length,textLength,text};
 }
-export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis'; facet?: ResearchFacet; verified?: boolean; authorialBasis?:ClaimAuthorialBasis;quoteLexicalPolicy?:'literal_terms/v1';quoteRolePolicy?:'preserve_actor/v1';sourceReadKind?:ResearchPage['kind'];sourceReadUrl?:string }
+export interface ResearchClaim { sourceKey: string; quote: string; statement: string; kind: 'attributed_statement'|'page_statement'|'inference'; section:'background'|'work'|'expression'|'analysis'; facet?: ResearchFacet; verified?: boolean; authorialBasis?:ClaimAuthorialBasis;quoteLexicalPolicy?:'literal_terms/v1';quoteRolePolicy?:'preserve_actor/v1';sourceReadKind?:ResearchPage['kind'];sourceReadUrl?:string;genreReview?:ClaimGenreReview }
 /** Frozen first-step selection binding; fetch work may only read these accounts. */
 export interface FirstStepBinding {
  caseId: string; discoveryRevision: number; scopeVersion: number;
@@ -40,7 +40,13 @@ export interface FirstStepBinding {
  accounts: Array<{ accountId: string; accountKey: string; profileUrl: string; allowedScope: 'profile_only' | 'public_history'; independent: boolean; accessCoverage: string }>;
 }
 export interface StoredPage extends ResearchPage { sourceKey: string; discoveredFrom?: string[]; inheritedFrom?: {runId: string; sourceKey: string} }
+export interface ClaimGenreReview {
+ policy:'genre_context/v1';decision:'literal_relevant';sourceUrl:string;sourceContentHash:string;
+ quoteOffset:number;contextOffset:number;contextLength:number;
+}
 export interface ResearchCheckpoint {
+ /** Same-source genre context is exclusion-only, never extra fact support. */
+ quoteGenrePolicy?:'genre_context/v1';
  /** Persisted only after a scoped quote-only verification starts; no historical relabeling. */
  quoteSupportPolicy?: 'exact_quote/v1';
  /** New dispatched attribution contract; historical verifier receipts stay distinct. */

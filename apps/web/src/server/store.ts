@@ -1,3 +1,4 @@
+import { genreReviewIssue } from './research/quote-genre.js';
 import { researchDepthCoverage, claimEvidenceIssue, presentedResearchUnknowns } from '../shared/research-depth.js';
 import { classifyFirstStepUrl, type FirstStepDiscoveryView } from '../shared/first-step-discovery.js';
 import { randomUUID, createHash } from 'node:crypto';
@@ -643,11 +644,15 @@ export class Store {
     const anchorRevoked = Boolean(checkpoint?.anchorUrl && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
     // Projection never rewrites checkpoint claims or supplier receipts. Policy
     // checks are shared with verification, including on terminal reopens/exports.
-    const policyRejected = (checkpoint?.claims ?? []).filter(claim => claimEvidenceIssue(claim,checkpoint?.quoteSupportPolicy)!==null);
+    const evidenceIssue=(claim:NonNullable<typeof checkpoint>['claims'][number]):string|null=>{
+      const page=checkpoint?.pages.find(p=>p.sourceKey===claim.sourceKey),source=sources.find(s=>s.sourceKey===claim.sourceKey&&!s.excluded);
+      return claimEvidenceIssue(claim,checkpoint?.quoteSupportPolicy)??genreReviewIssue(claim,page,checkpoint?.quoteGenrePolicy)??genreReviewIssue(claim,source&&typeof source.excerpt==='string'?{url:source.url,text:source.excerpt}:undefined,checkpoint?.quoteGenrePolicy);
+    };
+    const policyRejected = (checkpoint?.claims ?? []).filter(claim => evidenceIssue(claim)!==null);
     const hasActiveSupport=(statement:string,sourceKey?:string):boolean=>(checkpoint?.claims??[]).some(claim=>claim.statement===statement&&(!sourceKey||claim.sourceKey===sourceKey)&&!policyRejected.includes(claim)&&sources.some(source=>source.sourceKey===claim.sourceKey&&!source.excluded&&source.excerpt?.includes(claim.quote))&&checkpoint?.pages.some(page=>page.sourceKey===claim.sourceKey&&page.text.includes(claim.quote)));
     const projectedKeys=(statement:string,sourceKeys:readonly string[]):string[]=>policyRejected.some(claim=>claim.statement===statement&&sourceKeys.includes(claim.sourceKey))?sourceKeys.filter(key=>hasActiveSupport(statement,key)):[...sourceKeys];
     const isPolicyRejected=(statement:string,sourceKeys:readonly string[]):boolean=>sourceKeys.length>0&&projectedKeys(statement,sourceKeys).length===0;
-    const policyLimits=policyRejected.map(claim=>`${claim.sourceKey}：${claimEvidenceIssue(claim,checkpoint?.quoteSupportPolicy)} 该引文绑定不作为已支持依据展示；原记录保留。`);
+    const policyLimits=policyRejected.map(claim=>`${claim.sourceKey}：${evidenceIssue(claim)} 该引文绑定不作为已支持依据展示；原记录保留。`);
     const policyStop=policyRejected.length>0&&run.state==='completed'&& !['scope_changed','source_revoked'].includes(run.stopReason??'');
     // Legacy Person Object IDs are checkpoint ordinals. Assign them before
     // filtering so withdrawing one source cannot rename unrelated references.

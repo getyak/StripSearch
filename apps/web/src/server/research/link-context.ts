@@ -17,20 +17,32 @@ const THIRD_PARTY = /(?:activity|timeline|feed|comment|recommend|suggest|reshare
 const PAGE_ROOTS = new Set(['main', 'body', 'html']);
 
 type MarkdownNode={type:string;position?:{start:{offset?:number};end:{offset?:number}};children?:MarkdownNode[]};
-const markdownRanges=new Map<string,Array<{start:number;end:number}>>();
-export function restrictedMarkdownAt(original:string,offset:number):boolean {
- let ranges=markdownRanges.get(original);
- if(!ranges){
-  ranges=[];const pending:MarkdownNode[]=[fromMarkdown(original)];
+type OriginalRange={start:number;end:number};
+const markdownRanges=new Map<string,{restricted:OriginalRange[];links:OriginalRange[]}>();
+/** Full HTML documents use HTML semantics; layout indentation is not Markdown code. */
+function originalIsHtmlDocument(original:string):boolean {
+ return /^(?:\uFEFF)?(?:[ ]{0,3}\r?\n)*[ ]{0,3}(?:<!--[\s\S]*?-->\s*)*(?:<!doctype\s+html\b|<(?:html|body)\b)/iu.test(original);
+}
+function originalMarkdownRanges(original:string):{restricted:OriginalRange[];links:OriginalRange[]} {
+ const cached=markdownRanges.get(original);if(cached)return cached;
+ const ranges:{restricted:OriginalRange[];links:OriginalRange[]}={restricted:[],links:[]};
+ if(!originalIsHtmlDocument(original)){
+  const pending:MarkdownNode[]=[fromMarkdown(original)];
   while(pending.length){
    const node=pending.pop()!;
-   if(['code','inlineCode','blockquote'].includes(node.type)&&node.position?.start.offset!==undefined&&node.position.end.offset!==undefined)ranges.push({start:node.position.start.offset,end:node.position.end.offset});
+   if(node.position?.start.offset!==undefined&&node.position.end.offset!==undefined){
+    const range={start:node.position.start.offset,end:node.position.end.offset};
+    if(['code','inlineCode','blockquote'].includes(node.type))ranges.restricted.push(range);
+    if(node.type==='link')ranges.links.push(range);
+   }
    if(node.children)pending.push(...node.children);
   }
-  if(markdownRanges.size>=8)markdownRanges.delete(markdownRanges.keys().next().value!);
-  markdownRanges.set(original,ranges);
  }
- return ranges.some(range=>offset>=range.start&&offset<range.end);
+ if(markdownRanges.size>=8)markdownRanges.delete(markdownRanges.keys().next().value!);
+ markdownRanges.set(original,ranges);return ranges;
+}
+export function restrictedMarkdownAt(original:string,offset:number):boolean {
+ return originalMarkdownRanges(original).restricted.some(range=>offset>=range.start&&offset<range.end);
 }
 
 function restrictedIdentityContainer(node:Tree.Element):boolean {
@@ -156,6 +168,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
   // Markdown retains the literal href next to its anchor text. Paragraph
   // boundaries preserve authorship context without borrowing a different link.
   for (const match of original.matchAll(/\[[^\]\n]*\]\(<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\)/g)) {
+    if(!originalMarkdownRanges(original).links.some(range=>range.start===match.index&&range.end===match.index+match[0].length))continue;
     const url = resolveLink(match[1]!, base);
     if (!url) continue;
     const index = match.index;

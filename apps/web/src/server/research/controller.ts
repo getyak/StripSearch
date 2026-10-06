@@ -6,6 +6,7 @@ import { ProviderError, type HttpTransport } from '../adapters/types.js';
 import type { Store, RunRecord } from '../store.js';
 import { type ResearchPlanner, invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { RESEARCH_LIMITS, ResearchStop, remainingOf, type ActionUsage, type ResearchCheckpoint, type StoredPage, type ResearchClaim } from './research-store.js';
+import { genreReviewIssue, bindGenreReview, parseGenreDecisions } from './quote-genre.js';
 import { FirstStepSelectionError } from './first-step-store.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchTools } from './tool-contracts.js';
 
@@ -89,12 +90,13 @@ export function buildResearchReport(context:ResearchReportContext,reason:string,
  const eligibleClaims=checkpoint.claims.filter(c=>keys.has(c.sourceKey)&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')));
  const sourceClaims=eligibleClaims.filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&p.text.includes(c.quote)));
  const invalidQuotes=eligibleClaims.filter(c=>!sourceClaims.includes(c));
- const scopeRejected=sourceClaims.filter(c=>claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)!==null);
- const claims=sourceClaims.filter(c=>claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null);
+ const evidenceIssue=(c:ResearchClaim)=>claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)??genreReviewIssue(c,pages.find(p=>p.sourceKey===c.sourceKey),checkpoint.quoteGenrePolicy);
+ const scopeRejected=sourceClaims.filter(c=>evidenceIssue(c)!==null);
+ const claims=sourceClaims.filter(c=>evidenceIssue(c)===null);
  if(scopeRejected.length||invalidQuotes.length){state='partial';if(!scopeStop){reason=scopeRejected.length?'claim_scope_unverified':'invalid_evidence';checkpoint.stopReason=reason;}}
  const coverage=researchDepthCoverage(claims,keys);
  const gaps=coverage.filter(c=>c.state==='gap').map(c=>`${c.label}：${c.note}`);
- const depthLimits=[...gaps,...scopeRejected.map(c=>`${c.sourceKey}：${claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)}`),...invalidQuotes.map(c=>`${c.sourceKey}：引用不在该来源原文中，原陈述保留待核对。`),
+ const depthLimits=[...gaps,...scopeRejected.map(c=>`${c.sourceKey}：${evidenceIssue(c)}`),...invalidQuotes.map(c=>`${c.sourceKey}：引用不在该来源原文中，原陈述保留待核对。`),
   ...scope.discoveryOnly.length?[`${scope.discoveryOnly.length} 个来源只有搜索发现材料、未回读原文；只能当线索，不算已读证据。`]:[],
   ...scope.unread.length?[`还有 ${scope.unread.length} 条已发现链接未回读；它们是待判断线索，不等于均属于此人。`]:[],
   ...scope.truncated.length?[`${scope.truncated.length} 个来源的原文被截断或不完整；截断部分仍是缺口，不能当作完整原文。`]:[],
@@ -114,7 +116,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const checkpoint:ResearchCheckpoint=persisted??{phase:'identity',steps:0,startedAt:launched,elapsedMs:0,anchorUrl:normalizeResearchUrl(run.seedUrl),identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null};
  checkpoint.limits??={...limits};
  if(options.firstStepScope)checkpoint.quoteRolePolicy??='preserve_actor/v1';
- if(options.firstStepScope&&checkpoint.steps===0&&checkpoint.claims.length===0&&!checkpoint.pendingClaims){checkpoint.independentMaterials??=[];checkpoint.modelGapHistory??=[];}
+ if(options.firstStepScope&&checkpoint.steps===0&&checkpoint.claims.length===0&&!checkpoint.pendingClaims){checkpoint.independentMaterials??=[];checkpoint.modelGapHistory??=[];if(planner.genreReviewPolicy)checkpoint.quoteGenrePolicy??=planner.genreReviewPolicy;}
  // Historical checkpoints did not persist retrieval provenance. Recover it only
  // from a completed, matching action receipt; missing proof stays unread.
  for(const page of checkpoint.pages){
@@ -207,8 +209,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     const attributionPolicy=mode==='verify'?checkpoint.quoteAttributionPolicy:null;
     const lexicalPolicy=mode==='verify'?checkpoint.quoteLexicalPolicy:null;
     const rolePolicy=checkpoint.quoteRolePolicy;
-    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}${lexicalPolicy?':literal_terms_v1':''}${rolePolicy?':preserve_actor_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
-    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{}),...(rolePolicy?{rolePolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
+    const genrePolicy=checkpoint.quoteGenrePolicy;
+    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}${lexicalPolicy?':literal_terms_v1':''}${rolePolicy?':preserve_actor_v1':''}${genrePolicy?':genre_context_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
+    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{}),...(rolePolicy?{rolePolicy}:{}),...(genrePolicy?{genrePolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
     if(old){if(old.state==='failed')throw new ProviderError('provider_bad_response','模型请求已有已结算失败回执，不自动重放。');return old.result as Awaited<ReturnType<typeof invokeDeepSeek>>;}
     try{const result=await invokeDeepSeek(options.transport,options.deepseekApiKey,request);
      const usage=parseMessagesUsage(result.body);
@@ -233,10 +236,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   const quoteFallback=(reason:'verification_budget'|'verification_unavailable'):ProviderResult=>{
    active();
    const pages=stillActivePages();
-   const excerpts=claims.filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))).map(c=>({...c,statement:c.quote,kind:'page_statement' as const,verified:false}));
-   const retained=options.firstStepScope?checkpoint.claims.filter(c=>c.verified===true&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))):[];
+   const excerpts=(checkpoint.quoteGenrePolicy?[]:claims).filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))).map(c=>({...c,statement:c.quote,kind:'page_statement' as const,verified:false}));
+   const retained=options.firstStepScope?checkpoint.claims.filter(c=>c.verified===true&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null&&genreReviewIssue(c,pages.find(p=>p.sourceKey===c.sourceKey),checkpoint.quoteGenrePolicy)===null&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))):[];
    checkpoint.claims=[...retained,...excerpts];delete checkpoint.pendingClaims;
-   checkpoint.unknowns.push('综合结论未通过独立语义核验，仅保留来源逐字摘录；摘录不代表结论已核实。');
+   checkpoint.unknowns.push(checkpoint.quoteGenrePolicy?'综合结论未通过完整语义与语体核验；来源原文保留待核对，未核验提案不作为人物结论。':'综合结论未通过独立语义核验，仅保留来源逐字摘录；摘录不代表结论已核实。');
    return finish(reason,'partial');
   };
   if(limits.modelCalls>0&&(checkpoint.steps>=limits.modelCalls||store.research.budget(run.id,limits).modelCalls>=limits.modelCalls)){
@@ -269,16 +272,21 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   }
   const partition=[...supportedIndexes,...rejectedIndexes];
   if(partition.some(i=>!Number.isInteger(i)||Number(i)<0||Number(i)>=claims.length)||new Set(partition).size!==partition.length||partition.length!==claims.length)return quoteFallback('verification_unavailable');
+  const genreDecisions=checkpoint.quoteGenrePolicy?parseGenreDecisions(checked.genreDecisions,claims.length):null;
+  if(checkpoint.quoteGenrePolicy&&!genreDecisions)return quoteFallback('verification_unavailable');
+  const pages=stillActivePages();
+  const reviewedClaims=claims.map((c,index)=>checkpoint.quoteGenrePolicy&&genreDecisions?.get(index)==='literal_relevant'?{...c,genreReview:bindGenreReview(c,pages.find(p=>p.sourceKey===c.sourceKey)!)}:checkpoint.quoteGenrePolicy?{...c,genreReview:undefined}:c);
+  const evidenceIssue=(c:ResearchClaim)=>claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)??genreReviewIssue(c,pages.find(p=>p.sourceKey===c.sourceKey),checkpoint.quoteGenrePolicy);
   const supported=new Set(supportedIndexes as number[]);
-  const scopeRejected=claims.filter((c,index)=>supported.has(index)&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)!==null);
-  const approved=claims.filter((c,index)=>supported.has(index)&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null).map(c=>({...c,verified:true}));
-  const retained=options.firstStepScope?checkpoint.claims.filter(c=>c.verified===true&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null&&stillActivePages().some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))):[];
+  const scopeRejected=reviewedClaims.filter((c,index)=>supported.has(index)&&evidenceIssue(c)!==null);
+  const approved=reviewedClaims.filter((c,index)=>supported.has(index)&&evidenceIssue(c)===null).map(c=>({...c,verified:true}));
+  const retained=options.firstStepScope?checkpoint.claims.filter(c=>c.verified===true&&evidenceIssue(c)===null&&stillActivePages().some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))):[];
   checkpoint.claims=[...new Map([...retained,...approved].map(c=>[digest({...c,verified:undefined}),c])).values()];delete checkpoint.pendingClaims;checkpoint.steps++;
-  const feedback=[...(checked.rejected as Array<{index:number;reason:string}>).map(item=>({claim:claims[item.index]!,reason:sanitizeText(item.reason,500)})),...scopeRejected.map(claim=>({claim,reason:claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)!}))];
+  const feedback=[...(checked.rejected as Array<{index:number;reason:string}>).map(item=>({claim:claims[item.index]!,reason:sanitizeText(item.reason,500)})),...scopeRejected.map(claim=>({claim,reason:evidenceIssue(claim)!}))];
   if(checkpoint.quoteLexicalPolicy){
    checkpoint.verificationHistory=[...(checkpoint.verificationHistory??[]),{step:checkpoint.steps,policy:checkpoint.quoteLexicalPolicy,rejections:feedback}];
   }else{
-   for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)}`);
+   for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${evidenceIssue(claim)}`);
    if(Array.isArray(checked.rejected))for(const item of checked.rejected)if(object(item)&&typeof item.reason==='string')checkpoint.unknowns.push(sanitizeText(item.reason,500));
   }
   if(options.firstStepScope&&feedback.length&&(checkpoint.claimRepairRounds??0)<2){
@@ -291,7 +299,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    }
   }
   if(checkpoint.quoteLexicalPolicy&&feedback.length){
-   for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)}`);
+   for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${evidenceIssue(claim)}`);
    if(rejectedIndexes.length)checkpoint.unknowns.push(`最终核验仍有 ${rejectedIndexes.length} 条提案未获得完整支持，未作为结论；原提案及拒绝理由保存在核验历史与实际回执。`);
   }
   const coverage=researchDepthCoverage(checkpoint.claims,new Set(stillActivePages().filter(p=>(p.retrieval==='read'||p.retrieval==='profile')).map(p=>p.sourceKey)));
@@ -299,7 +307,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   // completion: any discovery-only source, unread discovered link, truncated
   // original or explicit unresolved record keeps the run partial.
   const scope=scopeGaps();
-  const complete=checkpoint.claims.length>0&&scope.pages.length>1&&supported.size===claims.length&&coverage.every(c=>c.state==='evidence_found')
+  const complete=feedback.length===0&&checkpoint.claims.length>0&&scope.pages.length>1&&supported.size===claims.length&&coverage.every(c=>c.state==='evidence_found')
    &&scope.discoveryOnly.length===0&&scope.unread.length===0&&scope.truncated.length===0&&scope.unresolved.length===0;
   return finish(complete?'research_complete':'limited_evidence',complete?'completed':'partial');
  };

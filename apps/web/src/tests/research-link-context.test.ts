@@ -50,15 +50,16 @@ test('HTML and Markdown self links share visible-text and quotation restrictions
   const tag=wrapper.split(' ')[0]!;
   for(const link of [`<a href="${url}">GitHub</a>`,`[GitHub](${url})`]){
    const original=`<${wrapper}>My GitHub: ${link}</${tag}>`;
-   const context=extractOriginalLinkContexts(original,'https://fixture-author.dev/').find(c=>c.url===url)!;
+   const linked=extractOriginalLinkContexts(original,'https://fixture-author.dev/');
+   if(link.startsWith('[')&&['p','pre','body','html','blockquote'].includes(tag))assert.ok(linked.every(c=>c.binding!=='markdown_link'),original);
+   const context=(link.startsWith('[')?extractOriginalLiteralLinkContexts(original,'https://fixture-author.dev/',url):linked).find(c=>c.url===url)!;
    assert.ok(context,original);
-   assert.equal(linkRoleFromContext({...context,targetUrl:url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role==='self_account_section',wrapper==='p',original);
+   assert.equal(linkRoleFromContext({...context,targetUrl:url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role==='self_account_section',wrapper==='p'&&!link.startsWith('['),original);
   }
  }
  const attribute=`<p title="My GitHub: [GitHub](${url})">Plain text</p>`;
- const context=extractOriginalLinkContexts(attribute,'https://fixture-author.dev/')[0]!;
- assert.equal(context.surface,'unknown');
- assert.notEqual(linkRoleFromContext({...context,targetUrl:url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');
+ assert.equal(extractOriginalLinkContexts(attribute,'https://fixture-author.dev/').length,0);
+ assert.equal(extractOriginalLiteralLinkContexts(attribute,'https://fixture-author.dev/',url).length,0);
 });
 
 test('Markdown code and quotation spans cannot grant either literal or linked ownership',()=>{
@@ -184,3 +185,15 @@ test('Exa original requests preserve HTML binding and cannot turn extras labels 
   const source=`<section>${'x'.repeat(8100)}<a rel="me" href="https://github.com/fixture-other">GitHub</a></section>`;
   assert.equal(extractOriginalLinkContexts(source,'https://fixture-author.dev/')[0]!.surface,'unknown');
  });
+
+test('complete raw HTML indentation preserves authorial self-links while fenced or indented HTML examples do not',()=>{
+ const home='https://fixture-author.dev/',blog='https://fixture-author.blog/';
+ const section=`<div>I have three blogs. This <a href="${blog}">GitHub blog</a> is my oldest one.</div>`;
+ const original=`<!doctype html>\n<html>\n<body>\n    ${section}\n</body>\n</html>`;
+ const [context]=extractOriginalLinkContexts(original,home);assert.equal(context!.surface,'authorial');assert.equal(linkRoleFromContext({...context!,targetUrl:blog,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');assert.ok(original.includes(context!.quote));
+ for(const code of ['```html\n'+original+'\n```','    <html>\n    <body>\n    '+section+'\n    </body>\n    </html>'])assert.ok(extractOriginalLinkContexts(code,home).every(c=>c.surface==='third_party'));
+});
+test('regex cannot manufacture a Markdown link from an AST HTML block or code example',()=>{
+ const url='https://github.com/fixture-code-example';
+ for(const original of [`<p>I am Fixture.</p>\n\`\`\`text\nMy GitHub: [My account](${url})\n\`\`\``,`<p>My GitHub: [My account](${url})</p>`,`\`My GitHub: [My account](${url})\``])assert.ok(extractOriginalLinkContexts(original,'https://fixture-author.dev/').every(c=>c.binding!=='markdown_link'));
+});
