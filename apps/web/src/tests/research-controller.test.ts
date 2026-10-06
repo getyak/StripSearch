@@ -480,3 +480,60 @@ test('canonical multi-source statement keeps valid support and removes only the 
  const view=store.buildCanonicalView(store.getRun(run.id)!);assert.equal(view.observations.length,1);assert.deepEqual(view.observations[0]!.sourceKeys,['S2']);assert.equal(view.answer[0]!.body,statement);assert.deepEqual(view.answer[0]!.bullets[0]!.sourceKeys,['S2']);assert.deepEqual(view.personObject!.claims.map(c=>c.id),['C2']);assert.deepEqual(view.research!.coverage!.find(c=>c.id==='background')!.sourceKeys,['S2']);assert.deepEqual(store.listObservations(run.id)[0]!.sourceKeys,['S1','S2']);assert.equal(store.research.checkpoint(run.id)!.claims.length,2);
  store.setSourceExcluded(run.id,'S2',true);const revoked=store.buildCanonicalView(store.getRun(run.id)!);assert.equal(revoked.observations.length,0);assert.equal(revoked.answer.length,0);assert.equal(revoked.personObject!.claims.length,0);assert.equal(revoked.research!.coverage!.find(c=>c.id==='background')!.state,'gap');db.close();
 });
+
+
+test('scoped seeded original links retain exact article transport addresses and deny unobserved slash variants',async()=>{
+ const {db,store,run}=setup();const literal='https://fixture.test/Writing/Article/?lang=zh';const original={...profile,sourceKey:'S1',retrieval:'profile' as const,links:[literal+'#details']};
+ store.addSource(run.id,{key:'S1',url:original.url,title:original.title,kind:'profile',publishedAt:null,excerpt:original.text,excerptLocator:'Synthetic',identityLabel:'Synthetic',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);
+ store.research.save(run.id,{phase:'planning',steps:0,startedAt:0,elapsedMs:0,anchorUrl:original.url,identity:{displayName:'Ada Fixture',handle:'ada-fixture',profileUrl:original.url,status:'resolved',note:'Synthetic',candidates:[]},candidates:[],pages:[original],claims:[],unknowns:[],stopReason:null});
+ const dispatched:string[]=[];let rounds=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(action){assert.notEqual(action.type,'search');if(action.type==='search')throw new Error('search refused');dispatched.push(action.url);return {pages:[{...interview,url:literal,links:[]}],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify')return {supported:[0],rejected:[]};rounds++;return rounds===1?{action:'read',url:'https://fixture.test/Writing/Article?lang=zh'}:rounds===2?{action:'read',url:literal+'#details'}:{action:'finish',claims:[{sourceKey:'S2',quote:interview.text,statement:interview.text,kind:'page_statement',section:'work'}]};}}});
+ assert.deepEqual(dispatched,[literal]);assert.ok(result.limitations.some(n=>n.includes('拒绝未在已读资料中发现')));assert.equal(store.research.checkpoint(run.id)!.pages[1]!.url,literal);assert.equal(store.research.checkpoint(run.id)!.pages[0]!.links[0],literal+'#details');assert.equal(store.research.receipts(run.id).filter(r=>r.kind==='tool').length,1);db.close();
+});
+
+test('scoped rejected synthesis is rewritten and independently reverified while approved claims survive',async()=>{
+ const {db,store,run}=setup();let plans=0,verifications=0;
+ const good={sourceKey:'S1',quote:profile.text,statement:profile.text,kind:'page_statement',section:'work'};
+ const corrected={sourceKey:'S1',quote:'I wrote the parser.',statement:'作者自述编写了解析器。',kind:'attributed_statement',section:'work'};
+ const bad={...corrected,statement:'In 2020 Ada Fixture invented every compiler.'};
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(){return {pages:[{...profile,text:profile.text+' I wrote the parser.'}],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify'){verifications++;return verifications===1?{supported:[0],rejected:[{index:1,reason:'The quote has no year or invention claim.'}]}:{supported:[0],rejected:[]};}plans++;if(plans===2){assert.equal(input.checkpoint.claimRepairRounds,1);assert.equal(input.checkpoint.claims.length,1);assert.equal(input.checkpoint.verificationFeedback![0]!.claim.statement,bad.statement);}return {action:'finish',claims:plans===1?[good,bad]:[corrected]};}}});
+ assert.equal(plans,2);assert.equal(verifications,2);assert.equal(result.observations.length,2);assert.equal(result.observations.some(o=>o.statement===bad.statement),false);assert.ok(store.research.checkpoint(run.id)!.claims.every(c=>c.verified===true));assert.equal(store.research.checkpoint(run.id)!.claimRepairRounds,1);db.close();
+});
+
+test('scoped perpetual rejection stops after exactly two repair rounds even with unlimited budget',async()=>{
+ const {db,store,run}=setup();let plans=0,verifications=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(){return {pages:[profile],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify'){verifications++;return {supported:[],rejected:[{index:0,reason:'Unsupported invention claim.'}]};}plans++;return {action:'finish',claims:[{sourceKey:'S1',quote:profile.text,statement:'Ada Fixture invented every compiler.'}]};}}});
+ assert.equal(plans,3);assert.equal(verifications,3);assert.equal(result.state,'partial');assert.equal(result.observations.length,0);assert.equal(store.research.checkpoint(run.id)!.claimRepairRounds,2);db.close();
+});
+
+test('scoped rejection does not spend a correction round without room for another verification',async()=>{
+ const {db,store,run}=setup();let plans=0;
+ const result=await runResearch({store,run,limits:{...unlimited,modelCalls:3},signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(){return {pages:[profile],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify')return {supported:[],rejected:[{index:0,reason:'No evidence.'}]};plans++;return {action:'finish',claims:[{sourceKey:'S1',quote:profile.text}]};}}});
+ assert.equal(plans,1);assert.equal(result.observations.length,0);assert.equal(store.research.checkpoint(run.id)!.claimRepairRounds,undefined);db.close();
+});
+
+
+test('revocation during rejected verification stops before any synthesis repair',async()=>{
+ const {db,store,run}=setup();let plans=0;
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(){return {pages:[profile],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify'){store.setSourceExcluded(run.id,'S1',true);return {supported:[],rejected:[{index:0,reason:'No evidence.'}]};}plans++;return {action:'finish',claims:[{sourceKey:'S1',quote:profile.text}]};}}});
+ assert.equal(plans,1);assert.equal(result.stopReason,'source_revoked');assert.equal(result.observations.length,0);assert.equal(store.research.checkpoint(run.id)!.claimRepairRounds,undefined);db.close();
+});
+
+
+for(const [limit,expected] of [[4,2],[6,3]] as const)test(`scoped repair can use exactly the remaining plan and verify slots (${limit})`,async()=>{
+ const {db,store,run}=setup();let plans=0,verifications=0;
+ const result=await runResearch({store,run,limits:{...unlimited,modelCalls:limit},signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(){return {pages:[profile],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify'){verifications++;return {supported:[],rejected:[{index:0,reason:'No support.'}]};}plans++;return {action:'finish',claims:[{sourceKey:'S1',quote:profile.text}]};}}});
+ assert.equal(plans,expected);assert.equal(verifications,expected);assert.equal(store.research.checkpoint(run.id)!.steps,limit);assert.equal(result.state,'partial');db.close();
+});

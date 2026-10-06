@@ -43,6 +43,9 @@ export interface StoredPage extends ResearchPage { sourceKey: string; discovered
 export interface ResearchCheckpoint {
  /** Persisted only after a scoped quote-only verification starts; no historical relabeling. */
  quoteSupportPolicy?: 'exact_quote/v1';
+ /** Bounded synthesis correction; rejected material is feedback, never evidence. */
+ claimRepairRounds?: number;
+ verificationFeedback?: Array<{claim:ResearchClaim;reason:string}>;
  /** Last bounded model validation feedback; never source evidence. */
  planFeedback?: string;
  planValidationFailures?: number;

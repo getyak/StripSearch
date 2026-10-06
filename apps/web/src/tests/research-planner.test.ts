@@ -107,3 +107,17 @@ test('scoped verification cannot borrow dates, roles or other entries from adjac
  assert.equal(scoped.evidencePolicy,'exact_quote/v1');assert.match(scoped.quotedSupportInstruction,/every clause.*only this claim exact quote/);assert.match(scoped.quotedSupportInstruction,/publication timestamp/);
  assert.equal(page.text,text);assert.equal(page.publishedAt,'2026-01-02T00:00:00Z');
 });
+
+
+test('synthesis-repair feedback cannot reproduce missing, outside-scope or forged original quotes',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');const {classifyFirstStepUrl}=await import('../shared/first-step-discovery.js');
+ const url='https://fixture-repair-author.dev/',classified=classifyFirstStepUrl(url);assert.ok(classified.ok);
+ const page={sourceKey:'S1',url,title:'Fixture',text:'I wrote this parser.',kind:'profile' as const,publishedAt:null,links:[],limitations:[],retrieval:'read' as const};
+ const own={sourceKey:'S1',quote:page.text,statement:'Unsupported 2020 invention.',kind:'attributed_statement' as const,section:'work' as const};
+ const absent={...own,sourceKey:'REVOKED',quote:'REVOKED_PRIVATE_TEXT'};
+ const outside={...own,sourceKey:'S2',quote:'OUTSIDE_PRIVATE_TEXT'};
+ const forged={...own,quote:'FORGED_QUOTE_TEXT'};
+ const cp={phase:'planning',steps:2,startedAt:0,elapsedMs:0,anchorUrl:url,identity:null,candidates:[],pages:[page,{...page,sourceKey:'S2',url:'https://other-repair-author.dev/',text:outside.quote}],claims:[{...own,verified:true},{...absent,verified:true},{...outside,verified:true},{...forged,verified:true}],unknowns:[],stopReason:null,claimRepairRounds:1,verificationFeedback:[own,absent,outside,forged].map(claim=>({claim,reason:'Unsupported.'})),firstStep:{caseId:'case',scopeVersion:1,discoveryRevision:1,selectedAccountIds:['a'],independentAccountIds:[],clusterId:'c',displayName:'Fixture',anchorUrl:url,accountKeys:{[classified.ref.accountKey]:'a'},accounts:[{accountId:'a',accountKey:classified.ref.accountKey,profileUrl:url,allowedScope:'public_history' as const,independent:false,accessCoverage:'read'}]}};
+ const data=JSON.parse(buildResearchPrompt({question:'Fixture',checkpoint:cp,remainingTools:5,remainingModels:5}));
+ assert.equal(data.firstStepScope.synthesisRepair.rejected.length,1);assert.equal(data.firstStepScope.synthesisRepair.alreadyVerified.length,1);assert.doesNotMatch(JSON.stringify(data.firstStepScope.synthesisRepair),/REVOKED_PRIVATE_TEXT|OUTSIDE_PRIVATE_TEXT|FORGED_QUOTE_TEXT/);assert.equal(cp.verificationFeedback.length,4);
+});

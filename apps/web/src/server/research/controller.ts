@@ -120,7 +120,14 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const save=()=>{active();checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);};
  const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':'读取相关资料',status:'active'});};
  const stillActivePages=()=>stillActivePagesOf(store,run,checkpoint);
- const allowedUrls=()=>new Set([checkpoint.anchorUrl,...stillActivePages().flatMap(p=>[p.url,...p.links])].filter((v):v is string=>!!v));
+ // Concrete scoped articles keep their observed URL. Legacy normalization
+ // removes trailing slashes for anchor keys and is not a transport alias proof.
+ const researchUrl=(raw:unknown):string|null=>{
+  const normalized=normalizeResearchUrl(raw);if(!normalized)return null;
+  if(!options.firstStepScope)return normalized;
+  const url=new URL(raw as string);url.hash='';return url.href;
+ };
+ const allowedUrls=()=>new Set([checkpoint.anchorUrl,...stillActivePages().flatMap(p=>[p.url,...p.links])].map(researchUrl).filter((v):v is string=>!!v));
  const dependencies=(action:ResearchToolAction):string[]=>{
   if(action.type==='search'||action.url===checkpoint.anchorUrl)return [];
   const existing=checkpoint.pages.find(p=>p.url===action.url);
@@ -132,10 +139,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   // No page cap and no slicing: every supplied page, its full original text
   // and all its links stay in the corpus; model scope is a separate window.
   for(const page of result.pages){
-   const url=normalizeResearchUrl(page.url);if(!url)continue;
+   const url=researchUrl(page.url);if(!url)continue;
    const existing=checkpoint.pages.find(p=>p.url===url);
    const retrieval=action.type==='search'?'search':action.type==='github_profile'||action.type==='social_profile'?'profile':'read';
-   const clean:StoredPage={...page,retrieval,url,title:sanitizeText(page.title,200),text:retainText(page.text),links:[...new Set(page.links.map(normalizeResearchUrl).filter((v):v is string=>!!v))],limitations:page.limitations.map(v=>sanitizeText(v,500)),sourceKey:existing?.sourceKey??`S${checkpoint.pages.length+1}`,...existing?.inheritedFrom?{inheritedFrom:existing.inheritedFrom}:{},...discoveredFrom.length?{discoveredFrom:[...discoveredFrom]}:{}};
+   const clean:StoredPage={...page,retrieval,url,title:sanitizeText(page.title,200),text:retainText(page.text),links:[...new Set(page.links.map(researchUrl).filter((v):v is string=>!!v))],limitations:page.limitations.map(v=>sanitizeText(v,500)),sourceKey:existing?.sourceKey??`S${checkpoint.pages.length+1}`,...existing?.inheritedFrom?{inheritedFrom:existing.inheritedFrom}:{},...discoveredFrom.length?{discoveredFrom:[...discoveredFrom]}:{}};
    // Search can enrich discovery but cannot replace an already fetched original.
    if(existing&&(existing.retrieval==='read'||existing.retrieval==='profile')&&retrieval==='search'){
     clean.text=existing.text;clean.title=existing.title;clean.retrieval=existing.retrieval;clean.kind=existing.kind;clean.publishedAt=existing.publishedAt;clean.author=existing.author;clean.retrievedAt=existing.retrievedAt;clean.textTruncated=existing.textTruncated;clean.account=existing.account;clean.discoveredFrom=existing.discoveredFrom;
@@ -152,7 +159,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const perform=async(action:ResearchToolAction):Promise<ResearchToolResult>=>{
   active();
   if(action.type!=='search'){
-   const url=normalizeResearchUrl(action.url);
+   const url=researchUrl(action.url);
    if(!url||!allowedUrls().has(url))throw new ResearchStop('url_not_discovered');
    action={...action,url};
    if(action.type==='firecrawl'&&(!options.firecrawlAvailable||['x.com','twitter.com'].includes(new URL(url).hostname)))throw new ResearchStop('tool_unavailable');
@@ -202,12 +209,14 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   if(!options.signal.aborted){store.research.save(run.id,checkpoint);}
   return result;
  };
- const verify=async():Promise<ProviderResult>=>{
+ const verify=async():Promise<ProviderResult|null>=>{
   const claims=checkpoint.pendingClaims??[];
   const quoteFallback=(reason:'verification_budget'|'verification_unavailable'):ProviderResult=>{
    active();
    const pages=stillActivePages();
-   checkpoint.claims=claims.filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))).map(c=>({...c,statement:c.quote,kind:'page_statement',verified:false}));delete checkpoint.pendingClaims;
+   const excerpts=claims.filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))).map(c=>({...c,statement:c.quote,kind:'page_statement' as const,verified:false}));
+   const retained=options.firstStepScope?checkpoint.claims.filter(c=>c.verified===true&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))):[];
+   checkpoint.claims=[...retained,...excerpts];delete checkpoint.pendingClaims;
    checkpoint.unknowns.push('综合结论未通过独立语义核验，仅保留来源逐字摘录；摘录不代表结论已核实。');
    return finish(reason,'partial');
   };
@@ -224,6 +233,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    return quoteFallback('verification_unavailable');
   }
   active();
+  if(claims.some(c=>!stillActivePages().some(p=>p.sourceKey===c.sourceKey)))throw new ResearchStop('source_revoked');
   if(!object(checked)||!Array.isArray(checked.supported)||!Array.isArray(checked.rejected))return quoteFallback('verification_unavailable');
   const supportedIndexes=checked.supported;
   const rejectedIndexes:number[]=[];
@@ -235,9 +245,21 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   if(partition.some(i=>!Number.isInteger(i)||Number(i)<0||Number(i)>=claims.length)||new Set(partition).size!==partition.length||partition.length!==claims.length)return quoteFallback('verification_unavailable');
   const supported=new Set(supportedIndexes as number[]);
   const scopeRejected=claims.filter((c,index)=>supported.has(index)&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)!==null);
-  checkpoint.claims=claims.filter((c,index)=>supported.has(index)&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null).map(c=>({...c,verified:true}));delete checkpoint.pendingClaims;checkpoint.steps++;
+  const approved=claims.filter((c,index)=>supported.has(index)&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null).map(c=>({...c,verified:true}));
+  const retained=options.firstStepScope?checkpoint.claims.filter(c=>c.verified===true&&claimEvidenceIssue(c,checkpoint.quoteSupportPolicy)===null&&stillActivePages().some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')&&p.text.includes(c.quote))):[];
+  checkpoint.claims=[...new Map([...retained,...approved].map(c=>[digest({...c,verified:undefined}),c])).values()];delete checkpoint.pendingClaims;checkpoint.steps++;
   for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)}`);
   if(Array.isArray(checked.rejected))for(const item of checked.rejected)if(object(item)&&typeof item.reason==='string')checkpoint.unknowns.push(sanitizeText(item.reason,500));
+  const feedback=[...(checked.rejected as Array<{index:number;reason:string}>).map(item=>({claim:claims[item.index]!,reason:sanitizeText(item.reason,500)})),...scopeRejected.map(claim=>({claim,reason:claimEvidenceIssue(claim,checkpoint.quoteSupportPolicy)!}))];
+  if(options.firstStepScope&&feedback.length&&(checkpoint.claimRepairRounds??0)<2){
+   const remaining=remainingOf(limits.modelCalls,store.research.budget(run.id,limits).modelCalls);
+   if((remaining===null||remaining>=2)&&(limits.modelCalls===0||checkpoint.steps<=limits.modelCalls-2)){
+    checkpoint.claimRepairRounds=(checkpoint.claimRepairRounds??0)+1;
+    checkpoint.verificationFeedback=feedback;checkpoint.phase='planning';save();
+    store.addEvent(run.id,'stage',{key:`claim_repair:${checkpoint.claimRepairRounds}`,label:'按原文修正未通过核验的陈述',status:'active'});
+    return null;
+   }
+  }
   const coverage=researchDepthCoverage(checkpoint.claims,new Set(stillActivePages().filter(p=>(p.retrieval==='read'||p.retrieval==='profile')).map(p=>p.sourceKey)));
   // Five facets with evidence never prove all-platform or full-history
   // completion: any discovery-only source, unread discovered link, truncated
@@ -293,7 +315,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    checkpoint.identity={displayName:sanitizeText(page.title,160)||page.account?.handle||anchor,handle:page.account?.handle??handle,profileUrl:anchor,status:'resolved',note:'已读取所选公开主页；跨平台账号关系尚未自动合并。',candidates:[]};
    checkpoint.candidates=[];ingest(result,action);save();
   }
-  if(checkpoint.pendingClaims)return await verify();
+  if(checkpoint.pendingClaims){const result=await verify();if(result)return result;}
   const seen=new Set(store.research.receipts(run.id).filter(r=>r.kind==='tool').map(r=>digest(r.request)));
   while(limits.modelCalls===0||checkpoint.steps<limits.modelCalls-1){
    active();progress('planning');
@@ -335,9 +357,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      return true;
     });
     if(options.firstStepScope&&decision.claims.length>0&&validOriginalClaims===0)throw new ResearchStop('invalid_evidence');
-    checkpoint.claims=[];checkpoint.pendingClaims=claims;checkpoint.steps++;
+    if(!options.firstStepScope)checkpoint.claims=[];checkpoint.pendingClaims=claims;checkpoint.steps++;
     checkpoint.unknowns=[...new Set([...checkpoint.unknowns,...Array.isArray(decision.unknowns)?decision.unknowns.filter((v):v is string=>typeof v==='string').map(v=>sanitizeText(v,600)):[]])];
-    checkpoint.phase='verifying';save();return await verify();
+    checkpoint.phase='verifying';save();const result=await verify();if(result)return result;continue;
    }
    const decisions=decision.action==='batch'?decision.actions:[decision];
    if(!Array.isArray(decisions)||decisions.length<1||decisions.length>4)throw new ResearchStop('invalid_decision');
@@ -357,7 +379,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     }
     if(item.action==='search'&&typeof item.query==='string')return {kind:'tool',action:{type:'search',query:item.query.trim()}};
     if(['read','social','social_posts','firecrawl'].includes(String(item.action))&&typeof item.url==='string'){
-     const url=normalizeResearchUrl(item.url);if(!url)throw new ResearchStop('url_not_discovered');
+     const url=researchUrl(item.url);if(!url)throw new ResearchStop('url_not_discovered');
      return {kind:'tool',action:{type:item.action==='social'?'social_profile':item.action as 'read'|'social_posts'|'firecrawl',url}};
     }
     throw new ResearchStop('invalid_decision');
@@ -371,7 +393,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     if(step.kind!=='tool')continue;
     const action=step.action;
     if(action.type==='search'){if(!action.query.trim()||action.query.length>600)throw new ResearchStop('invalid_decision');}
-    else {const url=normalizeResearchUrl(action.url);if(!url||(!options.firstStepScope&&!allowedUrls().has(url)))throw new ResearchStop('url_not_discovered');}
+    else {const url=researchUrl(action.url);if(!url||(!options.firstStepScope&&!allowedUrls().has(url)))throw new ResearchStop('url_not_discovered');}
    }
    let madeProgress=false;
    const outcomes:NonNullable<ResearchCheckpoint['lastBatchOutcomes']>=[];
@@ -415,7 +437,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      if(discoveredFrom.length&&!discoveredFrom.some(key=>store.isResearchSourceActive(run.id,key,run.ownerId)))throw new ResearchStop('source_revoked');
      ingest(result,action,discoveredFrom);
      const fresh=result.pages.some(p=>{
-      const url=normalizeResearchUrl(p.url);const next=checkpoint.pages.find(item=>item.url===url);const prior=url?before.get(url):undefined;
+      const url=researchUrl(p.url);const next=checkpoint.pages.find(item=>item.url===url);const prior=url?before.get(url):undefined;
       return !!next&&((next.text.trim().length>0&&next.text!==prior?.text)||next.links.some(link=>!prior?.links.includes(link)));
      });
      madeProgress ||= fresh;outcomes.push({action:action.type,target,status:fresh?'new_material':'no_new_material'});}
