@@ -1152,8 +1152,27 @@ export function linkRoleFromContext(input: {
     const workAction=workActions.at(-1);
     if(workAction&&!OWNERSHIP_MARKERS.test(before.slice(workAction.index!+workAction[0].length)))return {role:'prose_mention',retrieval:'read'};
   }
-  const context = classifyLinkContext(quote);
-  if (context === 'third_party') return { role: 'prose_mention', retrieval: 'read' };
+  const wholeContext = classifyLinkContext(quote);
+  if (wholeContext === 'third_party') return { role: 'prose_mention', retrieval: 'read' };
+  // A self declaration must precede THIS target or name its own anchor.
+  // Later sentences and unrelated paragraph tails cannot establish ownership,
+  // regardless of how the author describes a linked work.
+  let localQuote=quote;
+  if(targetAt>=0&&input.binding!=='html_rel_me'&&!input.sourceIsDirectory){
+    const anchorAt=extractedTargetAt>=0?extractedTargetAt:quote.lastIndexOf('<a',targetAt);
+    const start=anchorAt>=0?anchorAt:targetAt;
+    const prefix=quote.slice(0,start).split(/<br\s*\/?\s*>|[。!?\n;]|\.\s+/iu).at(-1)!;
+    const anchorEnd=input.binding==='html_anchor'?quote.indexOf('</a>',start):input.binding==='markdown_link'?quote.indexOf(')',start):targetAt+(input.targetUrl?.length??0);
+    localQuote=prefix+quote.slice(start,anchorEnd>=0?anchorEnd+(input.binding==='html_anchor'?4:input.binding==='markdown_link'?1:0):start);
+    const readable=prefix.replace(/<a\b[^>]*>[\s\S]*?<\/a>/giu,' ').replace(/<[^>]*>/g,' ');
+    localQuote=readable+localQuote.slice(prefix.length);
+    const marker=[...readable.matchAll(new RegExp(OWNERSHIP_MARKERS.source,'giu'))].at(-1);
+    const tail=marker?readable.slice(marker.index!+marker[0].length).trim():null;
+    // A preceding self-link can extend through a simple link list, but new
+    // prose/action after it starts another relationship, not an owned list.
+    if(tail!==null&&!/^(?:(?:on|at|and|or|here|below|profiles?|accounts?|pages?|links?|channels?|websites?|blogs?|newsletters?)\b|网站|博客|频道|主页|账号|通讯|[\s:：,，.;/＆&()\-–—])*$/iu.test(tail))localQuote='';
+  }
+  const context=classifyLinkContext(localQuote);
   if(input.binding==='html_rel_me'&&input.surface==='authorial'&&input.sourceIsOwnProfilePage&&!input.sourceIsRestrictedSurface&&!input.sourceIsSocialPlatform){
     return isUntrustedInstructionText(quote) ? {role:'unknown_role',retrieval:'link_only'} : {role:'self_account_section',retrieval:'read'};
   }
