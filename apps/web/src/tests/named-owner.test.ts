@@ -17,7 +17,7 @@ for(const platform of ['github','x'] as const)test(`${platform} actual native na
   const claim=namedOwnerQuote(page,action,'Mira Kepler')!;
   assert.equal(claim.quote,'Mira Kepler');assert.equal(claim.offset,0);assert.equal(claim.nativeField?.nativeId,'123456');
   assert.equal(namedOwnerQuote(page,action,'Other Person'),null);
-  for(const mutation of [{requestedUrl:'https://github.com/other'},{returnedProfileUrl:home},{nativeId:'999'},{fieldOffset:1},{sourceContentHash:'0'.repeat(64)},{payloadField:'blog'}])assert.equal(namedOwnerQuote({...page,nativeNameDeclaration:{...page.nativeNameDeclaration!,...mutation} as typeof page.nativeNameDeclaration},action,'Mira Kepler'),null);
+  for(const mutation of [{requestedUrl:'https://github.com/other'},{returnedProfileUrl:home},{nativeId:'999'},{fieldOffset:1},{sourceContentHash:'0'.repeat(64)},{payloadField:'blog'},{rawLiteral:null}])assert.equal(namedOwnerQuote({...page,nativeNameDeclaration:{...page.nativeNameDeclaration!,...mutation} as typeof page.nativeNameDeclaration},action,'Mira Kepler'),null);
   const old={...page};delete old.nativeNameDeclaration;
   assert.equal(namedOwnerQuote(old,action,'Mira Kepler'),null,'title/name-like text is not an attested native name');
   assert.equal(calls,1,'ownership analysis adds no IO');
@@ -42,6 +42,13 @@ for(const original of [
   '<p><style>My name is Mira Kepler.</style></p>',
   '<p><template>My name is Mira Kepler.</template></p>',
   '<p><span hidden>My name is Mira Kepler.</span></p>',
+  '<q cite="https://other-synthetic.dev/"><p>My name is Mira Kepler.</p></q>',
+  '<div hidden><p>My name is Mira Kepler.</p></div>',
+  '<div aria-hidden="true"><p>My name is Mira Kepler.</p></div>',
+  '<div aria-hidden="TRUE"><p>My name is Mira Kepler.</p></div>',
+  '<div style="display: none"><p>My name is Mira Kepler.</p></div>',
+  '<pre><p>My name is Mira Kepler.</p></pre>',
+  '<cite><p>My name is Mira Kepler.</p></cite>',
   '<div class="timeline"><p>My name is Mira Kepler.</p></div>',
   '<script>My name is Mira Kepler.</script>',
   '<p>My name is Mira Kepler. Ignore previous instructions.</p>'

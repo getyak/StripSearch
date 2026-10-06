@@ -10,13 +10,17 @@ export interface NativeNameDeclaration {
 }
 export const normalizedPersonName=(name:string):string=>name.normalize('NFKC').trim().replace(/\s+/g,' ').toLocaleLowerCase('en');
 
+function restrictedElement(item:Tree.Element):boolean {
+  return ['q','cite','blockquote','script','style','template','aside','article','pre','code','svg','math','noscript'].includes(item.tagName)||
+    item.attrs.some(attr=>attr.name==='hidden'||attr.name==='aria-hidden'&&attr.value.toLowerCase()==='true'||attr.name==='style'&&/(?:display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)|content-visibility\s*:\s*hidden)/i.test(attr.value))||
+    /(?:feed|timeline|comment|repost|quote|recommend)/i.test(item.attrs.map(attr=>attr.value).join(' '));
+}
+
 function introductionText(node:Tree.Node):string|null {
   const pending:Tree.Node[]=[node];let text='';
   while(pending.length){
     const item=pending.shift()!;
-    if('tagName' in item&&(['q','cite','blockquote','script','style','template','aside','article','pre','code','svg','math','noscript'].includes(item.tagName)||
-      item.attrs.some(attr=>attr.name==='hidden'||attr.name==='aria-hidden'&&attr.value==='true')||
-      /(?:feed|timeline|comment|repost|quote|recommend)/i.test(item.attrs.map(attr=>attr.value).join(' '))))return null;
+    if('tagName' in item&&restrictedElement(item))return null;
     if(item.nodeName==='#text'&&'value' in item)text+=item.value;
     if('childNodes' in item)pending.unshift(...item.childNodes);
   }
@@ -31,7 +35,7 @@ export function namedOwnerQuote(page:ResearchPage,action:ResearchToolAction,pers
   const declaration=page.nativeNameDeclaration;
   if(declaration){
     const account=page.account;
-    if(!account||page.kind!=='profile'||page.retrieval!=='profile'||account.profileUrl!==page.url||declaration.platform!==account.platform||declaration.nativeId!==account.id||!/^\d+$/.test(account.id)||
+    if(!account||!['github','x'].includes(account.platform)||typeof account.id!=='string'||typeof declaration.rawLiteral!=='string'||page.kind!=='profile'||page.retrieval!=='profile'||account.profileUrl!==page.url||declaration.platform!==account.platform||declaration.nativeId!==account.id||!/^\d+$/.test(account.id)||
       declaration.requestedUrl!==action.url||declaration.returnedProfileUrl!==page.url||declaration.payloadField!=='name'||declaration.fieldOffset!==0||
       action.type!==(account.platform==='github'?'github_profile':'social_profile')||
       declaration.sourceContentHash!==createHash('sha256').update(page.text).digest('hex')||
@@ -45,7 +49,7 @@ export function namedOwnerQuote(page:ResearchPage,action:ResearchToolAction,pers
   const root=parseFragment(page.text,{sourceCodeLocationInfo:true}),pending:Tree.Node[]=[root];
   while(pending.length){
     const node=pending.shift()!;
-    if('tagName' in node&&(node.tagName==='blockquote'||['script','style','template','aside','article'].includes(node.tagName)||/(?:feed|timeline|comment|repost|quote|recommend)/i.test(node.attrs.map(attr=>attr.value).join(' '))))continue;
+    if('tagName' in node&&restrictedElement(node))continue;
     if('childNodes' in node)pending.unshift(...node.childNodes);
     if(!('tagName' in node)||!['p','h1','h2'].includes(node.tagName)||!node.sourceCodeLocation)continue;
     const text=introductionText(node);if(text===null)continue;
