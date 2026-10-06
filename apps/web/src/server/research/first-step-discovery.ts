@@ -29,7 +29,7 @@ import type { HttpTransport } from '../adapters/types.js';
 import { ProviderError } from '../adapters/types.js';
 import { invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { runDshDecision } from './dsh-decision.js';
-import { extractOriginalLinkContexts } from './link-context.js';
+import { extractOriginalLinkContexts, extractOriginalLiteralLinkContexts } from './link-context.js';
 import { verifiedNativeAccountRequest, verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext } from './toolkit.js';
 import type { NativeWebsiteDeclaration } from '../../shared/native-website.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchPage, ResearchAliasProof } from './tool-contracts.js';
@@ -539,7 +539,7 @@ export function verifyFirstStepModelProposals(
     // and quotes are never synthesized.
     const linked = observed.readLinks?.get(proposal.fromUrl) ?? [];
     const targetComparable = comparableUrl(proposal.targetUrl);
-    const contexts = (observed.readContexts?.get(proposal.fromUrl) ?? []).filter(
+    const contexts = [...(observed.readContexts?.get(proposal.fromUrl) ?? []),...extractOriginalLiteralLinkContexts(text,proposal.fromUrl,proposal.targetUrl)].filter(
       (context) => comparableUrl(context.url) === targetComparable
     );
     const boundContext =
@@ -563,6 +563,10 @@ export function verifyFirstStepModelProposals(
     }
     // A denial needs explicit actual negative association with the target;
     // ordinary mentions can never become identity_counterevidence/rejected.
+    if(proposal.linkRole!=='prose_mention'&&(!boundContext||boundContext.surface==='third_party'||boundContext.surface==='unknown')){
+      reject('摘录没有绑定实际可见的作者文字或目标链接；属性、隐藏或引用内容不能建立归属/否认。');
+      continue;
+    }
     if (proposal.linkRole === 'explicit_denial') {
       if (!isExplicitDenialQuote(proposal.quote, proposal.targetUrl)) {
         reject('普通提及不能当作明确否认；否认必须有实际负向声明文本。');
@@ -1078,7 +1082,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           const targetClassified = classifyFirstStepUrl(target);
           if (!targetClassified.ok) continue;
           const targetRef = targetClassified.ref;
-          const context = byTarget.get(target) ?? null;
+          const context = byTarget.get(target) ?? extractOriginalLiteralLinkContexts(page.text,page.url,target)[0] ?? null;
           // Save concrete identity navigation BEFORE same-account links are
           // skipped for relation projection. It is not an ownership edge.
           const navigation = !legacyAttempt && context && receipt ? firstStepIdentityNavigation(page.url, target) : null;
@@ -1088,9 +1092,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
             navigationQueue.push({ref:source,url:navigation.url,intent:{...navigation,sourceUrl:page.url,
               sourceContentHash:createHash('sha256').update(page.text).digest('hex'),sourceReceiptKey:receipt!.key,quote:context.quote,locator:context.locator}});
           }
-          const fallback = context === null ? quoteAround(page.text, target) : null;
-          const quote = context !== null ? context.quote : fallback?.quote ?? null;
-          const locator = context !== null ? context.locator : fallback?.locator ?? '页面出链提取（正文无对应片段）';
+          const quote = context?.quote ?? null;
+          const locator = context?.locator ?? '页面出链提取（正文无对应片段）';
           const role = linkRoleFromContext({
             quote,
             targetUrl: target,

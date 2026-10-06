@@ -28,7 +28,7 @@ for(const variant of ['exact','wrong-request','wrong-document-binding','valid-re
  }finally{f.close();}
 });
 
-for(const wrapper of ['p','script','blockquote','p hidden','p aria-hidden="true"','p style="display:none"','code','p class="activity-feed"'])test(`cached literal binds a visible authorial text node: ${wrapper}`,()=>{
+for(const wrapper of ['p','script','blockquote','q','cite','body hidden','html hidden','p hidden','p aria-hidden="true"','p aria-hidden="TRUE"','p style="display:none"','code','p class="activity-feed"'])test(`cached literal binds a visible authorial text node: ${wrapper}`,()=>{
  const quote=`My GitHub: ${book}`,tag=wrapper.split(' ')[0]!,text=`<${wrapper}>${quote}</${tag}>`;
  const f=seedFirstStep({accounts:[{url:home},{url:book,supportedBy:{sourceUrl:home,quote}}]});
  try{

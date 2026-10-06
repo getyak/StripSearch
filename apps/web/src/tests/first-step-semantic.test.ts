@@ -1176,6 +1176,17 @@ for(const phrase of ['我的账号在','My GitHub profile is at'])test(`actual t
  try{const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===github)!;assert.equal(account.identity.state,'supported');assert.ok(account.identity.evidence.some(e=>e.role==='identity_support'));}finally{h.db.close();}
 });
 
+for(const wrapper of ['p','p hidden','body hidden','html hidden','p aria-hidden="TRUE"','blockquote','q','cite','script','p class="activity-feed"'])test(`fresh discovery and a model require a visible literal text node: ${wrapper}`,async()=>{
+ const tag=wrapper.split(' ')[0]!,quote=`My GitHub: ${github}`,text=`<${wrapper}>${quote}</${tag}>`;
+ const own=page(home,text,{links:[github],linkContexts:extractOriginalLinkContexts(text,home)});
+ const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[own,page(github,'Mira Kepler')],read:url=>url===home?[own]:[page(github,'Synthetic profile.')],propose:async(_signal,input)=>{const source=input.excerpts.find(e=>e.url===home);return {proposals:source?[{fromUrl:home,targetUrl:github,linkRole:'self_account_section',quote,requestKey:source.requestKey}]:[],leads:[]};}});
+ try{
+  const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===github)!;
+  assert.equal(account.identity.state==='supported',wrapper==='p');
+  assert.equal(account.defaultSuggestion.suggested,wrapper==='p');
+ }finally{h.db.close();}
+});
+
 for(const previous of ['<a href="https://twitter.com/#!/mira">Twitter</a>, ','<a href="https://x.com/mira">Twitter</a>,\n '])test('HTML self list preserves formatting whitespace and punctuation inside other hrefs '+previous,async()=>{
  const text=`<p>Find me on ${previous}<a href="${github}">GitHub</a>.</p>`;
  const own=page(home,text,{links:[github],linkContexts:extractOriginalLinkContexts(text,home)});

@@ -44,6 +44,23 @@ test('attribute punctuation cannot manufacture a visible ownership declaration',
  }
 });
 
+test('HTML and Markdown self links share visible-text and quotation restrictions',()=>{
+ const url='https://github.com/fixture-profile';
+ for(const wrapper of ['p','q','cite','body hidden','html hidden','p aria-hidden="TRUE"','p hidden','pre','blockquote']){
+  const tag=wrapper.split(' ')[0]!;
+  for(const link of [`<a href="${url}">GitHub</a>`,`[GitHub](${url})`]){
+   const original=`<${wrapper}>My GitHub: ${link}</${tag}>`;
+   const context=extractOriginalLinkContexts(original,'https://fixture-author.dev/').find(c=>c.url===url)!;
+   assert.ok(context,original);
+   assert.equal(linkRoleFromContext({...context,targetUrl:url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role==='self_account_section',wrapper==='p',original);
+  }
+ }
+ const attribute=`<p title="My GitHub: [GitHub](${url})">Plain text</p>`;
+ const context=extractOriginalLinkContexts(attribute,'https://fixture-author.dev/')[0]!;
+ assert.equal(context.surface,'unknown');
+ assert.notEqual(linkRoleFromContext({...context,targetUrl:url,sourceIsOwnProfilePage:true,sourceIsDirectory:false}).role,'self_account_section');
+});
+
 test('rel-me local attribution does not borrow unrelated prose from the page root', () => {
   const source = '<main><header><div><a rel="me" href="https://github.com/fixture-author">GitHub</a></div></header><article><p>He said this about a different person.</p></article></main>';
   const [context] = extractOriginalLinkContexts(source, 'https://fixture-author.dev/');

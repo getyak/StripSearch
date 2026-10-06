@@ -1,4 +1,4 @@
-import { parseFragment, type DefaultTreeAdapterTypes as Tree } from 'parse5';
+import { parse, parseFragment, type DefaultTreeAdapterTypes as Tree } from 'parse5';
 import { classifyLinkContext, isExplicitDenialQuote } from '../../shared/first-step-discovery.js';
 import type { ResearchLinkContext } from './tool-contracts.js';
 
@@ -16,7 +16,27 @@ const THIRD_PARTY = /(?:activity|timeline|feed|comment|recommend|suggest|reshare
 const PAGE_ROOTS = new Set(['main', 'body', 'html']);
 
 function restrictedIdentityContainer(node:Tree.Element):boolean {
- return ['script','style','template','noscript','title','code','pre','blockquote'].includes(node.tagName)||node.attrs.some(a=>['hidden','inert'].includes(a.name)||a.name==='aria-hidden'&&a.value==='true'||a.name==='style'&&/display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)/iu.test(a.value));
+ return ['script','style','template','noscript','title','code','pre','blockquote','q','cite'].includes(node.tagName)||node.attrs.some(a=>['hidden','inert'].includes(a.name)||a.name==='aria-hidden'&&a.value.trim().toLowerCase()==='true'||a.name==='style'&&/display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)/iu.test(a.value));
+}
+
+function originalIdentityTree(original:string):Tree.Document|Tree.DocumentFragment {
+ return /<!doctype\s+html|<\s*(?:html|body)\b/iu.test(original)?parse(original,{sourceCodeLocationInfo:true}):parseFragment(original,{sourceCodeLocationInfo:true});
+}
+
+function originalTextSurfaceAt(root:Tree.Document|Tree.DocumentFragment,offset:number):'authorial'|'third_party'|'unknown' {
+ const pending:Tree.Node[]=[root];
+ while(pending.length){
+  const node=pending.pop()!;if('childNodes' in node)pending.push(...node.childNodes);
+  const location=node.sourceCodeLocation;
+  if(node.nodeName!=='#text'||!location||offset<location.startOffset||offset>=location.endOffset)continue;
+  let ancestor=node.parentNode;
+  while(ancestor&&'tagName' in ancestor){
+   if(ancestor.tagName==='a'||restrictedIdentityContainer(ancestor)||THIRD_PARTY.test(ancestor.attrs.map(a=>`${a.name}=${a.value}`).join(' ')))return 'third_party';
+   ancestor=ancestor.parentNode;
+  }
+  return 'authorial';
+ }
+ return 'unknown';
 }
 
 /** A root's adjacent heading/description belongs to this branch; an
@@ -63,7 +83,7 @@ function nodeText(node:Tree.Node):string {
 /** Retain actual HTML anchors and their original containing span. No source executes. */
 export function extractOriginalLinkContexts(original: string, base: string): ResearchLinkContext[] {
   const contexts: ResearchLinkContext[] = [];
-  const root = parseFragment(original, { sourceCodeLocationInfo: true });
+  const root = originalIdentityTree(original);
   const pending: Tree.Node[] = [root];
   while (pending.length) {
     const node = pending.pop()!;
@@ -127,8 +147,9 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
     const end = next < 0 ? original.length : next;
     const quote = original.slice(start, end);
     const thirdParty = /^\s*>/m.test(quote) || THIRD_PARTY.test(quote);
+    const textSurface=originalTextSurfaceAt(root,index);
     contexts.push({ url, quote, targetOffset:index-start, locator: `Markdown 原文第 ${String(start + 1)}–${String(end)} 字符`,
-      binding: 'markdown_link', surface: thirdParty ? 'third_party' : quote.length > 8000 ? 'unknown' : 'authorial' });
+      binding: 'markdown_link', surface: thirdParty||textSurface==='third_party' ? 'third_party' : quote.length > 8000||textSurface==='unknown' ? 'unknown' : 'authorial' });
   }
   return contexts;
 }
@@ -138,7 +159,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
 type LiteralLinkContext=Omit<ResearchLinkContext,'binding'>&{binding:null};
 export function extractOriginalLiteralLinkContexts(original:string,base:string,url:string):LiteralLinkContext[] {
  if(resolveLink(url,base)!==url)return [];
- const root=parseFragment(original,{sourceCodeLocationInfo:true}),pending:Tree.Node[]=[root],contexts:LiteralLinkContext[]=[];
+ const root=originalIdentityTree(original),pending:Tree.Node[]=[root],contexts:LiteralLinkContext[]=[];
  while(pending.length){
   const node=pending.pop()!;if('childNodes' in node)pending.push(...node.childNodes);
   if(node.nodeName!=='#text'||!('value' in node)||!node.sourceCodeLocation||!node.value.includes(url.replace(/\/+$/,'')))continue;
