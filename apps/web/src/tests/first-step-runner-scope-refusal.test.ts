@@ -369,7 +369,7 @@ test('one fabricated quote cannot erase an independently verified valid claim',a
  const runner=runnerFor(f,tools,planner);t.after(()=>runner.stopAll());const run=await runToTerminal(f,runner);
  assert.equal(run.stopReason,'limited_evidence');assert.equal(verified,1);assert.equal(calls.length,2);
  const observations=f.store.listObservations(f.run.id);assert.equal(observations.length,1);assert.equal(observations[0]?.statement,CLAIM);
- assert.ok(run.limitations.some(s=>s.includes('第 1 条结论未通过原文引用校验')));
+ const cp=f.store.research.checkpoint(f.run.id)!;assert.equal(cp.proposalRejections!.length,1);assert.equal(cp.proposalRejections![0]!.index,0);assert.equal(cp.proposalRejections![0]!.sourceKey,cp.pages.find(p=>p.url===HOME_URL)!.sourceKey);assert.equal(cp.proposalRejections![0]!.reason,'invalid_evidence');assert.equal(run.limitations.some(s=>s.includes('第 1 条结论未通过原文引用校验')),false);
 });
 
 test('broad Fetch search is refused without paid dispatch and selected originals remain usable',async t=>{
