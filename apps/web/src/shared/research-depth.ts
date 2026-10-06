@@ -78,7 +78,13 @@ export function claimLiteralTermIssue(claim:{statement:string;quote:string;facet
   if(/\bfirst\s+(?:\w+\s+){0,4}(?:course|class)\b/iu.test(quote)&&/首位.{0,16}课程/u.test(claim.statement))return '原文首门课程不能改写为首位课程设计者；请保留课程与人物的不同限定。';
   if(!/\p{Script=Han}/u.test(claim.statement))return null;
   let statement=claim.statement;
-  if(claim.sourceReadUrl){try{const source=new URL(claim.sourceReadUrl);statement=statement.replaceAll(source.href,' ').replaceAll(source.hostname,' ');}catch{/* An invalid stored source cannot exempt any term. */}}
+  if(claim.sourceReadUrl){try{
+   const source=new URL(claim.sourceReadUrl);
+   statement=statement.replace(/https?:\/\/[^\s，。；：）)\]「」<>]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s，。；：）)\]「」<>]*)?/giu,token=>{
+    if(token.toLowerCase()===source.hostname)return ' ';
+    try{return new URL(/^https?:\/\//i.test(token)?token:'https://'+token).href===source.href?' ':token;}catch{return token;}
+   });
+  }catch{/* An invalid stored source cannot exempt any term. */}}
   const stem=(term:string)=>(term.length>3&&/[^s]s$/i.test(term)||/^[A-Z]{2,}s$/u.test(term))?term.slice(0,-1).toLowerCase():term.toLowerCase();
   const terms=(text:string)=>(text.replace(/([a-z])\s+(?=\d)/giu,'$1').match(/\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*\b/gu)??[]);
   const words=new Set(terms(quote).map(stem));

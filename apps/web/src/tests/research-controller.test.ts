@@ -600,6 +600,8 @@ test('new mixed-language named terms stay inside their own quote and source loca
  assert.equal(claimLiteralTermIssue({...policy,statement:'他把Nimbus的不均衡与经济联系起来。',quote:'Nimbus has jagged performance, which I associate with economics.'}),null);
  assert.equal(claimLiteralTermIssue({...policy,statement:'fixture.test页面介绍LLM及CS231n。',quote:'LLMs and CS 231n.',sourceReadUrl:'https://fixture.test/'}),null);
  assert.ok(claimLiteralTermIssue({...policy,statement:'another.test页面介绍LLM。',quote:'LLMs.',sourceReadUrl:'https://fixture.test/'}));
+ for(const url of ['https://untrusted-fixture.test/','https://fixture.test.evil/'])assert.ok(claimLiteralTermIssue({...policy,statement:`他提到${url}。`,quote:'I described an untrusted HTTPS endpoint and evil content.',sourceReadUrl:'https://fixture.test/'}));
+ assert.equal(claimLiteralTermIssue({...policy,statement:'fixture.test页面提到https://fixture.test/。',quote:'A page.',sourceReadUrl:'https://fixture.test/'}),null);
  assert.equal(claimLiteralTermIssue({statement:'他把Nimbus与经济联系起来。',quote:'This involves economics.'}),null);
  assert.equal(claimAuthorialIssue({statement:'同一帖中他介绍解析器。',quote:'I wrote a parser.',authorialBasis:'quote_first_person'}),null);assert.ok(claimLiteralTermIssue({...policy,statement:'同一帖中他介绍解析器。',quote:'I wrote a parser.'}));
  assert.ok(claimLiteralTermIssue({...policy,statement:'页面介绍首位课程设计者。',quote:'He designed the first deep learning course.'}));
