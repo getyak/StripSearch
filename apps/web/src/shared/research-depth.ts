@@ -80,7 +80,7 @@ export function claimLiteralTermIssue(claim:{statement:string;quote:string;facet
   let statement=claim.statement;
   if(claim.sourceReadUrl){try{
    const source=new URL(claim.sourceReadUrl);
-   statement=statement.replace(/https?:\/\/[^\s，。；：）)\]「」<>]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s，。；：）)\]「」<>]*)?/giu,token=>{
+   statement=statement.replace(/https?:\/\/[^\s，。；：）)\]「」『』“”‘’"'`<>]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s，。；：）)\]「」『』“”‘’"'`<>]*)?/giu,token=>{
     if(token.toLowerCase()===source.hostname)return ' ';
     try{return new URL(/^https?:\/\//i.test(token)?token:'https://'+token).href===source.href?' ':token;}catch{return token;}
    });
