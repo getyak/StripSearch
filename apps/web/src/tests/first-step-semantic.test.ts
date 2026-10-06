@@ -1159,3 +1159,12 @@ for(const binding of ['literal','encoded','relative','preceding-self'])test(`act
  const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[own,page(book,'Mira Kepler book')],read:url=>url===home?[own]:[page(book,'Website not found.')],propose:async(_signal,input)=>{const source=input.excerpts.find(e=>e.url===home);return {proposals:source?[{fromUrl:home,targetUrl:book,linkRole:'self_account_section',quote:text,requestKey:source.requestKey}]:[],leads:[]};}});
  try{const view=await discoverFirstStep(h.ctx);const target=view.accounts.find(a=>a.profileUrl===book);assert.ok(target);assert.notEqual(target.identity.state,'supported');assert.equal(target.defaultSuggestion.suggested,false);assert.equal(target.identity.evidence.filter(e=>e.role==='identity_support').length,0);assert.ok(view.gaps.some(g=>g.includes('模型提议被拒')));}finally{h.db.close();}
 });
+
+for(const variant of ['encoded','relative'])test(`actual discovery keeps a legitimate ${variant} self profile without a model proposal`,async()=>{
+ const target=variant==='encoded'?github:new URL('/~mira-blog/',home).href;
+ const href=variant==='encoded'?'https://github.com/mira&#45;k':'/~mira-blog/';
+ const text=`<p>My ${variant==='encoded'?'GitHub profile':'blog'}: <a href="${href}">Visit my profile</a></p>`;
+ const own=page(home,text,{links:[target],linkContexts:extractOriginalLinkContexts(text,home)});
+ const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[own,page(target,'Mira Kepler')],read:url=>url===home?[own]:[page(target,'Synthetic profile.')],propose:async()=>({proposals:[],leads:[]})});
+ try{const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===target)!;assert.ok(account);assert.equal(account.identity.state,'supported');if(variant==='encoded')assert.equal(account.defaultSuggestion.suggested,true);assert.ok(account.identity.evidence.some(e=>e.role==='identity_support'));}finally{h.db.close();}
+});

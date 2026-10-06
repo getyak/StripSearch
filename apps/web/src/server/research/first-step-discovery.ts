@@ -1135,6 +1135,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           const role = linkRoleFromContext({
             quote,
             targetUrl: target,
+            targetOffset: context?.targetOffset,
             binding: context?.binding ?? null,
             surface: context?.surface ?? null,
             sourceIsOwnProfilePage: source.entry === 'profile' || page.kind === 'profile',
