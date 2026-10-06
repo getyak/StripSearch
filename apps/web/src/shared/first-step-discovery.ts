@@ -1100,6 +1100,8 @@ export function linkRoleFromContext(input: {
   quote: string | null;
   /** Target URL this context binds; required for the quote fallback path. */
   targetUrl?: string | null;
+  /** Server extractor-derived offset of this target in the unchanged quote. */
+  targetOffset?: number;
   /** Extraction binding/surface of the retained original, when observed. */
   binding?: 'html_anchor' | 'html_rel_me' | 'markdown_link' | 'native_profile_field' | null;
   surface?: 'authorial' | 'profile_field' | 'third_party' | 'unknown' | null;
@@ -1139,11 +1141,16 @@ export function linkRoleFromContext(input: {
   // A paragraph may contain unrelated "find me" text after a book link.
   // Judge the actual target's local action before whole-paragraph ownership.
   // Authorship of that work never proves ownership of its hosting account.
-  const targetAt=input.targetUrl?quote.indexOf(input.targetUrl.replace(/\/+$/,'')):-1;
+  const literalTargetAt=input.targetUrl?quote.indexOf(input.targetUrl.replace(/\/+$/,'')):-1;
+  const extractedTargetAt=Number.isSafeInteger(input.targetOffset)&&input.targetOffset!>=0&&input.targetOffset!<quote.length?input.targetOffset!:-1;
+  const targetAt=extractedTargetAt>=0?extractedTargetAt:literalTargetAt;
+  if(targetAt<0&&(input.binding==='html_anchor'||input.binding==='markdown_link'))return {role:'unknown_role',retrieval:'link_only'};
   if(targetAt>=0&&input.binding!=='html_rel_me'){
-    const anchorAt=quote.lastIndexOf('<a',targetAt);
+    const anchorAt=extractedTargetAt>=0?extractedTargetAt:quote.lastIndexOf('<a',targetAt);
     const before=quote.slice(0,anchorAt>=0?anchorAt:targetAt).split(/<br\s*\/?\s*>|[。!?\n;]/iu).at(-1)!.replace(/<[^>]*>/g,' ').slice(-240);
-    if(/\b(?:wrote|authored|published|created|built)\b.{0,100}\b(?:books?|novels?|papers?|articles?|projects?)\b|(?:撰写|编写|出版|创作).{0,30}(?:书籍|小说|论文|文章|项目)/iu.test(before)&&!OWNERSHIP_MARKERS.test(before))return {role:'prose_mention',retrieval:'read'};
+    const workActions=[...before.matchAll(/\b(?:wrote|authored|published|created|built)\b.{0,100}\b(?:books?|novels?|papers?|articles?|projects?)\b|(?:撰写|编写|出版|创作).{0,30}(?:书籍|小说|论文|文章|项目)/giu)];
+    const workAction=workActions.at(-1);
+    if(workAction&&!OWNERSHIP_MARKERS.test(before.slice(workAction.index!+workAction[0].length)))return {role:'prose_mention',retrieval:'read'};
   }
   const context = classifyLinkContext(quote);
   if (context === 'third_party') return { role: 'prose_mention', retrieval: 'read' };

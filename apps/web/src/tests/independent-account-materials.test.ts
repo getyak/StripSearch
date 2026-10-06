@@ -20,7 +20,8 @@ test('only a leading citation to this exact bound source is excluded from named 
   assert.equal(claimAuthorialIssue({quote:'Sometimes I am referred to as the reference human.',statement:'有时被称为参考人类，并不是总是如此。',authorialBasis:'quote_first_person'}),null);
   const migration='I have three blogs. I then briefly and sadly switched to my second blog on Medium. I now have a Bear blog.';
   assert.ok(claimAuthorialIssue({quote:migration,statement:'主页自述共经营三个博客。',authorialBasis:'quote_first_person'}));
-  for(const statement of ['目前同时经营三个博客。','曾经换过平台，如今同时运营三个博客。'])assert.ok(claimAuthorialIssue({quote:migration,statement,authorialBasis:'quote_first_person'}));
+  for(const statement of ['目前同时经营三个博客。','曾经换过平台，如今同时运营三个博客。','先后换过平台后如今同时经营三个博客。'])assert.ok(claimAuthorialIssue({quote:migration,statement,authorialBasis:'quote_first_person'}));
+  assert.equal(claimAuthorialIssue({quote:migration,statement:'先后共经营三个博客，如今只使用 Bear。',authorialBasis:'quote_first_person'}),null);
   assert.equal(claimAuthorialIssue({quote:migration,statement:'并非同时经营三个博客，目前使用 Bear。',authorialBasis:'quote_first_person'}),null);
   assert.equal(claimAuthorialIssue({quote:migration,statement:'主页自述先后有三个博客，目前使用 Bear。',authorialBasis:'quote_first_person'}),null);
 });

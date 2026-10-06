@@ -34,6 +34,8 @@ export type ResearchAliasProof =
     };
 /** A link bound to an exact span of the retained original, never an index label. */
 export interface ResearchLinkContext {
+ /** Server extractor-derived start of this target anchor within the exact quote. */
+ targetOffset?: number;
  url: string; quote: string; locator: string;
  binding: 'html_anchor' | 'html_rel_me' | 'markdown_link' | 'native_profile_field';
  surface: 'authorial' | 'profile_field' | 'third_party' | 'unknown';

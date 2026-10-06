@@ -61,7 +61,7 @@ function hasUnqualifiedStrengthening(statement:string,pattern:RegExp,allowSequen
   for(const match of clause.matchAll(pattern)){
    const prefix=clause.slice(0,match.index).trimEnd();
    if(/(?:并?不(?:是)?|并非|不是|不能(?:说|称)|未必)$/u.test(prefix))continue;
-   if(allowSequential&&/先后/u.test(prefix))continue;
+   if(allowSequential&&!match[0].startsWith('同时')&&/先后$/u.test(prefix))continue;
    return true;
   }
   return false;

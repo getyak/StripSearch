@@ -107,7 +107,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
     const quote = original.slice(location.startOffset, location.endOffset);
     // A huge wrapper is not a target-specific attribution context.
     const tooBroad = quote.length > 8000;
-    contexts.push({ url, quote: tooBroad ? original.slice(node.sourceCodeLocation.startOffset, node.sourceCodeLocation.endOffset) : quote,
+    contexts.push({ url, targetOffset: tooBroad?0:node.sourceCodeLocation.startOffset-location.startOffset, quote: tooBroad ? original.slice(node.sourceCodeLocation.startOffset, node.sourceCodeLocation.endOffset) : quote,
       locator: `HTML 原文第 ${String((tooBroad ? node.sourceCodeLocation : location).startOffset + 1)}–${String((tooBroad ? node.sourceCodeLocation : location).endOffset)} 字符`,
       binding: relMe ? 'html_rel_me' : 'html_anchor', surface: thirdParty ? 'third_party' : tooBroad ? 'unknown' : relMe ? 'authorial' : block === node ? 'unknown' : 'authorial' });
   }
@@ -123,7 +123,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
     const end = next < 0 ? original.length : next;
     const quote = original.slice(start, end);
     const thirdParty = /^\s*>/m.test(quote) || THIRD_PARTY.test(quote);
-    contexts.push({ url, quote, locator: `Markdown 原文第 ${String(start + 1)}–${String(end)} 字符`,
+    contexts.push({ url, quote, targetOffset:index-start, locator: `Markdown 原文第 ${String(start + 1)}–${String(end)} 字符`,
       binding: 'markdown_link', surface: thirdParty ? 'third_party' : quote.length > 8000 ? 'unknown' : 'authorial' });
   }
   return contexts;

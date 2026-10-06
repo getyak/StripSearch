@@ -295,6 +295,7 @@ export interface FirstStepModelProposal {
 
 /** Extractor-record link context of one actually read page (untrusted data). */
 export interface FirstStepObservedLinkContext {
+  targetOffset?: number;
   url: string;
   quote: string;
   binding?: 'html_anchor' | 'markdown_link' | 'native_profile_field' | null;
@@ -580,6 +581,7 @@ export function verifyFirstStepModelProposals(
       quote: boundContext?.quote ?? proposal.quote,
       targetUrl: proposal.targetUrl,
       binding: boundContext?.binding ?? null,
+      targetOffset: boundContext?.targetOffset,
       surface: boundContext?.surface ?? null,
       sourceIsOwnProfilePage: flags.sourceIsOwnProfilePage,
       sourceIsDirectory: flags.sourceIsDirectory,
@@ -1101,7 +1103,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
             continue;
           }
           const rank = (candidate: (typeof contexts)[number]): number => {
-            const role = linkRoleFromContext({quote: candidate.quote, targetUrl: candidate.url, binding: candidate.binding, surface: candidate.surface,
+            const role = linkRoleFromContext({quote: candidate.quote, targetUrl: candidate.url, targetOffset: candidate.targetOffset, binding: candidate.binding, surface: candidate.surface,
               sourceIsOwnProfilePage: source.entry === 'profile', sourceIsDirectory: source.platform === 'linktree',
               sourceIsNativeAccount: candidate.binding === 'native_profile_field' && (page.retrieval === 'profile' || page.account !== undefined),
               sourceIsRestrictedSurface: flags.sourceIsRestrictedSurface, sourceIsSocialPlatform: flags.sourceIsSocialPlatform}).role;
