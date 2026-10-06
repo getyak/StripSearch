@@ -91,3 +91,19 @@ test('batch descriptor text is rebuilt and scoped instead of trusting cached or 
  assert.equal(data.inspects.length,1);assert.equal(data.inspects[0].text,page.text);assert.equal(data.inspects[0].offset,0);assert.equal(data.inspects[0].excerpt,true);assert.equal(data.inspect.text,page.text);assert.doesNotMatch(JSON.stringify(data.inspects),/FAKE_CACHE|OUTSIDE_SCOPE/);
  assert.doesNotMatch(data.firstStepScope.planningInstruction,/at most6 planning steps/);
 });
+
+
+test('scoped verification cannot borrow dates, roles or other entries from adjacent source text',async()=>{
+ const {buildResearchPrompt}=await import('../server/research/planner.js');
+ const quote='I completed my MSc research.';
+ const text='In 2011 I began a PhD with Prof Other. '+quote+' Other article: bitcoin and compiler recipes.';
+ const page={sourceKey:'S1',url:'https://fixture-quote-support.dev/',title:'Fixture',text,kind:'profile' as const,publishedAt:'2026-01-02T00:00:00Z',links:[],limitations:[],retrieval:'read' as const};
+ const checkpoint={phase:'verifying',steps:1,startedAt:0,elapsedMs:0,anchorUrl:page.url,identity:null,candidates:[],pages:[page],claims:[],unknowns:[],stopReason:null};
+ const claim={sourceKey:'S1',quote,statement:'In 2011 I began a PhD and completed an MSc.',kind:'attributed_statement' as const,section:'background' as const};
+ const legacy=JSON.parse(buildResearchPrompt({mode:'verify',question:'Fixture',claims:[claim],checkpoint,remainingTools:null,remainingModels:null}));
+ assert.equal(legacy.claims[0].sourceContext.text,text);assert.equal(legacy.evidencePolicy,undefined);
+ const scoped=JSON.parse(buildResearchPrompt({mode:'verify',question:'Fixture',claims:[claim],checkpoint:{...checkpoint,quoteSupportPolicy:'exact_quote/v1'},remainingTools:null,remainingModels:null}));
+ assert.equal(scoped.claims[0].sourceContext.text,quote);assert.equal(scoped.claims[0].sourceContext.offset,text.indexOf(quote));assert.equal(scoped.claims[0].sourceContext.textLength,text.length);
+ assert.equal(scoped.evidencePolicy,'exact_quote/v1');assert.match(scoped.quotedSupportInstruction,/every clause.*only this claim exact quote/);assert.match(scoped.quotedSupportInstruction,/publication timestamp/);
+ assert.equal(page.text,text);assert.equal(page.publishedAt,'2026-01-02T00:00:00Z');
+});

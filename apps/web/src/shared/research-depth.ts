@@ -33,6 +33,20 @@ export function claimScopeIssue(claim: { statement: string; quote: string }): st
     : null;
 }
 
+/** Narrow literal-year guard; never a complete semantic entailment test. */
+export function claimQuotedYearIssue(claim: { statement: string; quote: string }): string | null {
+  const years = claim.statement.match(/(?<!\d)(?:1[5-9]\d{2}|20\d{2}|21\d{2})(?!\d)/gu) ?? [];
+  const quotedYears: readonly string[] = claim.quote.match(/(?<!\d)(?:1[5-9]\d{2}|20\d{2}|21\d{2})(?!\d)/gu) ?? [];
+  return years.some(year => !quotedYears.includes(year))
+    ? '陈述包含本条引文未支持的年份；请绑定能完整支持本条的连续引文，或删除未绑定的经历与日期。'
+    : null;
+}
+
+/** Same policy gate for verification, stored canonical projection and exports. */
+export function claimEvidenceIssue(claim: { statement: string; quote: string }, policy?: 'exact_quote/v1'): string | null {
+  return claimScopeIssue(claim) ?? (policy === 'exact_quote/v1' ? claimQuotedYearIssue(claim) : null);
+}
+
 /** Evidence availability, never a percentage or a claim of complete history. */
 export function researchDepthCoverage(
   claims: readonly { sourceKey: string; facet?: ResearchFacet; verified?: boolean }[],

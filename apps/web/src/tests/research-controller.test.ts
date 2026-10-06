@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { renderJson, renderMarkdown } from '../shared/canonical.js';
+import { renderReportHtml } from '../shared/report-html.js';
 import assert from 'node:assert/strict';
 import { openDatabase, applyCoreSchema } from '../server/db/index.js';
 import { Store } from '../server/store.js';
@@ -413,4 +415,68 @@ for(const facetsFound of [4,5])test(`scoped five-facet synthesis preserves missi
  planner:{async decide(input){if(input.mode==='verify')return {supported:proposed.map((_,i)=>i),rejected:[]};return ++round===1?{action:'read',url:interview.url}:{action:'finish',claims:proposed};}}});
  assert.equal(result.observations.length,facetsFound);assert.equal(result.state,facetsFound===5?'completed':'partial');
  assert.equal(store.buildCanonicalView(run).research!.coverage!.find(f=>f.id==='counterevidence')!.state,facetsFound===5?'evidence_found':'gap');db.close();
+});
+
+
+test('scoped quote-only policy rejects unsupported years even when verifier erroneously supports the claim',async()=>{
+ const {db,store,run}=setup();let round=0;
+ const original={...interview,text:'In 2011 I began doctoral work. I completed my MSc research.',links:[]};
+ const claim={sourceKey:'S2',quote:'I completed my MSc research.',statement:'In 2011 I began doctoral work and completed an MSc.',kind:'attributed_statement',section:'background',facet:'background'};
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,
+ firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(action){return {pages:[action.type==='github_profile'?profile:original],requests:1,bytes:original.text.length,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify'){assert.equal(input.checkpoint.quoteSupportPolicy,'exact_quote/v1');return {supported:[0],rejected:[]};}return ++round===1?{action:'read',url:interview.url}:{action:'finish',claims:[claim]};}}});
+ assert.equal(result.state,'partial');assert.equal(result.observations.length,0);assert.ok(result.limitations.some(n=>n.includes('年份')));assert.ok(result.limitations.every(n=>!n.endsWith('：null')));
+ const cp=store.research.checkpoint(run.id)!;assert.equal(cp.quoteSupportPolicy,'exact_quote/v1');assert.equal(cp.pages[1]!.text,original.text);
+ const {buildResearchReport}=await import('../server/research/controller.js');
+ const replay={...cp,claims:[{...claim,kind:'attributed_statement' as const,section:'background' as const,facet:'background' as const,verified:true}]};
+ const rebuilt=buildResearchReport({store,run,checkpoint:replay,limits:unlimited},'research_complete','completed');assert.equal(rebuilt.observations.length,0);assert.equal(rebuilt.state,'partial');assert.equal(replay.claims.length,1);
+ db.close();
+});
+
+test('literal years must bind the same quoted year without substring or neighbouring-page support',async()=>{
+ const {claimQuotedYearIssue}=await import('../shared/research-depth.js');
+ assert.equal(claimQuotedYearIssue({statement:'2020年开始研究。',quote:'Started research in 2020.'}),null);
+ assert.equal(claimQuotedYearIssue({statement:'讲授200行的例子。',quote:'A 200-line example.'}),null);
+ assert.ok(claimQuotedYearIssue({statement:'2020年开始研究。',quote:'Document ID 120201.'}));
+ assert.ok(claimQuotedYearIssue({statement:'2005–2009本科，2011–2015博士。',quote:'BSc 2005–2009; MSc 2009–2011.'}));
+});
+
+
+test('reopening a completed quote-policy checkpoint guards actual Store canonical and all exports without rewriting stored claims',()=>{
+ const {db,store,run}=setup();const quote='I completed my MSc research.';const statement='In 2011 I began a PhD and completed my MSc.';
+ store.addSource(run.id,{key:'S1',url:profile.url,title:profile.title,kind:'profile',publishedAt:null,excerpt:quote,excerptLocator:'Synthetic original',identityLabel:'Synthetic',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);
+ store.addObservation(run.id,{statement,kind:'attributed_statement',sourceKeys:['S1'],limitations:[]},0);
+ const checkpoint:ResearchCheckpoint={phase:'done',steps:2,startedAt:0,elapsedMs:0,anchorUrl:profile.url,identity:null,candidates:[],pages:[{...profile,sourceKey:'S1',text:quote,retrieval:'read'}],claims:[{sourceKey:'S1',quote,statement,kind:'attributed_statement',section:'background',facet:'background',verified:true}],unknowns:[],stopReason:'research_complete',quoteSupportPolicy:'exact_quote/v1'};
+ store.research.save(run.id,checkpoint);const original=JSON.stringify(checkpoint);
+ store.updateRun(run.id,{state:'completed',stop_reason:'research_complete',identity_json:JSON.stringify({displayName:'Ada Fixture',handle:'ada-fixture',profileUrl:profile.url,status:'resolved',note:'Synthetic',candidates:[]}),answer_json:JSON.stringify([{id:'background',heading:'Background',body:'',bullets:[{text:statement,sourceKeys:['S1'],kind:'attributed_statement'}]}])});
+ const view=store.buildCanonicalView(store.getRun(run.id)!);assert.equal(view.state,'partial');assert.equal(view.stopReason,'claim_scope_unverified');assert.equal(view.observations.length,0);assert.equal(view.answer.length,0);assert.equal(view.personObject!.claims.length,0);assert.equal(view.personObject!.evidence.length,0);assert.ok(view.personObject!.unknowns.some(n=>n.includes('年份')));assert.equal(view.research!.coverage!.find(f=>f.id==='background')!.state,'gap');
+ const claims=view.personObject!.claims;assert.equal(JSON.stringify({observations:view.observations,answer:view.answer,claims,coverage:view.research!.coverage}).includes(statement),false);
+ for(const rendered of [renderJson(view),renderMarkdown(view),renderReportHtml(view)])assert.equal(rendered.includes(statement),false);
+ assert.equal(store.listObservations(run.id)[0]!.statement,statement);assert.equal(JSON.stringify(store.research.checkpoint(run.id)),original);assert.equal(store.getRun(run.id)!.state,'completed');assert.equal(view.sources[0]!.excerpt,quote);
+ // Historical checkpoints never gain the new policy or a quote-only pass.
+ const legacy={...checkpoint};delete legacy.quoteSupportPolicy;db.prepare('UPDATE research_checkpoints SET data_json=? WHERE run_id=?').run(JSON.stringify(legacy),run.id);assert.equal(store.buildCanonicalView(store.getRun(run.id)!).observations.length,1);assert.equal(store.research.checkpoint(run.id)!.quoteSupportPolicy,undefined);
+ db.close();
+});
+
+test('resuming scoped pending claims cannot relabel a completed legacy verifier receipt as quote-only',async()=>{
+ const {db,store,run}=setup();const quote='Ada Fixture wrote a compiler.';
+ store.addSource(run.id,{key:'S1',url:profile.url,title:profile.title,kind:'profile',publishedAt:null,excerpt:quote,excerptLocator:'Synthetic original',identityLabel:'Synthetic',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);
+ const cp:ResearchCheckpoint={phase:'verifying',steps:0,startedAt:0,elapsedMs:0,anchorUrl:profile.url,identity:{displayName:'Ada Fixture',handle:'ada-fixture',profileUrl:profile.url,status:'resolved',note:'Synthetic',candidates:[]},candidates:[],pages:[{...profile,sourceKey:'S1',text:quote,retrieval:'read'}],claims:[],pendingClaims:[{sourceKey:'S1',quote,statement:quote,kind:'attributed_statement',section:'work'}],unknowns:[],stopReason:null};
+ store.research.save(run.id,cp);store.research.reserve(run.id,'model:0','model',{model:'deepseek-flash',path:'/v1/messages'},{inputTokens:10,outputTokens:2500},unlimited);store.research.settle(run.id,'model:0',{status:200,body:'LEGACY_CONTEXT_RESULT',headers:{'content-type':'text/event-stream'}},{inputTokens:10,outputTokens:1,estimatedUsd:0});let sends=0;
+ await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},deepseekApiKey:'synthetic',
+ transport:{async fetch(){sends++;return {status:200,ok:true,headers:{get(){return 'text/event-stream';}},async text(){return 'NEW_QUOTE_ONLY_RESULT';}};}},
+ tools:{async execute(){throw new Error('no tool dispatch needed for pending claims');}},planner:{async decide(input,signal,invoke){assert.equal(input.mode,'verify');const raw=await invoke({path:'/v1/messages',body:{model:'deepseek-flash',max_tokens:2500},signal} as Parameters<typeof invoke>[0]);assert.equal(raw.body,'NEW_QUOTE_ONLY_RESULT');return {supported:[0],rejected:[]};}}});
+ assert.equal(sends,1);const receipts=store.research.receipts(run.id);assert.equal(receipts.length,2);assert.equal(receipts[0]!.key,'model:0');assert.equal((receipts[0]!.result as {body:string}).body,'LEGACY_CONTEXT_RESULT');const current=receipts.find(r=>r.key==='model:0:quote_only_v1')!;assert.equal((current.request as {verificationPolicy:string}).verificationPolicy,'exact_quote/v1');assert.equal(store.research.budget(run.id,unlimited).modelCalls,2);assert.equal(store.research.checkpoint(run.id)!.quoteSupportPolicy,'exact_quote/v1');db.close();
+});
+
+
+test('canonical multi-source statement keeps valid support and removes only the rejected citation binding',()=>{
+ const {db,store,run}=setup();const badQuote='I completed an MSc.',goodQuote='In 2011 I began doctoral work.',statement='2011年开始博士研究。';
+ for(const [i,quote] of [badQuote,goodQuote].entries())store.addSource(run.id,{key:`S${i+1}`,url:i?interview.url:profile.url,title:'Synthetic',kind:'profile',publishedAt:null,excerpt:quote,excerptLocator:'Synthetic original',identityLabel:'Synthetic',identityConfirmed:false,fetchStatus:'ok',limits:[]},i);
+ store.addObservation(run.id,{statement,kind:'attributed_statement',sourceKeys:['S1','S2'],limitations:[]},0);
+ const cp:ResearchCheckpoint={phase:'done',steps:2,startedAt:0,elapsedMs:0,anchorUrl:profile.url,identity:null,candidates:[],pages:[{...profile,sourceKey:'S1',text:badQuote,retrieval:'read'},{...interview,sourceKey:'S2',text:goodQuote,retrieval:'read'}],claims:[{sourceKey:'S1',quote:badQuote,statement,kind:'attributed_statement',section:'background',facet:'background',verified:true},{sourceKey:'S2',quote:goodQuote,statement,kind:'attributed_statement',section:'background',facet:'background',verified:true}],unknowns:[],stopReason:'research_complete',quoteSupportPolicy:'exact_quote/v1'};store.research.save(run.id,cp);
+ store.updateRun(run.id,{state:'completed',identity_json:JSON.stringify({displayName:'Ada Fixture',handle:'ada-fixture',profileUrl:profile.url,status:'resolved',note:'Synthetic',candidates:[]}),answer_json:JSON.stringify([{id:'background',heading:'Background',body:statement,bullets:[{text:statement,sourceKeys:['S1','S2'],kind:'attributed_statement'}]}])});
+ const view=store.buildCanonicalView(store.getRun(run.id)!);assert.equal(view.observations.length,1);assert.deepEqual(view.observations[0]!.sourceKeys,['S2']);assert.equal(view.answer[0]!.body,statement);assert.deepEqual(view.answer[0]!.bullets[0]!.sourceKeys,['S2']);assert.deepEqual(view.personObject!.claims.map(c=>c.id),['C2']);assert.deepEqual(view.research!.coverage!.find(c=>c.id==='background')!.sourceKeys,['S2']);assert.deepEqual(store.listObservations(run.id)[0]!.sourceKeys,['S1','S2']);assert.equal(store.research.checkpoint(run.id)!.claims.length,2);
+ store.setSourceExcluded(run.id,'S2',true);const revoked=store.buildCanonicalView(store.getRun(run.id)!);assert.equal(revoked.observations.length,0);assert.equal(revoked.answer.length,0);assert.equal(revoked.personObject!.claims.length,0);assert.equal(revoked.research!.coverage!.find(c=>c.id==='background')!.state,'gap');db.close();
 });

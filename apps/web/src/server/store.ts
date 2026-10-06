@@ -1,4 +1,4 @@
-import { researchDepthCoverage } from '../shared/research-depth.js';
+import { researchDepthCoverage, claimEvidenceIssue } from '../shared/research-depth.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
@@ -632,29 +632,37 @@ export class Store {
       : identityChanged ? { ...source, identityConfirmed: false, identityLabel: '人物归属待复核；账号自身原资料保留。' } : source);
     const excluded = excludedSourceKeys(sources);
     const anchorRevoked = Boolean(checkpoint?.anchorUrl && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
+    // Projection never rewrites checkpoint claims or supplier receipts. Policy
+    // checks are shared with verification, including on terminal reopens/exports.
+    const policyRejected = (checkpoint?.claims ?? []).filter(claim => claimEvidenceIssue(claim,checkpoint?.quoteSupportPolicy)!==null);
+    const hasActiveSupport=(statement:string,sourceKey?:string):boolean=>(checkpoint?.claims??[]).some(claim=>claim.statement===statement&&(!sourceKey||claim.sourceKey===sourceKey)&&!policyRejected.includes(claim)&&sources.some(source=>source.sourceKey===claim.sourceKey&&!source.excluded&&source.excerpt?.includes(claim.quote))&&checkpoint?.pages.some(page=>page.sourceKey===claim.sourceKey&&page.text.includes(claim.quote)));
+    const projectedKeys=(statement:string,sourceKeys:readonly string[]):string[]=>policyRejected.some(claim=>claim.statement===statement&&sourceKeys.includes(claim.sourceKey))?sourceKeys.filter(key=>hasActiveSupport(statement,key)):[...sourceKeys];
+    const isPolicyRejected=(statement:string,sourceKeys:readonly string[]):boolean=>sourceKeys.length>0&&projectedKeys(statement,sourceKeys).length===0;
+    const policyLimits=policyRejected.map(claim=>`${claim.sourceKey}：${claimEvidenceIssue(claim,checkpoint?.quoteSupportPolicy)} 该引文绑定不作为已支持依据展示；原记录保留。`);
+    const policyStop=policyRejected.length>0&&run.state==='completed'&& !['scope_changed','source_revoked'].includes(run.stopReason??'');
     // Legacy Person Object IDs are checkpoint ordinals. Assign them before
     // filtering so withdrawing one source cannot rename unrelated references.
     const personClaims = (checkpoint?.claims ?? [])
       .map((claim, index) => ({ claim, ordinal: index + 1 }))
-      .filter(({ claim }) => sources.some(source =>
+      .filter(({ claim }) => !policyRejected.includes(claim)&&sources.some(source =>
         source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote)));
     if (anchorRevoked) sources.forEach(source => excluded.add(source.sourceKey));
-    const observations = this.listObservations(run.id).map(observation => ({ ...observation,
+    const observations = this.listObservations(run.id).filter(observation=>!isPolicyRejected(observation.statement,observation.sourceKeys)).map(observation=>({...observation,sourceKeys:projectedKeys(observation.statement,observation.sourceKeys)})).map(observation => ({ ...observation,
       validity: identityChanged ? 'review' as const : validityFor(observation.sourceKeys, excluded),
       reviewReason: identityChanged ? identityReason : reviewReason(observation.sourceKeys, excluded)
     }));
     const answer: CanonicalAnswerSection[] = run.answer.map((section) => ({
       id: section.id,
       heading: section.heading,
-      body: section.body,
-      bullets: section.bullets.map((bullet) => ({
+      body: policyRejected.some(claim=>section.body.includes(claim.statement)&&!hasActiveSupport(claim.statement))?'':section.body,
+      bullets: section.bullets.filter(bullet=>!isPolicyRejected(bullet.text,bullet.sourceKeys)).map(bullet=>({...bullet,sourceKeys:projectedKeys(bullet.text,bullet.sourceKeys)})).map((bullet) => ({
         text: bullet.text,
         sourceKeys: bullet.sourceKeys,
         kind: bullet.kind,
         validity: identityChanged ? 'review' as const : validityFor(bullet.sourceKeys, excluded),
         reviewReason: identityChanged ? identityReason : reviewReason(bullet.sourceKeys, excluded)
       }))
-    }));
+    })).filter(section=>!policyRejected.length||section.body||section.bullets.length);
     const identity: CanonicalIdentity = {
       displayName: run.identity.displayName,
       handle: run.identity.handle,
@@ -668,7 +676,7 @@ export class Store {
     return {
       schemaVersion: SCHEMA_VERSION,
       runId: run.id,
-      state: run.state,
+      state: policyStop?'partial':run.state,
       revision: run.revision,
       question: run.question,
       seedUrl: run.seedUrl,
@@ -679,16 +687,16 @@ export class Store {
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
       interrupted: run.interrupted,
-      stopReason: run.stopReason,
+      stopReason: policyStop?'claim_scope_unverified':run.stopReason,
       identity,
       sources,
       observations,
       answer,
-      limitations: run.limitations,
+      limitations: [...new Set([...run.limitations,...policyLimits])],
       usage: run.usage,
       reviewCount: countReviewItems(observations, answer),
       ...(checkpoint ? {
-        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns, coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
+        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns, coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
         ...(checkpoint.anchorUrl && identity.status === 'resolved' ? {
           personObject: {
             schemaVersion: 'stripsearch/person/v1' as const,
@@ -700,7 +708,7 @@ export class Store {
             evidence: personClaims.map(({ claim, ordinal }) => ({
               id: `E${ordinal}`, sourceKey: claim.sourceKey, quote: claim.quote
             })),
-            unknowns: checkpoint.unknowns,
+            unknowns: [...new Set([...checkpoint.unknowns,...policyLimits])],
             report: { runId: run.id, revision: run.revision, asOf: run.updatedAt }
           }
         } : {})

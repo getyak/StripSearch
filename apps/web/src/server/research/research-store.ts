@@ -41,6 +41,8 @@ export interface FirstStepBinding {
 }
 export interface StoredPage extends ResearchPage { sourceKey: string; discoveredFrom?: string[]; inheritedFrom?: {runId: string; sourceKey: string} }
 export interface ResearchCheckpoint {
+ /** Persisted only after a scoped quote-only verification starts; no historical relabeling. */
+ quoteSupportPolicy?: 'exact_quote/v1';
  /** Last bounded model validation feedback; never source evidence. */
  planFeedback?: string;
  planValidationFailures?: number;
