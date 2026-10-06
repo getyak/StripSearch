@@ -17,8 +17,11 @@ test('only a leading citation to this exact bound source is excluded from named 
   assert.ok(claimAuthorialIssue({quote:'Sometimes I am jokingly referred to as the reference human.',statement:'主页自述常被开玩笑称为参考人类。',authorialBasis:'quote_first_person'}));
   assert.equal(claimAuthorialIssue({quote:'Sometimes I am jokingly referred to as the reference human.',statement:'主页自述有时被开玩笑称为参考人类。',authorialBasis:'quote_first_person'}),null);
   assert.equal(claimAuthorialIssue({quote:'Sometimes I am jokingly referred to as the reference human.',statement:'主页自述常被开玩笑称为参考人类。'}),null,'legacy without attribution policy unchanged');
+  assert.equal(claimAuthorialIssue({quote:'Sometimes I am referred to as the reference human.',statement:'有时被称为参考人类，并不是总是如此。',authorialBasis:'quote_first_person'}),null);
   const migration='I have three blogs. I then briefly and sadly switched to my second blog on Medium. I now have a Bear blog.';
   assert.ok(claimAuthorialIssue({quote:migration,statement:'主页自述共经营三个博客。',authorialBasis:'quote_first_person'}));
+  for(const statement of ['目前同时经营三个博客。','曾经换过平台，如今同时运营三个博客。'])assert.ok(claimAuthorialIssue({quote:migration,statement,authorialBasis:'quote_first_person'}));
+  assert.equal(claimAuthorialIssue({quote:migration,statement:'并非同时经营三个博客，目前使用 Bear。',authorialBasis:'quote_first_person'}),null);
   assert.equal(claimAuthorialIssue({quote:migration,statement:'主页自述先后有三个博客，目前使用 Bear。',authorialBasis:'quote_first_person'}),null);
 });
 
@@ -60,6 +63,12 @@ test('real controller preserves independent excerpts outside claims; canonical r
     const historicalReport=buildResearchReport({store:f.store,run:f.store.getRun(f.run.id)!,checkpoint:history,limits:saved.limits!},'limited_evidence','partial');
     assert.ok(historicalReport.limitations.some(text=>text.includes('步骤 1')&&text.includes('不代表当前读取状态')&&text.includes('X 帖文未读取')));
     assert.ok(!historicalReport.limitations.includes('X 帖文未读取'));
+    f.store.updateRun(f.run.id,{limitations_json:JSON.stringify(historicalReport.limitations)});
+    const historyView=current();
+    assert.ok(historyView.research!.unresolved.every(text=>text.includes('不代表当前读取状态')));
+    assert.ok(historyView.personObject!.unknowns.every(text=>text.includes('不代表当前读取状态')));
+    for(const text of [renderJson(historyView),renderMarkdown(historyView),renderReportHtml(historyView)])assert.ok(text.includes('不代表当前读取状态'));
+    assert.ok(!historyView.research!.unresolved.includes('X 帖文未读取'));
     assert.deepEqual(f.store.research.checkpoint(f.run.id)!.unknowns,['X 帖文未读取'],'historical model question is not rewritten');
     f.store.setSourceExcluded(f.run.id,'S1',true);assert.equal(current().research!.accountMaterials!.length,0);assert.equal(f.store.research.checkpoint(f.run.id)!.independentMaterials!.length,1,'historical material stays intact');
   }finally{f.close();}

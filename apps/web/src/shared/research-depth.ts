@@ -49,11 +49,30 @@ export function quoteHasFirstPerson(quote:string):boolean {
   return /\b(?:I|me|my|mine|we|our|ours)\b|(?:我|本人)(?:的|们|曾|在|是|有|做|写|想|希望|觉得|说|讲述|学习|研究|参与|负责|建立|发布|训练|工作|设计|创建|认为|喜欢)/iu.test(readable);
 }
 
+/** Preserve model questions as history in every current projection; raw checkpoints stay intact. */
+export function presentedResearchUnknowns(checkpoint:{unknowns:string[];modelGapHistory?:Array<{step:number;text:string}>}):string[]{
+ return checkpoint.unknowns.map(text=>{
+  const historical=checkpoint.modelGapHistory?.find(item=>item.text===text);
+  return historical?`Agent 在步骤 ${historical.step} 提出的核对项（未经独立核验，不代表当前读取状态）：${text}`:text;
+ });
+}
+function hasUnqualifiedStrengthening(statement:string,pattern:RegExp,allowSequential=false):boolean {
+ return statement.split(/[，,。；;!?\n]/u).some(clause=>{
+  for(const match of clause.matchAll(pattern)){
+   const prefix=clause.slice(0,match.index).trimEnd();
+   if(/(?:并?不(?:是)?|并非|不是|不能(?:说|称)|未必)$/u.test(prefix))continue;
+   if(allowSequential&&/先后/u.test(prefix))continue;
+   return true;
+  }
+  return false;
+ });
+}
+
 /** New server-bound attribution gate; unmarked history is not relabeled. */
 export function claimAuthorialIssue(claim:{statement:string;quote:string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis}):string|null {
   if(!claim.authorialBasis)return null;
-  if(/\bsometimes\b/iu.test(claim.quote)&&/(?:经常|常常|常被|时常|总是|一直|频繁)/u.test(claim.statement)&&!/(?:\boften\b|\balways\b|\bfrequently\b)/iu.test(claim.quote))return '原文有时不能加强为经常或总是；请保留频率限定。';
-  if(/\b(?:then|briefly)\b.{0,100}\bswitched\b[\s\S]*\bnow\b/iu.test(claim.quote)&&/(?:同时|共|都).{0,12}(?:经营|运营|更新)/u.test(claim.statement)&&!/(?:曾|先后|后来|转到|转向|迁移|如今|现在|目前)/u.test(claim.statement))return '原文包含先后迁移和当前位置，不能改成同时经营；请保留先后与当前限定。';
+  if(/\bsometimes\b/iu.test(claim.quote)&&hasUnqualifiedStrengthening(claim.statement,/(?:经常|常常|常被|时常|总是|一直|频繁)/gu)&&!/(?:\boften\b|\balways\b|\bfrequently\b)/iu.test(claim.quote))return '原文有时不能加强为经常或总是；请保留频率限定。';
+  if(/\b(?:then|briefly)\b.{0,100}\bswitched\b[\s\S]*\bnow\b/iu.test(claim.quote)&&hasUnqualifiedStrengthening(claim.statement,/(?:同时|共|都).{0,12}(?:经营|运营|更新)/gu,true))return '原文包含先后迁移和当前位置，不能改成同时经营；请保留先后与当前限定。';
   if(claim.authorialBasis==='page_text'&&(claim.kind==='attributed_statement'||/自述|自我介绍|自称|他称|她称|本人(?:开设|创办|创建)|\b(?:he|she)\s+(?:says|said|states|claims)|self-description/iu.test(claim.statement)))
     return '第三人称页面简介或一般页面文字不能改成本人自述；请使用页面陈述并保留来源归因，不增加创办或个人行动。';
   if(/^(?:同文|同一(?:篇|文章|论文)|上文|[Ii]n\s+the\s+same\s+(?:article|paper))/u.test(claim.statement.trim()))

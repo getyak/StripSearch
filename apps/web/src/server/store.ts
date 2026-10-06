@@ -1,4 +1,4 @@
-import { researchDepthCoverage, claimEvidenceIssue } from '../shared/research-depth.js';
+import { researchDepthCoverage, claimEvidenceIssue, presentedResearchUnknowns } from '../shared/research-depth.js';
 import { classifyFirstStepUrl } from '../shared/first-step-discovery.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
@@ -705,7 +705,7 @@ export class Store {
       usage: run.usage,
       reviewCount: countReviewItems(observations, answer),
       ...(checkpoint ? {
-        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns, ...(checkpoint.independentMaterials?{accountMaterials}:{}), coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
+        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: presentedResearchUnknowns(checkpoint), ...(checkpoint.independentMaterials?{accountMaterials}:{}), coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
         ...(checkpoint.anchorUrl && identity.status === 'resolved' ? {
           personObject: {
             schemaVersion: 'stripsearch/person/v1' as const,
@@ -717,7 +717,7 @@ export class Store {
             evidence: personClaims.map(({ claim, ordinal }) => ({
               id: `E${ordinal}`, sourceKey: claim.sourceKey, quote: claim.quote
             })),
-            unknowns: [...new Set([...checkpoint.unknowns,...policyLimits])],
+            unknowns: [...new Set([...presentedResearchUnknowns(checkpoint),...policyLimits])],
             report: { runId: run.id, revision: run.revision, asOf: run.updatedAt }
           }
         } : {})
