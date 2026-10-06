@@ -1,4 +1,4 @@
-import { RESEARCH_FACETS, researchDepthCoverage, type ResearchFacet } from '../../shared/research-depth.js';
+import { RESEARCH_FACETS, researchDepthCoverage, claimScopeIssue, type ResearchFacet } from '../../shared/research-depth.js';
 import { createHash } from 'node:crypto';
 import { NeedsInputError, type IdentityCandidate, type ProviderResult, type ResearchBudgetLimits, type SourceDraft } from '../../shared/types.js';
 import { extractGitHubHandle, normalizeResearchUrl, sanitizeText } from '../../shared/validation.js';
@@ -69,19 +69,24 @@ export interface ResearchReportContext {
 /** Deterministic report from the preserved checkpoint: never invents facts, keeps every gap. */
 export function buildResearchReport(context:ResearchReportContext,reason:string,state:'completed'|'partial'):ProviderResult{
  const {store,run,checkpoint,limits}=context;
+ const scopeStop=reason==='scope_changed'||reason==='source_revoked';
  checkpoint.phase='done';checkpoint.stopReason=reason;
  const scope=scopeGapsOf(store,run,checkpoint);const pages=scope.pages;const keys=new Set(pages.map(p=>p.sourceKey));
- const claims=checkpoint.claims.filter(c=>keys.has(c.sourceKey)&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')));
+ const eligibleClaims=checkpoint.claims.filter(c=>keys.has(c.sourceKey)&&pages.some(p=>p.sourceKey===c.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile')));
+ const sourceClaims=eligibleClaims.filter(c=>pages.some(p=>p.sourceKey===c.sourceKey&&p.text.includes(c.quote)));
+ const invalidQuotes=eligibleClaims.filter(c=>!sourceClaims.includes(c));
+ const scopeRejected=sourceClaims.filter(c=>claimScopeIssue(c)!==null);
+ const claims=sourceClaims.filter(c=>claimScopeIssue(c)===null);
+ if(scopeRejected.length||invalidQuotes.length){state='partial';if(!scopeStop){reason=scopeRejected.length?'claim_scope_unverified':'invalid_evidence';checkpoint.stopReason=reason;}}
  const coverage=researchDepthCoverage(claims,keys);
  const gaps=coverage.filter(c=>c.state==='gap').map(c=>`${c.label}：${c.note}`);
- const depthLimits=[...gaps,
+ const depthLimits=[...gaps,...scopeRejected.map(c=>`${c.sourceKey}：${claimScopeIssue(c)}`),...invalidQuotes.map(c=>`${c.sourceKey}：引用不在该来源原文中，原陈述保留待核对。`),
   ...scope.discoveryOnly.length?[`${scope.discoveryOnly.length} 个来源只有搜索发现材料、未回读原文；只能当线索，不算已读证据。`]:[],
   ...scope.unread.length?[`还有 ${scope.unread.length} 条已发现链接未回读；它们是待判断线索，不等于均属于此人。`]:[],
   ...scope.truncated.length?[`${scope.truncated.length} 个来源的原文被截断或不完整；截断部分仍是缺口，不能当作完整原文。`]:[],
   ...scope.unresolved.length?[`还有 ${scope.unresolved.length} 项未解决记录（unresolved）；存在明确未解决项时不能称全平台或全部历史研究完成。`]:[]];
  const observations=claims.map(c=>({statement:c.statement,kind:c.kind,sourceKeys:[c.sourceKey],limitations:['来源原文摘录；身份归属与独立事实核实另行判断。']}));
  const budget=store.research.budget(run.id,limits);
- const scopeStop=reason==='scope_changed'||reason==='source_revoked';
  const identity=checkpoint.identity??{displayName:'',handle:null,profileUrl:checkpoint.anchorUrl,status:'needs_input',note:'尚未确认公开主页。',candidates:checkpoint.candidates};
  return {state,identity:scopeStop&&checkpoint.identity?{...identity,note:`${identity.note?`${identity.note} `:''}冻结范围已失效或撤回（${reason}）：已读材料保留待复核，不能据此继续人物结论。`}:identity,sources:checkpoint.pages.map(p=>draft(p,checkpoint.anchorUrl,context.firstStepScope)),observations,
   answer:(['background','work','expression','analysis'] as const).map(section=>({id:section,heading:({background:'背景与经历',work:'作品与行动',expression:'公开表达',analysis:'分析与不确定性'})[section],body:'',bullets:claims.filter(c=>c.section===section).map(c=>({text:c.statement,sourceKeys:[c.sourceKey],kind:c.kind}))})).filter(section=>section.bullets.length>0),limitations:[...new Set([...checkpoint.unknowns,...(checkpoint.notes??[]),...(checkpoint.coverageGaps??[]),...depthLimits,...state==='partial'?[`研究已停止：${reason}。已有材料保留，未证实的内容不补写。`]:[],...scopeStop?['冻结范围已失效或撤回：如需继续，请通过现有第一步流程以新的范围重新开始研究。']:[]])],usage:{requests:budget.toolCalls+budget.modelCalls,bytes:store.research.receipts(run.id).reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:reason};
@@ -226,7 +231,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   const partition=[...supportedIndexes,...rejectedIndexes];
   if(partition.some(i=>!Number.isInteger(i)||Number(i)<0||Number(i)>=claims.length)||new Set(partition).size!==partition.length||partition.length!==claims.length)return quoteFallback('verification_unavailable');
   const supported=new Set(supportedIndexes as number[]);
-  checkpoint.claims=claims.filter((_c,index)=>supported.has(index)).map(c=>({...c,verified:true}));delete checkpoint.pendingClaims;checkpoint.steps++;
+  const scopeRejected=claims.filter((c,index)=>supported.has(index)&&claimScopeIssue(c)!==null);
+  checkpoint.claims=claims.filter((c,index)=>supported.has(index)&&claimScopeIssue(c)===null).map(c=>({...c,verified:true}));delete checkpoint.pendingClaims;checkpoint.steps++;
+  for(const claim of scopeRejected)checkpoint.unknowns.push(`${claim.sourceKey}：${claimScopeIssue(claim)}`);
   if(Array.isArray(checked.rejected))for(const item of checked.rejected)if(object(item)&&typeof item.reason==='string')checkpoint.unknowns.push(sanitizeText(item.reason,500));
   const coverage=researchDepthCoverage(checkpoint.claims,new Set(stillActivePages().filter(p=>(p.retrieval==='read'||p.retrieval==='profile')).map(p=>p.sourceKey)));
   // Five facets with evidence never prove all-platform or full-history

@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { openDatabase, applyCoreSchema } from '../server/db/index.js';
 import { Store } from '../server/store.js';
 import { runResearch } from '../server/research/controller.js';
+import { buildResearchReport } from '../server/research/controller.js';
+import { RESEARCH_LIMITS, type ResearchCheckpoint } from '../server/research/research-store.js';
+import { claimScopeIssue } from '../shared/research-depth.js';
 import type { ResearchTools, ResearchPage } from '../server/research/tool-contracts.js';
 function setup() {
  const db=openDatabase(':memory:');applyCoreSchema(db);const store=new Store(db);
@@ -11,6 +14,49 @@ function setup() {
 }
 const profile:ResearchPage={url:'https://github.com/ada-fixture',title:'Ada Fixture',text:'Ada Fixture builds open source compilers.',kind:'profile',publishedAt:null,links:['https://fixture.test/interview'],limitations:[],account:{platform:'github',handle:'ada-fixture',id:'123',profileUrl:'https://github.com/ada-fixture'}};
 const interview:ResearchPage={url:'https://fixture.test/interview',title:'An interview',text:'Ada Fixture started the compiler project in 2020.',kind:'third_party',publishedAt:null,links:[],limitations:[]};
+test('scope checks distinguish an individual work from corpus or lifetime summaries and require literal quote binding',()=>{
+ const quote='A toy compiler is useful for learning.';
+ for(const statement of ['其博客的核心观点是学习编译原理。','长期主张只用玩具例子。','所有作品都关注编译器。',"The blog's central philosophy is learning compilers.",'The author consistently argues for toy examples.',"His blog's core viewpoint is compilers.",'The central viewpoint of his blog is compilers.'])assert.ok(claimScopeIssue({statement,quote}));
+ for(const statement of ['这篇文章的核心观点是用玩具例子学习。','这篇文章中，其核心观点是编译原理。','本人喜欢玩具例子。','The core idea of this article is learning with toy examples.','In this article, his core viewpoint is compilers.'])assert.equal(claimScopeIssue({statement,quote}),null);
+ const source='His core philosophy is learning compilers.';
+ assert.equal(claimScopeIssue({statement:source,quote:source}),null);
+ assert.ok(claimScopeIssue({statement:source,quote:'HIS CORE PHILOSOPHY IS LEARNING COMPILERS.'}));
+});
+test('a blanket model support verdict cannot promote one blog entry into a corpus viewpoint',async()=>{
+ const {db,store,run}=setup();
+ const quote='The tiny compiler demo trains in twenty lines.';
+ const page={...profile,text:`Ada Fixture blog index. March: ${quote} February: a different topic.`,links:[]};
+ const broad='其个人博客的核心观点是：用二十行训练编译器。';
+ const narrow='该条目介绍了一个二十行的编译器训练示例。';
+ const result=await runResearch({store,run,signal:new AbortController().signal,tools:{async execute(){return {pages:[page],requests:1,bytes:page.text.length,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(input){return input.mode==='verify'?{supported:[0,1],rejected:[]}:{action:'finish',claims:[{sourceKey:'S1',quote,statement:broad,kind:'page_statement',facet:'expression'},{sourceKey:'S1',quote,statement:narrow,kind:'page_statement',facet:'expression'}]};}}});
+ assert.equal(result.state,'partial');assert.equal(result.observations.length,1);assert.equal(result.observations[0]!.statement,narrow);
+ assert.equal(JSON.stringify(result).includes(broad),false);assert.match(result.limitations.join(' '),/单条来源摘录/);
+ assert.equal(store.research.checkpoint(run.id)!.claims[0]!.verified,true);assert.equal(store.research.checkpoint(run.id)!.pages[0]!.text,page.text);db.close();
+});
+test('a literal scoped source assertion survives the scope guard without becoming an independent fact',async()=>{
+ const {db,store,run}=setup();const quote='我的博客的核心观点是：用玩具例子学习编译原理。';
+ const page={...profile,text:quote,links:[]};
+ const result=await runResearch({store,run,signal:new AbortController().signal,tools:{async execute(){return {pages:[page],requests:1,bytes:quote.length,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(input){return input.mode==='verify'?{supported:[0],rejected:[]}:{action:'finish',claims:[{sourceKey:'S1',quote,statement:quote,kind:'attributed_statement'}]};}}});
+ assert.equal(result.observations[0]!.statement,quote);assert.equal(result.observations[0]!.kind,'attributed_statement');db.close();
+});
+test('canonical rejects historical verified scope inflation and a fabricated literal exemption while preserving originals',()=>{
+ const {db,store,run}=setup();const quote='The tiny compiler demo trains in twenty lines.';
+ const broad='其个人博客的核心观点是：用二十行训练编译器。';
+ store.addSource(run.id,{key:'S1',url:profile.url,title:profile.title,kind:'profile',publishedAt:null,excerpt:quote,excerptLocator:'合成原文',identityLabel:'合成来源',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);
+ const checkpoint:ResearchCheckpoint={phase:'done',steps:0,startedAt:0,elapsedMs:0,anchorUrl:profile.url,identity:null,candidates:[],pages:[{...profile,sourceKey:'S1',text:quote,retrieval:'read'}],claims:[{sourceKey:'S1',quote,statement:broad,kind:'page_statement',section:'expression',facet:'expression',verified:true},{sourceKey:'S1',quote:broad,statement:broad,kind:'page_statement',section:'expression',facet:'expression',verified:true}],unknowns:[],stopReason:null};
+ const originalClaims=JSON.stringify(checkpoint.claims);const originalText=checkpoint.pages[0]!.text;
+ const result=buildResearchReport({store,run,checkpoint,limits:RESEARCH_LIMITS},'research_complete','completed');
+ assert.equal(result.state,'partial');assert.equal(result.observations.length,0);assert.equal(result.answer.length,0);
+ assert.match(result.limitations.join(' '),/原文材料|原作与观点/);assert.match(result.limitations.join(' '),/引用不在该来源原文/);
+ assert.equal(JSON.stringify(checkpoint.claims),originalClaims);assert.equal(checkpoint.pages[0]!.text,originalText);assert.equal(result.sources.length,1);db.close();
+});
+for(const reason of ['scope_changed','source_revoked'])test(`canonical claim rejection preserves the higher-priority ${reason} notice`,()=>{
+ const {db,store,run}=setup();const quote='The tiny compiler demo trains in twenty lines.';
+ store.addSource(run.id,{key:'S1',url:profile.url,title:profile.title,kind:'profile',publishedAt:null,excerpt:quote,excerptLocator:'合成原文',identityLabel:'合成来源',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);
+ const checkpoint:ResearchCheckpoint={phase:'done',steps:0,startedAt:0,elapsedMs:0,anchorUrl:profile.url,identity:{displayName:'Ada Fixture',handle:'ada-fixture',profileUrl:profile.url,status:'resolved',note:'Synthetic selection',candidates:[]},candidates:[],pages:[{...profile,sourceKey:'S1',text:quote,retrieval:'read'}],claims:[{sourceKey:'S1',quote,statement:'其个人博客的核心观点是编译原理。',kind:'page_statement',section:'expression',verified:true}],unknowns:[],stopReason:null};
+ const result=buildResearchReport({store,run,checkpoint,limits:RESEARCH_LIMITS},reason,'partial');
+ assert.equal(result.stopReason,reason);assert.equal(checkpoint.stopReason,reason);assert.match(result.identity.note!,new RegExp(reason));assert.match(result.limitations.join(' '),/冻结范围已失效或撤回/);assert.match(result.limitations.join(' '),/单条来源摘录/);assert.equal(result.observations.length,0);db.close();
+});
 test('research follows a discovered evidence gap and publishes only validated quotes',async()=>{
  const {db,store,run}=setup();let calls=0;let decisions=0;
  const tools:ResearchTools={async execute(action){calls++;return {pages:[action.type==='github_profile'?profile:interview],requests:1,bytes:120,estimatedUsd:.001,credits:null,limitations:[]};}};
