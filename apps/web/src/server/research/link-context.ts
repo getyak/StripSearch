@@ -28,7 +28,7 @@ function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment, branch: Tr
     if(!('tagName' in sibling)&&sibling.nodeName!=='#text')break;
     const pending:Tree.Node[]=[sibling];let independentLink=false;
     while(pending.length){const node=pending.pop()!;if('tagName' in node&&node.tagName==='a'){independentLink=true;break;}if('childNodes' in node)pending.push(...node.childNodes);}
-    if(independentLink)break;
+    if(independentLink&&'tagName' in sibling&&sibling.tagName==='p'&&'tagName' in branch&&branch.tagName==='p')break;
     if(!sibling.sourceCodeLocation)break;
     if(direction<0)start=sibling.sourceCodeLocation.startOffset;else end=sibling.sourceCodeLocation.endOffset;
    }

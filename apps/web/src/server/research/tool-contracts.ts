@@ -36,6 +36,8 @@ export interface ResearchLinkContext {
  url: string; quote: string; locator: string;
  binding: 'html_anchor' | 'html_rel_me' | 'markdown_link' | 'native_profile_field';
  surface: 'authorial' | 'profile_field' | 'third_party' | 'unknown';
+ /** Adapter-bound native payload field, with its actual assembled offset. */
+ nativeField?: {name:'blog'|'website'|'twitter_username';offset:number;nativeId:string};
 }
 export interface ResearchPage {
  url: string; title: string; text: string; kind: 'profile' | 'work' | 'third_party';

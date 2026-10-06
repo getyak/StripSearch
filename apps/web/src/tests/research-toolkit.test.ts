@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { createResearchTools } from '../server/research/toolkit.js';
+import { createResearchTools, verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext } from '../server/research/toolkit.js';
 import type { ResearchToolAction, ResearchToolsOptions } from '../server/research/tool-contracts.js';
 import type { HttpRequestInit } from '../server/adapters/types.js';
 
@@ -320,6 +320,8 @@ for(const platform of ['github','x'] as const) test(`${platform} preserves raw w
     assert.equal(declaration.requestedUrl,action.url);
     assert.equal(declaration.returnedProfileUrl,page.url);
     assert.equal(declaration.sourceContentHash,createHash('sha256').update(page.text).digest('hex'));
+    assert.deepEqual(verifiedNativeWebsiteDeclaration(page,action),declaration);
+    assert.ok(page.linkContexts!.every(context=>verifiedNativeFieldContext(page,context,declaration)));
     assert.equal(page.text.slice(declaration.fieldOffset,declaration.fieldOffset+raw.length),raw);
     assert.ok(declaration.fieldOffset>page.text.indexOf(value),'a repeated biography URL is not the website field');
     const native=page.linkContexts!.filter(context=>context.binding==='native_profile_field');
@@ -346,4 +348,28 @@ test('GitHub twitter_username locator binds the appended actual field, not a mat
   const offset=page.text.lastIndexOf(field);
   assert.ok(offset>page.text.indexOf(field));
   assert.match(context.locator,new RegExp(`第 ${offset+1}–`));
+  assert.equal(verifiedNativeFieldContext(page,context,null),true);
+  assert.equal(verifiedNativeFieldContext(page,{...context,nativeField:{...context.nativeField!,offset:page.text.indexOf(field)}},null),false);
+});
+
+test('native website attestation rejects mismatched requests, payload fields and protocol claims',async()=>{
+  const action={type:'github_profile' as const,url:'https://github.com/fixtureauthor'};
+  const h=harness({login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',bio:'Original biography.',blog:'https://synthetic-author.dev/'});
+  const original=(await h.execute(action)).pages[0]!,declaration=original.nativeWebsiteDeclaration!;
+  for(const mutation of [{requestedUrl:'https://github.com/other'}, {payloadField:'website' as const}, {protocol:'http' as const}, {publicHttpsUrl:'https://other-synthetic.dev/'}, {nativeId:'999'}, {fieldOffset:0}, {sourceContentHash:'0'.repeat(64)}]){
+    const page={...original,nativeWebsiteDeclaration:{...declaration,...mutation}};
+    assert.equal(verifiedNativeWebsiteDeclaration(page,action),null);
+    assert.equal(verifiedNativeFieldContext(page,page.linkContexts![0]!,null),false);
+  }
+});
+
+test('raw HTTP website text cannot become a native HTTPS self-link, including a legacy receipt',async()=>{
+  const action={type:'github_profile' as const,url:'https://github.com/fixtureauthor'};
+  const h=harness({login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',blog:'http://synthetic-author.dev/'});
+  const page=(await h.execute(action)).pages[0]!,declaration=verifiedNativeWebsiteDeclaration(page,action)!;
+  const context={url:'https://synthetic-author.dev/',quote:declaration.rawLiteral,locator:'forged',binding:'native_profile_field' as const,surface:'authorial' as const,nativeField:{name:'blog' as const,offset:declaration.fieldOffset,nativeId:declaration.nativeId}};
+  assert.equal(verifiedNativeFieldContext(page,context,declaration),false);
+  const legacy={...page};delete legacy.nativeWebsiteDeclaration;
+  const oldContext={...context};delete (oldContext as Partial<typeof context>).nativeField;
+  assert.equal(verifiedNativeFieldContext(legacy,oldContext,null),false);
 });

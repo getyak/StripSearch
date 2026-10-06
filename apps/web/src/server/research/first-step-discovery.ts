@@ -29,6 +29,8 @@ import { ProviderError } from '../adapters/types.js';
 import { invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { runDshDecision } from './dsh-decision.js';
 import { extractOriginalLinkContexts } from './link-context.js';
+import { verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext } from './toolkit.js';
+import type { NativeWebsiteDeclaration } from '../../shared/native-website.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchPage, ResearchAliasProof } from './tool-contracts.js';
 import type { ResearchBudgetLimits } from '../../shared/types.js';
 import { RESEARCH_LIMITS, ResearchStop, type ActionReceipt, type ActionUsage } from './research-store.js';
@@ -618,6 +620,7 @@ interface ObservedPage {
   ref: FirstStepAccountRef;
   retrieval: FirstStepRetrieval;
   receiptKey?: string;
+  nativeWebsiteDeclaration?: NativeWebsiteDeclaration;
 }
 
 /** Sentence-bounded span around the URL: a real excerpt with a real locator. */
@@ -1058,7 +1061,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         // The read page itself is an observed lead (explicit URL input is
         // always retained); it gets no read permission by itself.
         register(page.url);
-        observed.push({ page, ref: source, retrieval: 'read', ...(receipt ? {receiptKey:receipt.key} : {}) });
+        const declaration=receipt?verifiedNativeWebsiteDeclaration(page,receipt.request as ResearchToolAction):null;
+        const validatedContexts=(page.linkContexts??[]).filter(context=>verifiedNativeFieldContext(page,context,declaration));
+        observed.push({ page:{...page,linkContexts:validatedContexts}, ref: source, retrieval: 'read', ...(receipt ? {receiptKey:receipt.key} : {}), ...(declaration?{nativeWebsiteDeclaration:declaration}:{}) });
         // Adapter-attested alias proofs may project duplicate candidates onto
         // the observed canonical returned ref (server re-verified below).
         if (page.aliasProof) {
@@ -1069,10 +1074,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           else aliasNotes.add(`重复候选的别名证明未通过服务端核验（与实际请求或原生返回账号不绑定）：${proof.requestedUrl}；保持分离。`);
         }
         const flags = sourceFlags(page.url);
-        const declaration=page.nativeWebsiteDeclaration;
-        if (declaration && declaration.nativeId===page.account?.id && declaration.returnedProfileUrl===page.url &&
-          declaration.sourceContentHash===createHash('sha256').update(page.text).digest('hex') &&
-          declaration.protocol!=='https') gaps.push(`原生账号的网站声明尚未核对 HTTPS 入口：${declaration.rawLiteral}；保留原始声明，不推定协议对应关系或身份支持。`);
+        if (page.nativeWebsiteDeclaration && !declaration) gaps.push(`原生网站字段未通过实际请求与原文绑定：${page.url}；不采用声明或网站字段身份依据。`);
+        if (declaration && declaration.protocol!=='https') gaps.push(`原生账号的网站声明尚未核对 HTTPS 入口：${declaration.rawLiteral}；保留原始声明，不推定协议对应关系或身份支持。`);
         // Consume the ACTUAL extractor-record link contexts: exact spans of
         // the retained original with their href binding and surface. Quotes
         // are never synthesized and the href never has to be visible in the
@@ -1080,6 +1083,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         const contexts = page.linkContexts ?? [];
         const byTarget = new Map<string, (typeof contexts)[number]>();
         for (const context of contexts) {
+          if (!verifiedNativeFieldContext(page,context,declaration)) {
+            gaps.push(`原生网站链接上下文未通过字段协议或偏移核验：${page.url}；不采用为身份依据。`);
+            continue;
+          }
           if (typeof context.quote !== 'string' || context.quote.trim().length < 2 || !page.text.includes(context.quote)) {
             gaps.push(`链接上下文摘录不在已读原文中，已忽略：${page.url}`);
             continue;
@@ -1538,11 +1545,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       requiresIndependentScope: Boolean(conflict)||identityState !== 'supported',
       nativeWebsiteDeclarations: observed.filter(entry=>entry.retrieval==='read'&&resolveKey(entry.ref.accountKey)===resolveKey(ref.accountKey))
         .flatMap(entry=>{
-          const declaration=entry.page.nativeWebsiteDeclaration;
-          return declaration && declaration.platform===entry.page.account?.platform && declaration.nativeId===entry.page.account.id &&
-            declaration.returnedProfileUrl===entry.page.url && declaration.sourceContentHash===createHash('sha256').update(entry.page.text).digest('hex') &&
-            Number.isInteger(declaration.fieldOffset) && declaration.fieldOffset>=0 &&
-            entry.page.text.slice(declaration.fieldOffset,declaration.fieldOffset+declaration.rawLiteral.length)===declaration.rawLiteral ? [declaration] : [];
+          return entry.nativeWebsiteDeclaration ? [entry.nativeWebsiteDeclaration] : [];
         }),
       profileLinkSources: applicable.filter(observation => {
         if (observation.retrieval === 'indexed' || observation.linkRole === 'explicit_denial' || observation.fromAccountKey === null) return false;

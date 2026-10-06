@@ -14,6 +14,7 @@ import { applyCoreSchema, openDatabase, type DB } from '../server/db/index.js';
 import { Store } from '../server/store.js';
 import { FirstStepStore } from '../server/research/first-step-store.js';
 import { extractOriginalLinkContexts } from '../server/research/link-context.js';
+import { createResearchTools } from '../server/research/toolkit.js';
 import {
   createFirstStepCheckedSearch,
   discoverFirstStep,
@@ -1058,5 +1059,32 @@ test('legacy namespaced About input still replays its old canonical-root receipt
     assert.equal(h.reads.includes(about),false);
     assert.equal(view.accounts.find(account=>account.profileUrl===github)!.identity.state,'supported');
     assert.equal(view.gaps.some(gap=>gap.includes('invalid_decision')&&gap.includes(about)),false);
+  }finally{h.db.close();}
+});
+
+
+for(const tag of ['h2','p']) for(const heading of ['My colleague’s About page','This is not my About page']) test(`a citation link inside a local ${tag} cannot erase its ownership veto: ${heading}`,async()=>{
+  const text=`<main><${tag}>${heading} <a href="https://citation-synthetic.dev/">reference</a></${tag}><nav><a href="about">About</a></nav></main>`;
+  const h=harness({kind:'homepage_url',value:home},{read:url=>[originalPage(url,url===home?text:url===home+'about'?`<p>My GitHub: <a href="${github}">GitHub</a></p>`:'<p>Original unrelated citation.</p>')]});
+  try{
+    const view=await discoverFirstStep(h.ctx);
+    assert.equal(h.reads.includes(home+'about'),false);
+    assert.equal(view.accounts.some(account=>account.profileUrl===github&&account.identity.state==='supported'),false);
+  }finally{h.db.close();}
+});
+
+for(const model of [false,true]) test(`a forged HTTP-to-HTTPS native context cannot support an account${model?' through a model proposal':''}`,async()=>{
+  const tools=createResearchTools({exaApiKey:null,tikhubApiKey:null,firecrawlApiKey:null,githubToken:null,timeoutMs:100,maxBytes:100000,
+    transport:{async fetch(){return new Response(JSON.stringify({login:'mira-k',id:123456,html_url:github,name:'Mira Kepler',bio:'Original biography.',blog:'http://mira-kepler.dev/'}));}}});
+  const native=(await tools.execute({type:'github_profile',url:github},new AbortController().signal)).pages[0]!;
+  const declaration=native.nativeWebsiteDeclaration!;
+  native.links=[home];native.linkContexts=[{url:home,quote:declaration.rawLiteral,locator:`原文字段第 ${declaration.fieldOffset+1}–${declaration.fieldOffset+declaration.rawLiteral.length} 字符`,binding:'native_profile_field',surface:'authorial',nativeField:{name:'blog',offset:declaration.fieldOffset,nativeId:declaration.nativeId}}];
+  const h=harness({kind:'homepage_url',value:github},{read:url=>[url===github?native:originalPage(url,'Original independent page.')],
+    ...(model?{propose:async(_signal,context)=>({proposals:[{targetUrl:home,fromUrl:github,linkRole:'self_account_section' as const,quote:declaration.rawLiteral,requestKey:context.excerpts.find(entry=>entry.url===github)!.requestKey}],leads:[]})}:{})});
+  try{
+    const view=await discoverFirstStep(h.ctx);
+    assert.equal(view.accounts.some(account=>account.profileUrl===home&&account.identity.state==='supported'),false);
+    assert.deepEqual(view.accounts.find(account=>account.profileUrl===github)!.nativeWebsiteDeclarations,[declaration]);
+    assert.equal(view.gaps.some(gap=>gap.includes('HTTPS')),true);
   }finally{h.db.close();}
 });

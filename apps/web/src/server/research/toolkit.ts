@@ -7,7 +7,7 @@ import { extractOriginalLinkContexts, nativeProfileLinkContext, nativeUsernameLi
 import { asArray, asNumber, asRecord, asString, safeFetchJson } from '../adapters/http.js';
 import { ProviderError } from '../adapters/types.js';
 import type { HttpRequestInit } from '../adapters/types.js';
-import type { ResearchAccount, ResearchAliasProof, ResearchPage, ResearchToolAction, ResearchToolResult, ResearchTools, ResearchToolsOptions } from './tool-contracts.js';
+import type { ResearchAccount, ResearchAliasProof, ResearchLinkContext, ResearchPage, ResearchToolAction, ResearchToolResult, ResearchTools, ResearchToolsOptions } from './tool-contracts.js';
 import type { NativeWebsiteDeclaration } from '../../shared/native-website.js';
 
 const TEXT_LIMIT = 6000;
@@ -49,6 +49,47 @@ function nativeWebsiteDeclaration(account: ResearchAccount, requestedUrl: string
   } catch { /* Preserve the raw declaration, including rejected private/invalid namespaces. */ }
   return {platform:account.platform,nativeId:account.id,requestedUrl,returnedProfileUrl:account.profileUrl,payloadField,rawLiteral,fieldOffset,
     sourceContentHash:createHash('sha256').update(original).digest('hex'),protocol,declaredUrl,publicHttpsUrl};
+}
+
+/** Re-check adapter metadata against the actual request and original field; no new IO. */
+export function verifiedNativeWebsiteDeclaration(page:ResearchPage,action:ResearchToolAction):NativeWebsiteDeclaration|null {
+  const declaration=page.nativeWebsiteDeclaration,account=page.account;
+  if(!declaration||!account||action.type==='search'||page.retrieval!=='profile'||page.kind!=='profile'||account.profileUrl!==page.url||
+    typeof account.id!=='string'||!/^\d+$/.test(account.id)||declaration.platform!==account.platform||declaration.nativeId!==account.id||
+    declaration.requestedUrl!==action.url||declaration.returnedProfileUrl!==page.url||
+    declaration.payloadField!==(account.platform==='github'?'blog':'website')||action.type!==(account.platform==='github'?'github_profile':'social_profile')||
+    typeof declaration.rawLiteral!=='string'||!Number.isInteger(declaration.fieldOffset)||declaration.fieldOffset<0||
+    page.text.slice(declaration.fieldOffset,declaration.fieldOffset+declaration.rawLiteral.length)!==declaration.rawLiteral) return null;
+  try {
+    const requestedHandle=account.platform==='github'?extractGitHubHandle(publicUrl(action.url)):xHandle(action.url);
+    const returnedHandle=account.platform==='github'?extractGitHubHandle(publicUrl(page.url)):xHandle(page.url);
+    if(!requestedHandle||!returnedHandle||requestedHandle.toLowerCase()!==account.handle.toLowerCase()||returnedHandle!==account.handle) return null;
+    const expected=nativeWebsiteDeclaration(account,action.url,declaration.payloadField,declaration.rawLiteral,page.text,declaration.fieldOffset);
+    return (Object.keys(expected) as Array<keyof NativeWebsiteDeclaration>).every(key=>declaration[key]===expected[key])?declaration:null;
+  } catch {return null;}
+}
+
+/** Website proof cannot come from HTTP text or a biography occurrence. */
+export function verifiedNativeFieldContext(page:ResearchPage,context:ResearchLinkContext,declaration:NativeWebsiteDeclaration|null):boolean {
+  if(context.binding!=='native_profile_field')return true;
+  const field=context.nativeField;
+  if(field?.name==='twitter_username'){
+    const match=context.quote.match(/^twitter_username: ([A-Za-z0-9_]{1,15})$/);
+    if(!match||page.account?.platform!=='github'||field.nativeId!==page.account.id||field.offset!==page.text.length-context.quote.length)return false;
+    const expected=nativeUsernameLinkContext(page.text,match[1]!,`https://x.com/${match[1]}`,field.offset);
+    return Boolean(expected&&context.url===expected.url&&context.locator===expected.locator&&context.surface===expected.surface);
+  }
+  if(page.nativeWebsiteDeclaration){
+    if(!declaration?.publicHttpsUrl||!field||field.name!==declaration.payloadField||field.nativeId!==declaration.nativeId||field.offset!==declaration.fieldOffset)return false;
+    const expected=nativeProfileLinkContext(page.text,declaration.rawLiteral,declaration.fieldOffset);
+    return Boolean(expected&&context.quote===declaration.rawLiteral&&context.url===declaration.publicHttpsUrl&&context.locator===expected.locator&&context.surface===expected.surface);
+  }
+  // Old real receipts remain unassessed; their URL field still cannot state
+  // HTTP while claiming to have observed HTTPS. Historical rows aren't edited.
+  if(field)return false;
+  const twitter=context.quote.match(/^twitter_username: ([A-Za-z0-9_]{1,15})$/);
+  if(twitter)return page.account?.platform==='github'&&context.url===`https://x.com/${twitter[1]}`;
+  try{return publicUrl(context.quote.trim())===context.url;}catch{return false;}
 }
 
 /** Record field offsets during assembly; duplicate strings in biography are not field locators. */
@@ -261,7 +302,7 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
       const {content,websiteOffset} = assembleProfile([text(target.data.name, 200), retainText(target.data.desc)], website);
       const declaration = website ? nativeWebsiteDeclaration(target.account,url,'website',website,content,websiteOffset) : null;
       const context = declaration?.publicHttpsUrl ? nativeProfileLinkContext(content, website!, websiteOffset) : null;
-      if (context) context.url = declaration!.publicHttpsUrl!;
+      if (context) {context.url = declaration!.publicHttpsUrl!;context.nativeField={name:'website',offset:websiteOffset,nativeId:target.account.id};}
       // The requested-vs-returned handle and the stable native id are already
       // verified above: this proof is the only attestation of a case alias.
       const aliasProof: ResearchAliasProof = { kind: 'native_profile', platform: 'x', nativeId: target.account.id, requestedUrl: url, returnedUrl: target.account.profileUrl };
@@ -304,8 +345,10 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const aliasProof: ResearchAliasProof = { kind: 'native_profile', platform: 'github', nativeId: id, requestedUrl: raw, returnedUrl };
     const declaration = website ? nativeWebsiteDeclaration(account,raw,'blog',website,content,websiteOffset) : null;
     const context = declaration?.publicHttpsUrl ? nativeProfileLinkContext(content, website!, websiteOffset) : null;
-    if (context) context.url = declaration!.publicHttpsUrl!;
-    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [declaration?.publicHttpsUrl, twitterUsername ? `https://x.com/${twitterUsername}` : null]), linkContexts: [context, twitterUsername ? nativeUsernameLinkContext(content, twitterUsername, `https://x.com/${twitterUsername}`,suffixOffset) : null].filter((item): item is NonNullable<typeof item> => item !== null), ...(declaration ? {nativeWebsiteDeclaration:declaration} : {}), aliasProof, limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。', ...(declaration && declaration.protocol !== 'https' ? ['网站字段为原始声明；未取得可派发的安全 HTTPS 自链，不推定协议等价或账号归属。'] : [])] }], bytes, 0);
+    if (context) {context.url = declaration!.publicHttpsUrl!;context.nativeField={name:'blog',offset:websiteOffset,nativeId:id};}
+    const twitterContext=twitterUsername?nativeUsernameLinkContext(content,twitterUsername,`https://x.com/${twitterUsername}`,suffixOffset):null;
+    if(twitterContext)twitterContext.nativeField={name:'twitter_username',offset:suffixOffset,nativeId:id};
+    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [declaration?.publicHttpsUrl, twitterUsername ? `https://x.com/${twitterUsername}` : null]), linkContexts: [context,twitterContext].filter((item): item is NonNullable<typeof item> => item !== null), ...(declaration ? {nativeWebsiteDeclaration:declaration} : {}), aliasProof, limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。', ...(declaration && declaration.protocol !== 'https' ? ['网站字段为原始声明；未取得可派发的安全 HTTPS 自链，不推定协议等价或账号归属。'] : [])] }], bytes, 0);
   }
   return { async execute(action, signal) {
     signal.throwIfAborted();
