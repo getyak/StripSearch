@@ -242,6 +242,10 @@ Accounts supported in another person cluster remain visible as separate,
 unchecked account scopes. Choosing them cannot merge the clusters. Changing
 the target removes person-bound selections outside the new cluster and reports
 the removal; explicitly independent scopes remain selected.
+The chosen cluster's own anchor follows the shared server selection validator:
+an explicit checkbox may grant person research intent to a proposed anchor,
+without upgrading identity evidence. Conflicted or withdrawn anchors stay
+independent, and other clusters' accounts never use this anchor exception.
 
 Fresh research checkpoints retain proposed exact excerpts from independently
 selected accounts in `independentMaterials`, with source key, original URL,

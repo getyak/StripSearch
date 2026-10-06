@@ -39,6 +39,13 @@ test('real controller preserves independent excerpts outside claims; canonical r
       f.db.prepare('update research_checkpoints set data_json=? where run_id=?').run(JSON.stringify({...saved,independentMaterials:[{...material,...change}]}),f.run.id);assert.equal(current().research!.accountMaterials!.length,0);
     }
     f.db.prepare('update research_checkpoints set data_json=? where run_id=?').run(JSON.stringify(saved),f.run.id);
+    const sourceDraft={key:'S1',url,title:'Synthetic account',kind:'profile' as const,publishedAt:null,excerpt:original,excerptLocator:'公开页面文本',identityLabel:'独立账号',identityConfirmed:false,limits:[],fetchStatus:'ok' as const};
+    for(const replacement of [{url:'https://other-fixture.dev/'},{excerpt:'<p>A different body.</p>'},{excerpt:`${original} Changed outside the quote.`}]){
+      f.store.replaceSources(f.run.id,[{...sourceDraft,...replacement}]);
+      assert.equal(current().research!.accountMaterials!.length,0,'current source URL and full original hash must still bind');
+      assert.deepEqual(f.store.research.checkpoint(f.run.id)!.independentMaterials,saved.independentMaterials,'replacement never rewrites historical material');
+    }
+    f.store.replaceSources(f.run.id,[sourceDraft]);assert.equal(current().research!.accountMaterials!.length,1);
     f.store.setSourceExcluded(f.run.id,'S1',true);assert.equal(current().research!.accountMaterials!.length,0);assert.equal(f.store.research.checkpoint(f.run.id)!.independentMaterials!.length,1,'historical material stays intact');
   }finally{f.close();}
 });

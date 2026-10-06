@@ -212,6 +212,24 @@ function cluster(clusterId: string, displayName: string, anchorAccountId: string
   };
 }
 
+test('confirming the chosen cluster own anchor grants person research intent without upgrading its identity evidence',async()=>{
+  const fixture=seedFirstStep({accounts:[{url:'https://linzhou-fixture.dev/'}]});
+  const container=env.document.createElement('div');env.document.body.appendChild(container);
+  const api=panelApi(fixture);
+  api.getFirstStepDiscovery=async()=>({...await panelApi(fixture).getFirstStepDiscovery(fixture.run.id),runRevision:fixture.store.getRun(fixture.run.id)!.revision});
+  api.submitFirstStepSelection=async(_id,payload)=>({selection:fixture.firstStep.applyFirstStepSelection(fixture.run.ownerId,fixture.run.id,payload,'own-anchor-ui')});
+  const panel=createFirstStepPanel({api,container,runId:fixture.run.id});
+  try{
+    await panel.refresh();container.querySelector<HTMLButtonElement>('.first-step-cluster')!.click();
+    const before=fixture.store.cases.listAccounts(fixture.run.ownerId,fixture.caseId)[0]!.identitySupport;
+    const checkbox=container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;assert.equal(checkbox.checked,false);checkbox.click();
+    assert.equal(panel.draft().get(fixture.accountIdFor(0))!.selection,'selected');
+    container.querySelector<HTMLButtonElement>('.first-step-primary')!.click();await new Promise(resolve=>setTimeout(resolve,0));
+    const binding=fixture.firstStep.selectionBinding(fixture.run.id)!;assert.ok(binding);assert.deepEqual(binding.independentAccountIds,[]);
+    assert.deepEqual(fixture.store.cases.listAccounts(fixture.run.ownerId,fixture.caseId)[0]!.identitySupport,before);
+  }finally{panel.destroy();fixture.close();container.remove();}
+});
+
 test('one grounded target is suggested while alternatives stay available; no authority persists until explicit submit', async () => {
   const fixture = seedFirstStep({accounts:[
     {url:'https://github.com/linzhou',identityState:'supported',supportedBy:{sourceUrl:'https://lantern.dev/about',quote:'My GitHub profile is Lin Zhou.'}},

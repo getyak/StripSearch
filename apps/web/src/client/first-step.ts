@@ -24,6 +24,7 @@ import type {
   FirstStepDiscoveryView,
   FirstStepPersonClusterView
 } from '../shared/first-step-discovery.js';
+import { validateSelectionDecision } from '../shared/first-step-discovery.js';
 
 export interface FirstStepPanelApi {
   getFirstStepDiscovery(runId: string): Promise<FirstStepDiscoveryResponse>;
@@ -484,7 +485,10 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
 
   const renderCard = (account: FirstStepAccountView, matchedTitle?:string): HTMLElement => {
     const decision = decisionFor(account);
-    const requiresIndependentScope = account.requiresIndependentScope || clusterId !== null && !view?.clusters.find(cluster => cluster.clusterId === clusterId)?.accountIds.includes(account.accountId);
+    const personCluster=view?.clusters.find(cluster => cluster.clusterId === clusterId);
+    const ownAnchor=personCluster?.anchorAccountId===account.accountId || !personCluster?.anchorAccountId&&personCluster?.anchorUrl===account.profileUrl;
+    const mayJoinPerson=Boolean(personCluster?.accountIds.includes(account.accountId))&&validateSelectionDecision(account,{accountId:account.accountId,selection:'selected',excluded:false},{anchorAccountIds:ownAnchor?new Set([account.accountId]):new Set()}).ok;
+    const requiresIndependentScope = !mayJoinPerson;
     const checked = decision.selection === 'selected' || decision.selection === 'only_this_account';
     const card = make('div', {
       className: `first-step-card${checked ? ' checked' : ''}${decision.excluded ? ' excluded' : ''}`
