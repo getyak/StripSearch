@@ -57,7 +57,7 @@ test('withdrawal after selection rejects dispatch and late ingestion; independen
 
 test('withdrawing an unselected intermediate anchor invalidates downstream person attribution and an existing report', t => {
   const f = seedFirstStep({ accounts: [{ url: 'https://fixture-first-home.org/' },
-    { url: 'https://fixture-second-home.org/', supportedBy: { sourceUrl: 'https://fixture-first-home.org/', quote: 'My other home: https://fixture-second-home.org/.' } },
+    { url: 'https://fixture-second-home.org/', supportedBy: { sourceUrl: 'https://fixture-first-home.org/', quote: '<p>My website: <a href="https://fixture-second-home.org/">My website</a></p>'  } },
     { url: 'https://github.com/fixture-linked', supportedBy: { sourceUrl: 'https://fixture-second-home.org/', quote: 'My GitHub: https://github.com/fixture-linked.' } }] });
   t.after(() => f.close());
   const current = view(f); const payload: FirstStepSelectionInput = {

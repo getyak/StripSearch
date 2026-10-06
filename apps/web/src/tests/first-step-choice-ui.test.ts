@@ -48,8 +48,8 @@ const XSS_QUOTE = '<img src=x onerror="window.__xss=1"> 本人声明摘录';
 test('chosen cluster accounts are the main choices; unconfirmed leads are a collapsed, clearly labeled secondary area', async () => {
   const fixture = seedFirstStep({
     accounts: [
-      { url: 'https://github.com/linzhou', identityState: 'supported', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: XSS_QUOTE } },
-      { url: 'https://x.com/linzhou', identityState: 'supported', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: XSS_QUOTE } },
+      { url: 'https://github.com/linzhou', identityState: 'supported', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: `<p>My account: <a href="https://github.com/linzhou">My account</a> ${XSS_QUOTE}</p>` } },
+      { url: 'https://x.com/linzhou', identityState: 'supported', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: `<p>My account: <a href="https://x.com/linzhou">My account</a> ${XSS_QUOTE}</p>` } },
       { url: 'https://github.com/morganchen', identityState: 'proposed' }
     ]
   });
@@ -232,7 +232,7 @@ test('confirming the chosen cluster own anchor grants person research intent wit
 
 test('one grounded target is suggested while alternatives stay available; no authority persists until explicit submit', async () => {
   const fixture = seedFirstStep({accounts:[
-    {url:'https://github.com/linzhou',identityState:'supported',supportedBy:{sourceUrl:'https://lantern.dev/about',quote:'My GitHub profile is Lin Zhou.'}},
+    {url:'https://github.com/linzhou',identityState:'supported',supportedBy:{sourceUrl:'https://lantern.dev/about',quote:'My GitHub profile: https://github.com/linzhou'}},
     {url:'https://github.com/morganchen',identityState:'proposed'}
   ]});
   try {

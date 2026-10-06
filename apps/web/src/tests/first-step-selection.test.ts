@@ -30,7 +30,7 @@ test('one atomic submit binds run, scope and discovery versions and freezes the 
   const seeded = seedFirstStep({
     accounts: [
       { url: 'https://lantern.dev/', supportedBy: { sourceUrl: 'https://lantern.dev/about' } },
-      { url: 'https://github.com/linzhou-lantern', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: 'Accounts: GitHub' } },
+      { url: 'https://github.com/linzhou-lantern', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: 'My GitHub: https://github.com/linzhou-lantern' } },
       { url: 'https://x.com/linzhou_public' }
     ]
   });
@@ -359,7 +359,7 @@ test('incomplete decision batches are rejected; every current account answers ex
   const seeded = seedFirstStep({
     accounts: [
       { url: 'https://lantern.dev/', supportedBy: { sourceUrl: 'https://lantern.dev/about' } },
-      { url: 'https://github.com/linzhou-lantern', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: 'Accounts: GitHub' } }
+      { url: 'https://github.com/linzhou-lantern', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: 'My GitHub: https://github.com/linzhou-lantern' } }
     ]
   });
   try {
@@ -389,7 +389,7 @@ test('person cluster binding: nonexistent clusters and cross-cluster same-person
   const seeded = seedFirstStep({
     accounts: [
       { url: 'https://lantern.dev/', supportedBy: { sourceUrl: 'https://lantern.dev/about' } },
-      { url: 'https://github.com/linzhou-lantern', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: 'Accounts: GitHub' } }
+      { url: 'https://github.com/linzhou-lantern', supportedBy: { sourceUrl: 'https://lantern.dev/about', quote: 'My GitHub: https://github.com/linzhou-lantern' } }
     ]
   });
   try {

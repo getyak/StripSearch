@@ -1096,6 +1096,14 @@ export function classifyLinkContext(quote: string | null): FirstStepLinkContextC
  * - Colleague references, employers, recommendation sections and third-party
  *   prose never support the homepage owner's account.
  */
+/** HTML punctuation inside attributes and pretty-print whitespace are not prose boundaries. */
+function targetPrefixSentence(prefix:string,html:boolean,period:boolean):string {
+  const masked=html?prefix.replace(/<[^>]*>/g,tag=>tag.replace(/[。!?\n;]/g,' ')).replace(/\n/g,' '):prefix;
+  const pattern=period?/<br\s*\/?\s*>|[。!?\n;]|\.\s+/giu:/<br\s*\/?\s*>|[。!?\n;]/giu;
+  const boundary=[...masked.matchAll(pattern)].at(-1);
+  return prefix.slice(boundary?boundary.index!+boundary[0].length:0);
+}
+
 export function linkRoleFromContext(input: {
   quote: string | null;
   /** Target URL this context binds; required for the quote fallback path. */
@@ -1147,7 +1155,7 @@ export function linkRoleFromContext(input: {
   if(targetAt<0&&(input.binding==='html_anchor'||input.binding==='markdown_link'))return {role:'unknown_role',retrieval:'link_only'};
   if(targetAt>=0&&input.binding!=='html_rel_me'){
     const anchorAt=extractedTargetAt>=0?extractedTargetAt:quote.lastIndexOf('<a',targetAt);
-    const before=quote.slice(0,anchorAt>=0?anchorAt:targetAt).split(/<br\s*\/?\s*>|[。!?\n;]/iu).at(-1)!.replace(/<[^>]*>/g,' ').slice(-240);
+    const before=targetPrefixSentence(quote.slice(0,anchorAt>=0?anchorAt:targetAt),input.binding==='html_anchor',false).replace(/<[^>]*>/g,' ').slice(-240);
     const workActions=[...before.matchAll(/\b(?:wrote|authored|published|created|built)\b.{0,100}\b(?:books?|novels?|papers?|articles?|projects?)\b|(?:撰写|编写|出版|创作).{0,30}(?:书籍|小说|论文|文章|项目)/giu)];
     const workAction=workActions.at(-1);
     if(workAction&&!OWNERSHIP_MARKERS.test(before.slice(workAction.index!+workAction[0].length)))return {role:'prose_mention',retrieval:'read'};
@@ -1161,7 +1169,7 @@ export function linkRoleFromContext(input: {
   if(targetAt>=0&&input.binding!=='html_rel_me'&&!input.sourceIsDirectory){
     const anchorAt=extractedTargetAt>=0?extractedTargetAt:quote.lastIndexOf('<a',targetAt);
     const start=anchorAt>=0?anchorAt:targetAt;
-    const prefix=quote.slice(0,start).split(/<br\s*\/?\s*>|[。!?\n;]|\.\s+/iu).at(-1)!;
+    const prefix=targetPrefixSentence(quote.slice(0,start),input.binding==='html_anchor',true);
     const anchorEnd=input.binding==='html_anchor'?quote.indexOf('</a>',start):input.binding==='markdown_link'?quote.indexOf(')',start):targetAt+(input.targetUrl?.length??0);
     localQuote=prefix+quote.slice(start,anchorEnd>=0?anchorEnd+(input.binding==='html_anchor'?4:input.binding==='markdown_link'?1:0):start);
     const readable=prefix.replace(/<a\b[^>]*>[\s\S]*?<\/a>/giu,' ').replace(/<[^>]*>/g,' ');

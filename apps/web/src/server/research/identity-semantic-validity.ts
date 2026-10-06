@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import type {DB} from '../db/index.js';
 import type {CaseReportView} from '../../shared/research-case.js';
 import {classifyFirstStepUrl,linkRoleFromContext} from '../../shared/first-step-discovery.js';
+import {verifyAliasProjection} from './alias-proof.js';
 import {extractOriginalLinkContexts} from './link-context.js';
 import type {ResearchPage, ResearchToolAction} from './tool-contracts.js';
 import {verifiedNativeAccountRequest, verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext} from './toolkit.js';
@@ -17,6 +18,14 @@ export function identitySemanticReviewAccounts(db:DB,report:CaseReportView):Set<
   let result:{pages?:ResearchPage[]},action:ResearchToolAction;try{result=JSON.parse(row.result_json??'null')??{};action=JSON.parse(row.request_json);}catch{continue;}
   for(const page of Array.isArray(result.pages)?result.pages:[]){if(!page||typeof page.text!=='string'||typeof page.url!=='string')continue;originals.set(page.url+'|'+createHash('sha256').update(page.text).digest('hex'),{page,action});}
  }
+ const aliases=new Map<string,string>();
+ for(const {page,action} of originals.values()){
+  const proof=page.aliasProof;if(!proof||action.type==='search'||proof.requestedUrl!==action.url||proof.returnedUrl!==page.url)continue;
+  const bound=proof.kind==='native_profile'?verifiedNativeAccountRequest(page,action)&&page.account?.id===proof.nativeId&&page.account.platform===proof.platform:page.documentBinding?.requestedUrl===action.url&&page.documentBinding.returnedUrl===page.url;
+  if(!bound)continue;
+  const verified=verifyAliasProjection(proof);if(verified.ok)aliases.set(verified.aliasKey,verified.representativeKey);
+ }
+ const keyFor=(url:string|null)=>{const ref=classifyFirstStepUrl(url);return ref.ok?(aliases.get(ref.ref.accountKey)??ref.ref.accountKey):null;};
  for(const account of report.accounts){
   if(account.identitySupport.state!=='supported')continue;
   const target=classifyFirstStepUrl(account.profileUrl);if(!target.ok)continue;
@@ -24,21 +33,21 @@ export function identitySemanticReviewAccounts(db:DB,report:CaseReportView):Set<
    const source=report.sources.find(s=>s.sourceId===evidence.sourceId)?.revisions.find(r=>r.sourceRevision===evidence.sourceRevision);
    if(!source)continue; // Structural validity remains the separate authoritative gate.
    const original=originals.get(source.originalUrl+'|'+source.contentHash),page=original?.page;
-   // Legacy/manual records without a completed original can still expose a
-   // target-bound HTML/Markdown span. Plain legacy statements stay unassessed.
+   // Generated identity proof needs the completed original. Historical rows
+   // remain readable, but an unassessed excerpt cannot grant person scope.
+   if(!page){invalid.add(account.accountId);continue;}
    if(page&&!page.text.includes(evidence.quote)){invalid.add(account.accountId);continue;}
    const text=page?.text??evidence.quote;
    const contexts=extractOriginalLinkContexts(text,source.originalUrl);
-   const matched=contexts.filter(c=>{const ref=classifyFirstStepUrl(c.url);return ref.ok&&ref.ref.accountKey===target.ref.accountKey&&(c.quote===evidence.quote||c.quote.includes(evidence.quote)||evidence.quote.includes(c.quote));});
+   const matched=contexts.filter(c=>{const ref=classifyFirstStepUrl(c.url);return ref.ok&&keyFor(c.url)===keyFor(account.profileUrl)&&(c.quote===evidence.quote||c.quote.includes(evidence.quote)||evidence.quote.includes(c.quote));});
    const declaration=original?verifiedNativeWebsiteDeclaration(original.page,original.action):null;
-   const nativeCandidates=(Array.isArray(page?.linkContexts)?page.linkContexts:[]).filter(c=>c&&c.binding==='native_profile_field'&&c.quote===evidence.quote&&c.url===account.profileUrl);
+   const nativeCandidates=(Array.isArray(page?.linkContexts)?page.linkContexts:[]).filter(c=>{if(!c||c.binding!=='native_profile_field'||c.quote!==evidence.quote)return false;const ref=classifyFirstStepUrl(c.url);return ref.ok&&keyFor(c.url)===keyFor(account.profileUrl);});
    const native=nativeCandidates.filter(c=>original&&verifiedNativeAccountRequest(original.page,original.action)&&verifiedNativeFieldContext(original.page,c,declaration));
-   if(!page&&!/<a\b|\[[^\]\n]*\]\(/iu.test(evidence.quote))continue;
    const ref=classifyFirstStepUrl(source.originalUrl);if(!ref.ok){invalid.add(account.accountId);continue;}
    const social=!['personal_site','rss_blog','web_page'].includes(ref.ref.platform);
    // An extracted target context or native field is authoritative. A narrow
    // historical quote must never override its denial, attribution or field veto.
-   const literals=matched.length||nativeCandidates.length||/<a\b|\[[^\]\n]*\]\(/iu.test(text)?[]:[...new Set([...(Array.isArray(page?.links)?page.links:[]),account.profileUrl].filter((url):url is string=>typeof url==='string'))].filter(url=>{const ref=classifyFirstStepUrl(url);return ref.ok&&ref.ref.accountKey===target.ref.accountKey&&text.includes(url.replace(/\/+$/,''));}).map(url=>({url,quote:text,binding:null,surface:null,targetOffset:undefined}));
+   const literals=matched.length||nativeCandidates.length||/<a\b|\[[^\]\n]*\]\(/iu.test(text)?[]:[...new Set([...(Array.isArray(page?.links)?page.links:[]),account.profileUrl].filter((url):url is string=>typeof url==='string'))].filter(url=>{const ref=classifyFirstStepUrl(url);return ref.ok&&keyFor(url)===keyFor(account.profileUrl)&&text.includes(url.replace(/\/+$/,''));}).map(url=>({url,quote:text,binding:null,surface:null,targetOffset:undefined}));
    const bound=[...matched,...native,...literals];
    const valid=bound.some(c=>{
     const role=linkRoleFromContext({quote:c.quote,targetUrl:c.url,targetOffset:c.targetOffset,binding:c.binding,surface:c.surface,sourceIsOwnProfilePage:ref.ref.entry==='profile'||page?.kind==='profile',sourceIsDirectory:ref.ref.platform==='linktree',sourceIsRestrictedSurface:social&&ref.ref.entry!=='profile',sourceIsSocialPlatform:social,sourceIsNativeAccount:c.binding==='native_profile_field'&&!!page?.account});

@@ -1175,3 +1175,10 @@ for(const phrase of ['我的账号在','My GitHub profile is at'])test(`actual t
  const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[own,page(github,'Mira Kepler')],read:url=>url===home?[own]:[page(github,'Synthetic profile.')],propose:async()=>({proposals:[],leads:[]})});
  try{const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===github)!;assert.equal(account.identity.state,'supported');assert.ok(account.identity.evidence.some(e=>e.role==='identity_support'));}finally{h.db.close();}
 });
+
+for(const previous of ['<a href="https://twitter.com/#!/mira">Twitter</a>, ','<a href="https://x.com/mira">Twitter</a>,\n '])test('HTML self list preserves formatting whitespace and punctuation inside other hrefs '+previous,async()=>{
+ const text=`<p>Find me on ${previous}<a href="${github}">GitHub</a>.</p>`;
+ const own=page(home,text,{links:[github],linkContexts:extractOriginalLinkContexts(text,home)});
+ const h=harness({kind:'name_query',value:'Mira Kepler',question:null},{search:()=>[own,page(github,'Mira Kepler')],read:url=>url===home?[own]:[page(github,'Synthetic profile.')],propose:async()=>({proposals:[],leads:[]})});
+ try{const view=await discoverFirstStep(h.ctx),account=view.accounts.find(a=>a.profileUrl===github)!;assert.ok(account);assert.equal(account.identity.state,'supported');}finally{h.db.close();}
+});

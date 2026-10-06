@@ -179,6 +179,7 @@ export function seedFirstStep(options: SeedOptions): SeededFirstStep {
     });
     const evidenceIds: string[] = [];
     if (seed.supportedBy) {
+      const quote=seed.supportedBy.quote ?? `<p>My profile: <a href="${seed.url}">My account</a></p>`;
       const recorded = firstStep.recordIdentityObservation({
         ownerId,
         caseId,
@@ -189,14 +190,17 @@ export function seedFirstStep(options: SeedOptions): SeededFirstStep {
           title: '合成来源',
           author: null,
           retrievedAt: '2026-10-05T00:00:00.000Z',
-          contentHash: createHash('sha256').update(seed.supportedBy.sourceUrl).digest('hex'),
+          contentHash: createHash('sha256').update(quote).digest('hex'),
           locator: 'Accounts 区'
         },
         role: 'identity_support',
-        quote: seed.supportedBy.quote ?? '合成自链摘录',
+        quote,
         evidenceLocator: 'Accounts 区'
       });
       evidenceIds.push(recorded.evidenceId);
+      const receiptKey=`synthetic-original-${accountId}`;
+      store.research.reserve(run.id,receiptKey,'tool',{type:'read',url:seed.supportedBy.sourceUrl},{inputTokens:0,outputTokens:0});
+      store.research.settle(run.id,receiptKey,{pages:[{url:seed.supportedBy.sourceUrl,title:'Synthetic original',text:quote,kind:'profile',retrieval:'read',links:[seed.url],limitations:[],publishedAt:null}]},{inputTokens:0,outputTokens:0});
     }
     if (seed.deniedBy) {
       firstStep.recordIdentityObservation({

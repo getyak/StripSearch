@@ -59,16 +59,34 @@ for(const heading of ['My colleague','Not my account; impersonator'])test(`cache
  }finally{f.close();}
 });
 
-for(const variant of ['valid','wrong-request','wrong-returned-account','wrong-id','wrong-offset'])test(`cached native username field requires actual profile request and field: ${variant}`,()=>{
+for(const variant of ['valid','valid-case-alias','unproved-case-alias','wrong-request','wrong-returned-account','wrong-id','wrong-offset'])test(`cached native username field requires actual profile request and field: ${variant}`,()=>{
  const gh='https://github.com/mira-native-fixture',x='https://x.com/mira_social',quote='twitter_username: mira_social',text='Mira\n'+quote;
- const f=seedFirstStep({accounts:[{url:gh},{url:x,supportedBy:{sourceUrl:gh,quote}}]});
+ const f=seedFirstStep({accounts:[{url:gh},{url:variant.endsWith('case-alias')?'https://x.com/Mira_Social':x,supportedBy:{sourceUrl:gh,quote}}]});
  try{
   const context={...nativeUsernameLinkContext(text,'mira_social',x,5)!,nativeField:{name:'twitter_username' as const,offset:variant==='wrong-offset'?0:5,nativeId:variant==='wrong-id'?'456':'123'}};
   const page:ResearchPage={url:gh,title:'Synthetic profile',text,kind:'profile',retrieval:'profile',publishedAt:null,links:[x],limitations:[],linkContexts:[context],account:{platform:'github',id:'123',handle:variant==='wrong-returned-account'?'other-person':'mira-native-fixture',profileUrl:variant==='wrong-returned-account'?'https://github.com/other-person':gh}};
   f.db.prepare('UPDATE research_case_source_revisions SET content_hash=? WHERE original_url=?').run(createHash('sha256').update(text).digest('hex'),gh);
   f.store.research.reserve(f.run.id,'native','tool',{type:'github_profile',url:variant==='wrong-request'?'https://github.com/other-person':gh},{inputTokens:0,outputTokens:0});
   f.store.research.settle(f.run.id,'native',{pages:[page]},{inputTokens:0,outputTokens:0});
+  if(variant==='valid-case-alias'){
+   const returned='https://x.com/Mira_Social';
+   f.store.research.reserve(f.run.id,'actual-alias','tool',{type:'social_profile',url:x},{inputTokens:0,outputTokens:0});
+   f.store.research.settle(f.run.id,'actual-alias',{pages:[{url:returned,text:'Mira',kind:'profile',retrieval:'profile',account:{platform:'x',id:'789',handle:'Mira_Social',profileUrl:returned},aliasProof:{kind:'native_profile',platform:'x',nativeId:'789',requestedUrl:x,returnedUrl:returned}}]},{inputTokens:0,outputTokens:0});
+  }
   const view=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(view.mode!=='first_step')throw Error('mode');
-  assert.equal(view.view.accounts.find(a=>a.profileUrl===x)!.identity.validity,variant==='valid'?'valid':'review');
+  assert.equal(view.view.accounts.find(a=>a.accountId===f.accountIdFor(1))!.identity.validity,variant.startsWith('valid')?'valid':'review');
+ }finally{f.close();}
+});
+
+test('missing completed original makes historical generated plaintext proof review-only',()=>{
+ const quote=`I am the author of the book ${book}. When not working, find me reading.`;
+ const f=seedFirstStep({accounts:[{url:home},{url:book,supportedBy:{sourceUrl:home,quote}}]});
+ try{
+  f.db.prepare('DELETE FROM research_actions WHERE run_id=?').run(f.run.id);
+  const before=JSON.stringify(f.store.cases.reportView(f.run.ownerId,f.caseId).evidence);
+  const view=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(view.mode!=='first_step')throw Error('mode');
+  const account=view.view.accounts.find(a=>a.profileUrl===book)!;
+  assert.equal(account.identity.validity,'review');assert.equal(account.defaultSuggestion.suggested,false);assert.equal(account.requiresIndependentScope,true);
+  assert.equal(JSON.stringify(f.store.cases.reportView(f.run.ownerId,f.caseId).evidence),before);
  }finally{f.close();}
 });
