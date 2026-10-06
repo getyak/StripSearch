@@ -267,7 +267,7 @@ test('Firecrawl attests only strict same-document www/apex redirects and never i
   assert.equal(page.text, html, 'the exact original content is preserved');
   assert.deepEqual(page.aliasProof, { kind: 'same_document_redirect', requestedUrl: requested, returnedUrl: finalUrl });
   // Different paths, different queries and non-profile pages stay unproven:
-  // the read succeeds but carries no alias proof and keeps the requested URL.
+  // the read succeeds but carries no alias proof; content belongs to the final URL.
   for (const [source, final] of [
     ['https://www.synthetic-author.dev/about', 'https://synthetic-author.dev/'],
     ['https://www.synthetic-author.dev/?ref=a', 'https://synthetic-author.dev/?ref=b'],
@@ -276,7 +276,8 @@ test('Firecrawl attests only strict same-document www/apex redirects and never i
     const b = harness(body(source, final));
     const r = await b.execute({ type: 'firecrawl', url: source });
     assert.equal(r.pages[0]!.aliasProof, undefined, `${source} -> ${final}`);
-    assert.equal(r.pages[0]!.url, source);
+    assert.equal(r.pages[0]!.url, final);
+    assert.deepEqual(r.pages[0]!.documentBinding, {requestedUrl:source,returnedUrl:final});
     assert.equal(r.pages[0]!.text, html);
   }
   // Subdomain jumps stay refused outright, and a missing final URL is never
@@ -286,4 +287,17 @@ test('Firecrawl attests only strict same-document www/apex redirects and never i
   assert.equal(sub.calls.length, 1);
   const noFinal = harness({ success: true, data: { html, markdown: '', metadata: { sourceURL: requested, statusCode: 200, creditsUsed: 1 } } });
   await assert.rejects(noFinal.execute({ type: 'firecrawl', url: requested }));
+});
+
+test('Firecrawl binds relative hrefs and document kind to the actual same-host returned document', async () => {
+  const requested='https://synthetic-author.dev/about/me';
+  const returned='https://synthetic-author.dev/';
+  const html='<nav><a href="Contact">Contact</a></nav>';
+  const h=harness({success:true,data:{html,metadata:{sourceURL:requested,url:returned,statusCode:200,creditsUsed:1}}});
+  const r=await h.execute({type:'firecrawl',url:requested});
+  assert.equal(r.pages[0]!.url,returned);
+  assert.deepEqual(r.pages[0]!.documentBinding,{requestedUrl:requested,returnedUrl:returned});
+  assert.equal(r.pages[0]!.linkContexts![0]!.url,returned+'Contact');
+  assert.ok(r.pages[0]!.links.includes(returned+'Contact'));
+  assert.equal(r.pages[0]!.links.includes('https://synthetic-author.dev/about/Contact'),false);
 });

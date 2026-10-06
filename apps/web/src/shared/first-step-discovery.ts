@@ -41,7 +41,31 @@ export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
  * query slots cover actual empty-route fallback or observed alias expansion.
  * Up to two identity reads are reserved for leads found by that later wave.
  */
-export const FIRST_STEP_POLICY_VERSION = 'first-step/v9';
+export const FIRST_STEP_POLICY_VERSION = 'first-step/v10';
+
+/** Concrete, receipt-backed identity navigation; never a new account or an ownership assertion. */
+export interface FirstStepIdentityReadIntent {
+  accountKey: string;
+  url: string;
+  purpose: 'owner_about' | 'owner_contact';
+  sourceUrl: string;
+  sourceContentHash: string;
+  sourceReceiptKey: string;
+  quote: string;
+  locator: string;
+}
+
+/** Finite navigation within the exact observed author namespace. No network or alias guesses. */
+export function firstStepIdentityNavigation(sourceUrl: string, targetUrl: string): Pick<FirstStepIdentityReadIntent, 'accountKey' | 'url' | 'purpose'> | null {
+  const source = classifyFirstStepUrl(sourceUrl), target = classifyFirstStepUrl(targetUrl);
+  if (!source.ok || !target.ok || source.ref.platform !== 'personal_site' || target.ref.platform !== 'personal_site') return null;
+  const from = new URL(sourceUrl), to = new URL(targetUrl), root = new URL(source.ref.accountUrl);
+  if (from.origin !== to.origin || root.origin !== to.origin || to.search || to.hash || /%2f|%5c|%2e/i.test(to.pathname)) return null;
+  if (source.ref.accountKey !== target.ref.accountKey || !to.pathname.startsWith(root.pathname)) return null;
+  const relative = to.pathname.slice(root.pathname.length).replace(/^\/+|\/+$/g, '');
+  const purpose = /^(?:about(?:\/me)?|bio|biography)(?:\.html?)?$/i.test(relative) ? 'owner_about' : /^(?:contact|contacts)(?:\.html?)?$/i.test(relative) ? 'owner_contact' : null;
+  return purpose ? { accountKey: source.ref.accountKey, url: to.href, purpose } : null;
+}
 
 /* ------------------------------------------------------------------ */
 /* Input                                                               */

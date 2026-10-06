@@ -200,16 +200,15 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (comparable(sourceUrl) !== comparable(url)) fail('抓取来源与请求地址不匹配。');
     const canonicalHost = (value: string) => new URL(value).hostname.replace(/^www\./, '');
     if (canonicalHost(finalUrl) !== canonicalHost(url)) fail('网页跳转到了其他网站，未采用返回资料。');
-    // Only a strictly eligible same-document www/apex redirect may carry an
-    // alias proof and report the OBSERVED actual final URL as its page URL;
-    // the exact original text and the original requested URL stay preserved.
+    // All content belongs to the observed final URL. Only a strictly eligible
+    // same-document www/apex redirect may additionally carry an alias proof.
     const aliasProof = sameDocumentAliasProof(url, finalUrl);
     // Preserve provider-supplied HTML hrefs and their real surrounding spans.
     // Markdown remains the fallback; never reconstruct anchors from a link index.
     const rawContent = asString(data.html) || asString(data.markdown) || '';
     const content = retainText(rawContent); if (!content) fail('目标网页没有可用正文。');
     const limitations = ['网页原文仍需核对人物归属。', `请求地址：${sourceUrl}`, `最终地址：${finalUrl}`, '本次读取未指定正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。'];
-    return result([{ url: aliasProof ? finalUrl : sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], sourceUrl), linkContexts: extractOriginalLinkContexts(content, sourceUrl), ...(aliasProof ? { aliasProof } : {}), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
+    return result([{ url: finalUrl, documentBinding: { requestedUrl: url, returnedUrl: finalUrl }, title: text(metadata.title, 200) || finalUrl, text: content, kind: profileKind(finalUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], finalUrl), linkContexts: extractOriginalLinkContexts(content, finalUrl), ...(aliasProof ? { aliasProof } : {}), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
   }
   async function social(type: 'social_profile' | 'social_posts', url: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const handle = xHandle(url); const apiKey = key(options.tikhubApiKey, '公开账号');

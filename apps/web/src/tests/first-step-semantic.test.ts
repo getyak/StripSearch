@@ -7,6 +7,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadPlatformCatalog } from '../server/platforms/catalog.js';
 import { applyCoreSchema, openDatabase, type DB } from '../server/db/index.js';
@@ -30,7 +31,8 @@ import {
   assessIdentityLink,
   classifyFirstStepUrl,
   isUntrustedInstructionText,
-  linkRoleFromContext
+  linkRoleFromContext,
+  firstStepIdentityNavigation
 } from '../shared/first-step-discovery.js';
 
 const page = (
@@ -112,11 +114,11 @@ function harness(
     runId: run.id,
     attemptId: 'semantic-test',
     budget: {
-      maxSearchQueries: 8,
+      maxSearchQueries: 11,
       maxSearchResults: 12,
       maxProfileReads: 16,
       maxModelCalls: 2,
-      policyVersion: 'first-step/v2',
+      policyVersion: 'first-step/v10',
       ...impl.budget
     }
   });
@@ -839,4 +841,165 @@ test('indexed outbound posts retain their original URLs without proposing the qu
     const raw = h.store.research.receipts(h.runId).find(receipt => receipt.kind === 'tool' && (receipt.request as {type?:string}).type === 'search')!;
     assert.ok(JSON.stringify(raw.result).includes(variant),'literal indexed result remains in the actual receipt');
   } finally { h.db.close(); }
+});
+
+
+function originalPage(url: string, text: string): ResearchPage {
+  const linkContexts = extractOriginalLinkContexts(text,url);
+  return page(url,text,{retrieval:'read',links:linkContexts.map(context=>context.url),linkContexts});
+}
+
+test('same-account About is read at the concrete original URL and reveals accounts without another site card', async () => {
+  const root='https://people-synthetic.edu/~mira/';
+  const about=root+'About';
+  const homeText='<nav><a href="About">About me</a></nav>';
+  const aboutText=`<p>I build compilers. My GitHub profile: <a href="${github}">GitHub</a></p>`;
+  const h=harness({kind:'homepage_url',value:root},{read:url=>url===root?[originalPage(root,homeText)]:url===about?[originalPage(about,aboutText)]:[page(url,'Public profile.')]});
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.equal(h.reads.filter(url=>url===root).length,1);
+    assert.equal(h.reads.filter(url=>url===about).length,1);
+    assert.equal(view.accounts.filter(account=>account.platform==='personal_site').length,1);
+    const target=view.accounts.find(account=>account.profileUrl===github)!;
+    assert.equal(target.identity.state,'supported');
+    assert.equal(target.identity.evidence[0]!.sourceUrl,about,'actual About URL remains the original source');
+    const readReceipts=h.store.research.receipts(h.runId).filter(row=>(row.request as {url?:string}).url===root||(row.request as {url?:string}).url===about);
+    assert.equal(readReceipts.length,2,'two actual document reservations, one account');
+    assert.ok(readReceipts.every(row=>row.key.includes(':v10:profile:')));
+  } finally {h.db.close();}
+});
+
+test('About/me and Contact navigation reads finite identity paths but never a linked article', async () => {
+  const about=home+'about/me', contact=home+'Contact.html', article=home+'posts/research';
+  const h=harness({kind:'homepage_url',value:home},{read:url=>url===home?[originalPage(url,'<nav><a href="about/me">About</a><a href="posts/research">Article</a></nav>')]:url===about?[originalPage(url,'<nav><a href="/Contact.html">Contact</a></nav>')]:[originalPage(url,'<p>Contact the author through the public site.</p>')]});
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.deepEqual(h.reads,[home,about,contact]);
+    assert.equal(view.accounts.filter(account=>account.platform==='personal_site').length,1);
+    assert.equal(h.reads.includes(article),false);
+  } finally {h.db.close();}
+});
+
+test('provider extras, quoted links and foreign author namespaces never create identity navigation', async () => {
+  const root='https://people-synthetic.edu/~mira/';
+  const about=root+'about/me', foreign='https://people-synthetic.edu/~other/Contact';
+  const text=`<blockquote><a href="${about}">Another person's About</a></blockquote><nav><a href="${foreign}">Contact someone else</a></nav>`;
+  const original=originalPage(root,text);
+  original.links.push(root+'Contact'); // Real provider index, absent in the original.
+  const h=harness({kind:'homepage_url',value:root},{read:url=>url===root?[original]:[page(url,'Public record.')]});
+  try {
+    await discoverFirstStep(h.ctx);
+    assert.deepEqual(h.reads,[root]);
+    assert.equal(firstStepIdentityNavigation(root,foreign),null);
+    for(const bad of [root+'%2e%2e/~other/about',root+'%2fabout',root+'posts/about','https://www.people-synthetic.edu/~mira/about']) assert.equal(firstStepIdentityNavigation(root,bad),null,bad);
+  } finally {h.db.close();}
+});
+
+test('About redirect to home retains receipt and material but cannot claim the requested identity page was read', async () => {
+  const about=home+'about/me';
+  const homeText='<nav><a href="about/me">About</a></nav>';
+  const h=harness({kind:'homepage_url',value:home},{read:url=>url===home?[originalPage(home,homeText)]:[page(home,'Returned home instead of About.',{documentBinding:{requestedUrl:about,returnedUrl:home},retrieval:'read'})]});
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.deepEqual(h.reads,[home,about]);
+    assert.ok(view.gaps.some(gap=>gap.includes(about)&&gap.includes('未取得目标原文')));
+    const raw=h.store.research.receipts(h.runId).find(row=>(row.request as {url?:string}).url===about)!;
+    assert.equal(raw.state,'completed','financial/provider receipt is not rewritten as a fabricated failure');
+    assert.equal((raw.result as ResearchToolResult).pages[0]!.url,home);
+    assert.equal(view.accounts.flatMap(account=>account.identity.evidence).some(evidence=>evidence.sourceUrl===about),false);
+  } finally {h.db.close();}
+});
+
+test('identity navigation needs a same-attempt completed receipt, exact hash and a freshly extracted original href', async () => {
+  const about=home+'about/me', text='<nav><a href="about/me">About</a></nav>';
+  const h=harness({kind:'homepage_url',value:home},{read:url=>[originalPage(url,url===home?text:'<p>Original About.</p>')]});
+  try {
+    const sourceKey='firststep:boundary:v10:profile:source';
+    await h.ctx.search.readIdentity(sourceKey,{type:'read',url:home},h.ctx.signal);
+    const context=extractOriginalLinkContexts(text,home)[0]!;
+    const navigation=firstStepIdentityNavigation(home,about)!;
+    const intent={...navigation,sourceUrl:home,sourceContentHash:createHash('sha256').update(text).digest('hex'),sourceReceiptKey:sourceKey,quote:context.quote,locator:context.locator};
+    for(const patch of [{sourceReceiptKey:'firststep:foreign:v10:profile:source'},{sourceContentHash:'wrong'},{quote:'About'},{locator:'invented offset'},{url:home+'Contact'},{accountKey:'another account'}]) {
+      await assert.rejects(()=>h.ctx.search.readIdentity('firststep:boundary:v10:profile:about',{type:'read',url:about},h.ctx.signal,{...intent,...patch}),/invalid_decision/);
+      assert.deepEqual(h.reads,[home]);
+    }
+    await h.ctx.search.readIdentity('firststep:boundary:v10:profile:about',{type:'read',url:about},h.ctx.signal,intent);
+    await h.ctx.search.readIdentity('firststep:boundary:v10:profile:another-key',{type:'read',url:about},h.ctx.signal,intent);
+    assert.deepEqual(h.reads,[home,about],'new key/purpose provenance cannot send the same document twice');
+    assert.equal(h.store.research.receipts(h.runId).length,2);
+    await assert.rejects(()=>h.ctx.search.readIdentity('firststep:boundary:v10:profile:another-provider',{type:'firecrawl',url:about},h.ctx.signal,intent),/invalid_decision/);
+    await assert.rejects(()=>h.ctx.search.readIdentity(sourceKey,{type:'read',url:about},h.ctx.signal,intent),/invalid_decision/,'a colliding old key cannot replay a different request');
+    assert.equal(h.reads.length,2);
+  } finally {h.db.close();}
+});
+
+test('failed and inflight concrete reads are charged once and cannot retry through a new key', async () => {
+  for(const state of ['failed','inflight'] as const){
+    const about=home+'about/me', text='<nav><a href="about/me">About</a></nav>';
+    const h=harness({kind:'homepage_url',value:home},{read:url=>{if(url===about)throw new Error('synthetic timeout');return[originalPage(url,text)];}});
+    try {
+      const sourceKey='firststep:boundary:v10:profile:source';
+      await h.ctx.search.readIdentity(sourceKey,{type:'read',url:home},h.ctx.signal);
+      const context=extractOriginalLinkContexts(text,home)[0]!;
+      const intent={...firstStepIdentityNavigation(home,about)!,sourceUrl:home,sourceContentHash:createHash('sha256').update(text).digest('hex'),sourceReceiptKey:sourceKey,quote:context.quote,locator:context.locator};
+      const firstKey='firststep:boundary:v10:profile:about';
+      if(state==='failed')await assert.rejects(()=>h.ctx.search.readIdentity(firstKey,{type:'read',url:about},h.ctx.signal,intent),/timeout/);
+      else h.store.research.reserve(h.runId,firstKey,'tool',{type:'read',url:about},{inputTokens:0,outputTokens:0});
+      const before=h.reads.length;
+      await assert.rejects(()=>h.ctx.search.readIdentity('firststep:boundary:v10:profile:changed-key',{type:'read',url:about},h.ctx.signal,intent),/失败回执|unknown_inflight/);
+      assert.equal(h.reads.length,before);
+      assert.equal(h.store.research.receipts(h.runId).length,2);
+    } finally {h.db.close();}
+  }
+});
+
+test('all concrete identity reads share the sixteen-reservation ceiling and retain unread navigation gaps', async () => {
+  const paths=['about','About','ABOUT','about.html','about.htm','bio','BIO','bio.htm','bio.html','biography','Biography','biography.html','contact','Contact','contact.html','contacts','CONTACTS','contacts.htm'];
+  const text='<nav>'+paths.map(path=>`<a href="${path}">${path}</a>`).join('')+'</nav>';
+  const h=harness({kind:'homepage_url',value:home},{read:url=>[originalPage(url,url===home?text:'<p>Original identity information.</p>')]});
+  try {
+    const view=await discoverFirstStep(h.ctx);
+    assert.equal(h.reads.length,16);
+    const reads=h.store.research.receipts(h.runId).filter(row=>row.kind==='tool'&&(row.request as {type?:string}).type!=='search');
+    assert.equal(reads.length,16);
+    assert.ok(view.gaps.some(gap=>gap.includes('未读取实际导航')));
+    assert.equal(new Set(h.reads).size,16);
+  } finally {h.db.close();}
+});
+
+test('pending sequential-key discovery replays its old strategy without new About IO or policy relabeling', async () => {
+  const input={kind:'homepage_url' as const,value:home};
+  const text='<nav><a href="about/me">About</a></nav>';
+  const h=harness(input,{read:url=>[originalPage(url,text)]});
+  try {
+    const hash=createHash('sha256').update(JSON.stringify({input,hint:null})).digest('hex').slice(0,24);
+    await h.ctx.search.readIdentity(`firststep:1-${hash}:profile:1`,{type:'read',url:home},h.ctx.signal);
+    const view=await discoverFirstStep(h.ctx);
+    assert.deepEqual(h.reads,[home]);
+    assert.equal(view.policyVersion,'first-step/v9');
+    assert.equal(h.store.research.receipts(h.runId).some(row=>row.key.includes(':v10:')),false);
+  } finally {h.db.close();}
+});
+
+
+for(const change of ['cancel','person_revision','input_revision'] as const) test(`a late About result after ${change} cannot publish, while its settled cost stays in the ledger`, async()=>{
+  const about=home+'about/me';
+  let h:Harness;
+  const control=new AbortController();
+  h=harness({kind:'homepage_url',value:home},{read:url=>{
+    if(url===home)return[originalPage(home,'<nav><a href="about/me">About</a></nav>')];
+    if(change==='cancel')control.abort(new Error('synthetic cancellation'));
+    else if(change==='input_revision')h.db.prepare('UPDATE first_step_links SET input_revision=input_revision+1 WHERE run_id=?').run(h.runId);
+    else h.db.prepare('UPDATE research_cases SET person_revision=person_revision+1 WHERE id=?').run(h.firstStep.link(h.runId)!.caseId);
+    return[originalPage(about,`<p>My GitHub: <a href="${github}">GitHub</a></p>`)];
+  }});
+  h.ctx.signal=control.signal;
+  try{
+    await assert.rejects(()=>discoverFirstStep(h.ctx),/cancellation|run_inactive/);
+    assert.deepEqual(h.reads,[home,about]);
+    const receipt=h.store.research.receipts(h.runId).find(row=>(row.request as {url?:string}).url===about)!;
+    assert.equal(receipt.state,'completed');
+    assert.equal(h.firstStep.getFirstStepView(h.ownerId,h.runId).view.discoveryRevision,0);
+    assert.equal(h.store.cases.listAccounts(h.ownerId,h.firstStep.link(h.runId)!.caseId).length,0);
+  }finally{h.db.close();}
 });

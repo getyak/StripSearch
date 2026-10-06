@@ -28,6 +28,7 @@ import type { HttpTransport } from '../adapters/types.js';
 import { ProviderError } from '../adapters/types.js';
 import { invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { runDshDecision } from './dsh-decision.js';
+import { extractOriginalLinkContexts } from './link-context.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchPage, ResearchAliasProof } from './tool-contracts.js';
 import type { ResearchBudgetLimits } from '../../shared/types.js';
 import { RESEARCH_LIMITS, ResearchStop, type ActionReceipt, type ActionUsage } from './research-store.js';
@@ -45,6 +46,7 @@ import {
   FIRST_STEP_SCHEMA_VERSION,
   assessIdentityLink,
   classifyFirstStepUrl,
+  firstStepIdentityNavigation,
   firstStepAccountCategory,
   firstStepDefaultSuggestion,
   firstStepQueryPlan,
@@ -60,6 +62,7 @@ import {
   type FirstStepEvidenceView,
   type FirstStepFrozenPlan,
   type FirstStepInput,
+  type FirstStepIdentityReadIntent,
   type FirstStepLinkObservation,
   type FirstStepMaterialUse,
   type FirstStepPersonClusterView,
@@ -80,7 +83,7 @@ export interface FirstStepCheckedSearch {
   /** Ordinary web search with a bounded result count; one metered request. */
   search(requestKey: string, query: string, numResults: number, signal: AbortSignal, includeDomains?: readonly string[], provider?: 'bluesky'): Promise<ResearchToolResult>;
   /** Minimal identity read of one already-classified public page. */
-  readIdentity(requestKey: string, action: ResearchToolAction, signal: AbortSignal): Promise<ResearchToolResult>;
+  readIdentity(requestKey: string, action: ResearchToolAction, signal: AbortSignal, intent?: FirstStepIdentityReadIntent): Promise<ResearchToolResult>;
   /** Real request receipts for the discovery projection (original timestamps). */
   receipts(): FirstStepReceiptView[];
   /** Meter one restricted model call through the same ledger. */
@@ -117,6 +120,8 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
     modelCalls: options.budget.maxModelCalls
   };
   const log: FirstStepReceiptView[] = [];
+  const namespace = (requestKey: string): string | null => requestKey.match(/^firststep:[^:]+:/)?.[0] ?? null;
+  const sameRequest = (left: unknown, right: unknown): boolean => digest(left) === digest(right);
   const note = (requestKey: string, kind: FirstStepReceiptView['kind'], target: string, retrieval: FirstStepRetrieval, receipt: ActionReceipt, state: 'completed' | 'failed'): void => {
     const usage = receipt.usage ?? { estimatedUsd: null, unknownCost: true };
     log.push({
@@ -140,6 +145,29 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
   ): Promise<ResearchToolResult> => {
     signal.throwIfAborted();
     options.store.research.assertActive(options.runId);
+    const prior = options.store.research.receipt(options.runId, requestKey);
+    if (prior && (prior.kind !== 'tool' || !sameRequest(prior.request, action))) throw new ResearchStop('invalid_decision');
+    const prefix = namespace(requestKey);
+    const attemptReceipts = options.store.research.receipts(options.runId).filter(row => prefix !== null && row.key.startsWith(prefix));
+    // Concrete documents, not account keys, own read reservations. Switching
+    // tool/provider/purpose cannot retry a failed or unknown same-attempt URL.
+    if (!prior && kind === 'profile_read') {
+      const existing = attemptReceipts.find(row => row.kind === 'tool' && row.request && typeof row.request === 'object' &&
+        'url' in row.request && (row.request as {url:unknown}).url === target);
+      if (existing) {
+        if (!sameRequest(existing.request, action)) throw new ResearchStop('invalid_decision');
+        if (existing.state === 'inflight') throw new ResearchStop('unknown_inflight');
+        note(existing.key, kind, target, retrieval, existing, existing.state);
+        if (existing.state === 'failed') throw new ProviderError('provider_bad_response', '本次文档读取已有失败回执，未自动重试。');
+        return existing.result as ResearchToolResult;
+      }
+    }
+    if (!prior && prefix !== null) {
+      const count = attemptReceipts.filter(row => row.kind === 'tool' && row.request && typeof row.request === 'object' &&
+        ('type' in row.request && ((row.request as {type:unknown}).type === 'search') === (kind === 'search'))).length;
+      const ceiling = kind === 'search' ? options.budget.maxSearchQueries : options.budget.maxProfileReads;
+      if (count >= ceiling) throw new ResearchStop('budget_exhausted');
+    }
     const old = options.store.research.reserve(options.runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, limits, true);
     if (old) {
       // Same-attempt recovery: the real prior receipt, original timestamp.
@@ -173,22 +201,39 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
       if (query.trim().length === 0 || query.length > FIRST_STEP_SEARCH_QUERY_MAX) throw new ResearchStop('invalid_decision');
       return run(requestKey, 'search', query, 'indexed', { type: 'search', query, numResults, ...(includeDomains ? { includeDomains } : {}),...(provider?{provider}:{}) }, signal);
     },
-    async readIdentity(requestKey, action, signal) {
+    async readIdentity(requestKey, action, signal, intent) {
       // The first step may only read identity-level material: no posts, no
       // arbitrary fetch — deep reading happens after the scope confirmation.
       if (action.type !== 'read' && action.type !== 'github_profile' && action.type !== 'social_profile' && action.type !== 'firecrawl') {
         throw new ResearchStop('invalid_decision');
       }
-      if (action.type === 'firecrawl') {
-        const target = classifyFirstStepUrl(action.url);
-        if (!target.ok || target.ref.entry !== 'profile' || !['personal_site', 'linktree'].includes(target.ref.platform)) throw new ResearchStop('invalid_decision');
-      }
+      const target = classifyFirstStepUrl(action.url);
+      if (!target.ok) throw new ResearchStop('invalid_decision');
+      if (intent) {
+        const navigation = firstStepIdentityNavigation(intent.sourceUrl, action.url);
+        const receipt = options.store.research.receipt(options.runId, intent.sourceReceiptKey);
+        const prefix = namespace(requestKey);
+        const request = receipt?.request as {type?:unknown} | undefined;
+        const pages = (receipt?.result as ResearchToolResult | undefined)?.pages;
+        const source = Array.isArray(pages) ? pages.find(page => page.url === intent.sourceUrl &&
+          createHash('sha256').update(page.text).digest('hex') === intent.sourceContentHash) : undefined;
+        const realContext = source && extractOriginalLinkContexts(source.text, source.url).find(context => context.url === action.url &&
+          context.quote === intent.quote && context.locator === intent.locator && context.surface === 'authorial' &&
+          !isExplicitDenialQuote(context.quote) && !isUntrustedInstructionText(context.quote) && classifyLinkContext(context.quote) !== 'third_party');
+        if (!navigation || navigation.accountKey !== intent.accountKey || navigation.purpose !== intent.purpose || intent.url !== action.url ||
+          !prefix || !intent.sourceReceiptKey.startsWith(prefix) || receipt?.kind !== 'tool' || receipt.state !== 'completed' ||
+          !['read', 'firecrawl'].includes(String(request?.type)) || !realContext || !['read', 'firecrawl'].includes(action.type)) throw new ResearchStop('invalid_decision');
+      } else if (target.ref.entry !== 'profile') throw new ResearchStop('invalid_decision');
+      if (action.type === 'firecrawl' && !['personal_site', 'linktree'].includes(target.ref.platform)) throw new ResearchStop('invalid_decision');
       return run(requestKey, 'profile_read', action.url, 'read', action, signal);
     },
     receipts() {
       return [...log];
     },
     async withModel(requestKey, call, reservation = { inputTokens: 0, outputTokens: 0 }) {
+      const prefix = namespace(requestKey);
+      if (!options.store.research.receipt(options.runId, requestKey) && prefix !== null &&
+        options.store.research.receipts(options.runId).filter(row => row.key.startsWith(prefix) && row.kind === 'model').length >= options.budget.maxModelCalls) throw new ResearchStop('budget_exhausted');
       const old = options.store.research.reserve(options.runId, requestKey, 'model', { model: options.modelName ?? 'first-step-search-model' }, reservation, limits, true);
       if (old) {
         // Same-attempt recovery: replay the EXACT saved result with its
@@ -562,6 +607,7 @@ interface ObservedPage {
   page: ResearchPage;
   ref: FirstStepAccountRef;
   retrieval: FirstStepRetrieval;
+  receiptKey?: string;
 }
 
 /** Sentence-bounded span around the URL: a real excerpt with a real locator. */
@@ -655,9 +701,15 @@ function mapProviderFailure(error: unknown): ProviderFailure {
 
 export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<FirstStepDiscoveryView> {
   const now = ctx.now ?? (() => new Date().toISOString());
-  const budget = ctx.budget ?? FIRST_STEP_DEFAULT_BUDGET;
   const link = ctx.firstStep.attachRun({ id: ctx.runId, ownerId: ctx.ownerId, question: ctx.input.question ?? ctx.input.value });
   const caseId = link.caseId;
+  const attemptId = `${String(link.inputRevision)}-${digest({ input: ctx.input, hint: ctx.hint ?? null })}`;
+  const attemptPrefix = `firststep:${attemptId}:`;
+  const priorAttempt = ctx.store.research.receipts(ctx.runId).filter(receipt => receipt.key.startsWith(attemptPrefix));
+  const legacyAttempt = priorAttempt.length > 0 && !priorAttempt.some(receipt => receipt.key.startsWith(`${attemptPrefix}v10:`));
+  // A pending legacy attempt must not acquire new IO merely because code was
+  // updated. Preserve its sequential replay and old read strategy.
+  const budget = { ...(ctx.budget ?? FIRST_STEP_DEFAULT_BUDGET), ...(legacyAttempt ? { policyVersion: 'first-step/v9' } : {}) };
   // Frozen BEFORE any IO: catalog-bound obligations and the attempt identity.
   // A restart of this attempt reuses real receipts; an expand is a NEW attempt.
   const catalogRoutes = catalogObligations(ctx.catalog ?? null, ctx.input);
@@ -668,11 +720,15 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     now: now(),
     extraRoutes: catalogRoutes
   });
-  const attemptId = `${String(link.inputRevision)}-${digest({ input: ctx.input, hint: ctx.hint ?? null })}`;
-  const frozenScopeVersion = (ctx.store.cases.getCase(ctx.ownerId, caseId)?.scopeVersion ?? 1) as ScopeVersion;
+  if (legacyAttempt) plan.policyVersion = 'first-step/v9';
+  const frozenCase = ctx.store.cases.getCase(ctx.ownerId, caseId);
+  const frozenScopeVersion = (frozenCase?.scopeVersion ?? 1) as ScopeVersion;
   const active = (): void => {
     ctx.signal.throwIfAborted();
     ctx.store.research.assertActive(ctx.runId);
+    const currentLink = ctx.firstStep.link(ctx.runId), currentCase = ctx.store.cases.getCase(ctx.ownerId, caseId);
+    if (!currentLink || currentLink.inputRevision !== link.inputRevision || currentLink.selectionRevision !== link.selectionRevision ||
+      currentLink.submittedAt !== link.submittedAt || currentCase?.scopeVersion !== frozenCase?.scopeVersion || currentCase?.personRevision !== frozenCase?.personRevision) throw new ResearchStop('run_inactive');
   };
   const stage = (stageName: string, label: string): void => {
     ctx.firstStep.setPhase(ctx.runId, stageName as never);
@@ -698,6 +754,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const nativeNamespace=(ref:FirstStepAccountRef):string|null=>
     (ref.platform==='github'||ref.platform==='x')&&ref.handle?`${ref.platform}:${ref.handle.toLowerCase()}`:null;
   const readKeys = new Set<string>();
+  const readUrls = new Set<string>();
+  const navigationQueue: Array<{ref:FirstStepAccountRef;url:string;intent:FirstStepIdentityReadIntent}> = [];
   const resolveKey = (key: string): string => {
     let current = key;
     const seen = new Set<string>();
@@ -729,7 +787,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const emptyConstrainedQueries = new Set<string>();
   let budgetExhausted = false;
   let requestIndex = 0;
-  const requestKey = (kind: string): string => `firststep:${attemptId}:${kind}:${String(++requestIndex)}`;
+  const requestKey = (kind: string, descriptor: unknown = 'proposal'): string => legacyAttempt
+    ? `${attemptPrefix}${kind}:${String(++requestIndex)}`
+    : `${attemptPrefix}v10:${kind}:${digest(descriptor)}`;
 
   /** Non-account tool result links stay available as honest related leads. */
   const keepMaterialLead = (ref: FirstStepAccountRef, note?: string): void => {
@@ -867,7 +927,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const searchOnce = async (query: string, includeDomains?: readonly string[], provider?: 'bluesky'): Promise<'ok' | 'failed' | 'budget'> => {
     active();
     try {
-      const result = await ctx.search.search(requestKey('search'), query, budget.maxSearchResults, ctx.signal, includeDomains, provider);
+      const result = await ctx.search.search(requestKey('search', {query,includeDomains,provider}), query, budget.maxSearchResults, ctx.signal, includeDomains, provider);
       active();
       if (includeDomains?.length && result.pages.length === 0) emptyConstrainedQueries.add(query);
       for (const page of result.pages) {
@@ -947,29 +1007,48 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     }
   };
 
-  const readOnce = async (ref: FirstStepAccountRef): Promise<'ok' | 'failed' | 'budget' | 'missing'> => {
+  const readOnce = async (ref: FirstStepAccountRef, concreteUrl = ref.profileUrl, intent?: FirstStepIdentityReadIntent): Promise<'ok' | 'failed' | 'budget' | 'missing'> => {
     active();
     const action: ResearchToolAction =
       ref.platform === 'github'
-        ? { type: 'github_profile', url: ref.profileUrl }
+        ? { type: 'github_profile', url: concreteUrl }
         : ref.platform === 'x'
-          ? { type: 'social_profile', url: ref.profileUrl }
+          ? { type: 'social_profile', url: concreteUrl }
           : ctx.firecrawlAvailable && ['personal_site', 'linktree'].includes(ref.platform)
-            ? { type: 'firecrawl', url: ref.profileUrl }
-            : { type: 'read', url: ref.profileUrl };
+            ? { type: 'firecrawl', url: concreteUrl }
+            : { type: 'read', url: concreteUrl };
     try {
-      const result = await ctx.search.readIdentity(requestKey('profile'), action, ctx.signal);
+      const result = await ctx.search.readIdentity(requestKey('profile', {url:concreteUrl}), action, ctx.signal, intent);
       active();
       let ingested = 0;
       for (const page of result.pages) {
         const classified = classifyFirstStepUrl(page.url);
         if (!classified.ok) continue;
+        if (intent && (page.url !== concreteUrl || page.documentBinding &&
+          (page.documentBinding.requestedUrl !== concreteUrl || page.documentBinding.returnedUrl !== page.url))) {
+          keepMaterialLead(classified.ref, '身份导航实际返回了其他文档；原请求与费用保留，不算该身份页已读。');
+          gaps.push(`身份导航未取得目标原文：${concreteUrl} → ${page.url}；不作该身份页已读或归属依据。`);
+          continue;
+        }
+        const requested = classifyFirstStepUrl(concreteUrl);
+        const proof = page.aliasProof;
+        const verifiedAlias = proof && proof.requestedUrl === concreteUrl && proof.returnedUrl === page.url &&
+          (proof.kind !== 'native_profile' || page.account?.id === proof.nativeId && page.account.platform === proof.platform && page.account.profileUrl === page.url) && verifyAliasProjection(proof).ok;
+        if (requested.ok && requested.ref.accountKey !== classified.ref.accountKey && !verifiedAlias) {
+          if (classified.ref.entry === 'profile') register(page.url);
+          keepMaterialLead(classified.ref, '身份读取返回了另一个账号或作者目录；未采用为请求账号的身份材料。');
+          if (proof) aliasNotes.add(`重复候选的别名证明未通过服务端核验（与实际请求或原生返回账号不绑定，或不满足同文档规则）：${proof.requestedUrl}；保持分离。`);
+          gaps.push(`身份读取返回了未核实的其他账号：${concreteUrl} → ${page.url}；保持分离。`);
+          continue;
+        }
+        const receipt = [...ctx.store.research.receipts(ctx.runId)].reverse().find(row => row.key.startsWith(attemptPrefix) && row.kind === 'tool' && row.state === 'completed' &&
+          (row.request as {url?:unknown})?.url === concreteUrl && (row.result as ResearchToolResult)?.pages?.some(original => original.url === page.url && original.text === page.text));
         ingested++;
         const source = classified.ref;
         // The read page itself is an observed lead (explicit URL input is
         // always retained); it gets no read permission by itself.
         register(page.url);
-        observed.push({ page, ref: source, retrieval: 'read' });
+        observed.push({ page, ref: source, retrieval: 'read', ...(receipt ? {receiptKey:receipt.key} : {}) });
         // Adapter-attested alias proofs may project duplicate candidates onto
         // the observed canonical returned ref (server re-verified below).
         if (page.aliasProof) {
@@ -1009,6 +1088,15 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           if (!targetClassified.ok) continue;
           const targetRef = targetClassified.ref;
           const context = byTarget.get(target) ?? null;
+          // Save concrete identity navigation BEFORE same-account links are
+          // skipped for relation projection. It is not an ownership edge.
+          const navigation = !legacyAttempt && context && receipt ? firstStepIdentityNavigation(page.url, target) : null;
+          if (navigation && context && context.surface === 'authorial' &&
+            !isExplicitDenialQuote(context.quote) && !isUntrustedInstructionText(context.quote) && classifyLinkContext(context.quote) !== 'third_party' &&
+            !readUrls.has(navigation.url) && !navigationQueue.some(item => item.url === navigation.url)) {
+            navigationQueue.push({ref:source,url:navigation.url,intent:{...navigation,sourceUrl:page.url,
+              sourceContentHash:createHash('sha256').update(page.text).digest('hex'),sourceReceiptKey:receipt!.key,quote:context.quote,locator:context.locator}});
+          }
           const fallback = context === null ? quoteAround(page.text, target) : null;
           const quote = context !== null ? context.quote : fallback?.quote ?? null;
           const locator = context !== null ? context.locator : fallback?.locator ?? '页面出链提取（正文无对应片段）';
@@ -1069,13 +1157,13 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       if (isLivenessFailure(error, ctx.signal)) throw error;
       if (error instanceof ResearchStop && error.code === 'invalid_decision') {
         // Honest failure/gap for an input decision error: never internal_error.
-        failures.push({ kind: 'read', target: ref.profileUrl, platform: ref.platform, state: 'unknown', detail: '输入决策错误（invalid_decision）：读取请求不符合冻结读取契约；未派发请求、无计费回执。' });
-        gaps.push(`身份读取请求未通过冻结读取契约（invalid_decision），未派发请求、未计费：${ref.profileUrl}；如实保留缺口，不作内部错误。`);
+        failures.push({ kind: 'read', target: concreteUrl, platform: ref.platform, state: 'unknown', detail: '输入决策错误（invalid_decision）：读取请求不符合冻结读取契约；未派发请求、无计费回执。' });
+        gaps.push(`身份读取请求未通过冻结读取契约（invalid_decision），未派发请求、未计费：${concreteUrl}；如实保留缺口，不作内部错误。`);
         return 'failed';
       }
       const failure = mapProviderFailure(error);
-      failures.push({ kind: 'read', target: ref.profileUrl, platform: ref.platform, state: failure.state, detail: failure.message });
-      gaps.push(`身份读取路线未成功（${failure.state}）：${ref.profileUrl}；不代表无此账号。`);
+      failures.push({ kind: 'read', target: concreteUrl, platform: ref.platform, state: failure.state, detail: failure.message });
+      gaps.push(`身份读取路线未成功（${failure.state}）：${concreteUrl}；不代表无此账号。`);
       return 'failed';
     }
   };
@@ -1087,8 +1175,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   if (explicitAnchor && explicitAnchor.ok) {
     register(ctx.input.value, { explicit: true });
     readKeys.add(resolveKey(explicitAnchor.ref.accountKey));
-    await readOnce(explicitAnchor.ref);
-    anchorsRead.push(candidateRefs.get(resolveKey(explicitAnchor.ref.accountKey)) ?? explicitAnchor.ref);
+    readUrls.add(ctx.input.value);
+    if (await readOnce(explicitAnchor.ref, ctx.input.value) === 'ok') anchorsRead.push(candidateRefs.get(resolveKey(explicitAnchor.ref.accountKey)) ?? explicitAnchor.ref);
   }
 
   // 2. Wide recall: deliberate family coverage; every query runs before reads
@@ -1102,7 +1190,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    actual personal home/About/link-directory entries and native GitHub/X
   //    anchors over noisy social feeds — and DYNAMICALLY reading actually
   //    self-linked profiles while reads remain (never only the initial static
-  //    array). Account reads are deduplicated and a failed/missing read is
+  //    array). Concrete documents have their own deduplication and read count;
+  //    account cards remain unique. A failed/missing read is
   //    never counted as anchor evidence.
   stage('expanding_accounts', '读取公开身份资料与实际外链');
   const priorityOf = (ref: FirstStepAccountRef): number => {
@@ -1145,18 +1234,21 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     readQueue.unshift(ref);
   };
   const drainReads = async (limit = budget.maxProfileReads): Promise<void> => {
-  while (readQueue.length > 0 && readKeys.size < Math.max(0, limit)) {
-    const next = readQueue.shift()!;
+  while ((readQueue.length > 0 || navigationQueue.length > 0) && (legacyAttempt ? readKeys.size : readUrls.size) < Math.max(0, limit)) {
+    const navigation = navigationQueue.shift();
+    const next = navigation?.ref ?? readQueue.shift()!;
+    const concreteUrl = navigation?.url ?? next.profileUrl;
     const nextKey = resolveKey(next.accountKey);
-    if (readKeys.has(nextKey)) continue;
+    if (navigation ? readUrls.has(concreteUrl) : readKeys.has(nextKey)) continue;
     readKeys.add(nextKey);
+    readUrls.add(concreteUrl);
     const before = linkObservations.length;
-    const outcome = await readOnce(next);
+    const outcome = await readOnce(next, concreteUrl, navigation?.intent);
     if (outcome === 'budget') break;
     if (outcome === 'ok') anchorsRead.push(candidateRefs.get(resolveKey(next.accountKey)) ?? next);
     if (outcome === 'missing') {
       // A failed/missing read is never counted as actual anchor evidence.
-      gaps.push(`读取未返回可用页面内容：${next.profileUrl}；保持未回读状态，不作归属依据。`);
+      gaps.push(`读取未返回可用页面内容：${concreteUrl}；保持未回读状态，不作归属依据。`);
     }
     // Actually self-linked profiles expand the read set while reads remain.
     for (const observation of linkObservations.slice(before)) {
@@ -1204,6 +1296,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
 
   for (const ref of [...candidateRefs.values()].sort((a, b) => priorityOf(a) - priorityOf(b)).reverse()) enqueueRead(ref);
   await drainReads();
+  if (navigationQueue.length > 0) {
+    budgetExhausted = true;
+    for (const navigation of navigationQueue) gaps.push(`身份读取额度已到，未读取实际导航：${navigation.url}；不作身份页已读。`);
+  }
 
   // 5. Optional restricted model proposals, metered through the ledger and
   //    verified against real receipts and real source spans.

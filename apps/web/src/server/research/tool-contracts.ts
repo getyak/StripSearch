@@ -43,6 +43,8 @@ export interface ResearchPage {
  linkContexts?: ResearchLinkContext[];
   /** Adapter-generated alias proof of THIS response; never model-claimed. */
   aliasProof?: ResearchAliasProof;
+ /** Adapter-observed document binding; requested URL is never a substitute for returned URL. */
+ documentBinding?: { requestedUrl: string; returnedUrl: string };
 }
 export interface ResearchToolResult {
  pages: ResearchPage[]; requests: number; bytes: number;
