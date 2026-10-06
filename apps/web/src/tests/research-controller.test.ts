@@ -459,15 +459,15 @@ test('reopening a completed quote-policy checkpoint guards actual Store canonica
  db.close();
 });
 
-test('resuming scoped pending claims cannot relabel a completed legacy verifier receipt as quote-only',async()=>{
- const {db,store,run}=setup();const quote='Ada Fixture wrote a compiler.';
+test('resuming scoped pending claims cannot relabel a completed legacy verifier receipt as quote-only attribution',async()=>{
+ const {db,store,run}=setup();const quote='I wrote a compiler.';
  store.addSource(run.id,{key:'S1',url:profile.url,title:profile.title,kind:'profile',publishedAt:null,excerpt:quote,excerptLocator:'Synthetic original',identityLabel:'Synthetic',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);
  const cp:ResearchCheckpoint={phase:'verifying',steps:0,startedAt:0,elapsedMs:0,anchorUrl:profile.url,identity:{displayName:'Ada Fixture',handle:'ada-fixture',profileUrl:profile.url,status:'resolved',note:'Synthetic',candidates:[]},candidates:[],pages:[{...profile,sourceKey:'S1',text:quote,retrieval:'read'}],claims:[],pendingClaims:[{sourceKey:'S1',quote,statement:quote,kind:'attributed_statement',section:'work'}],unknowns:[],stopReason:null};
  store.research.save(run.id,cp);store.research.reserve(run.id,'model:0','model',{model:'deepseek-flash',path:'/v1/messages'},{inputTokens:10,outputTokens:2500},unlimited);store.research.settle(run.id,'model:0',{status:200,body:'LEGACY_CONTEXT_RESULT',headers:{'content-type':'text/event-stream'}},{inputTokens:10,outputTokens:1,estimatedUsd:0});let sends=0;
  await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},deepseekApiKey:'synthetic',
  transport:{async fetch(){sends++;return {status:200,ok:true,headers:{get(){return 'text/event-stream';}},async text(){return 'NEW_QUOTE_ONLY_RESULT';}};}},
  tools:{async execute(){throw new Error('no tool dispatch needed for pending claims');}},planner:{async decide(input,signal,invoke){assert.equal(input.mode,'verify');const raw=await invoke({path:'/v1/messages',body:{model:'deepseek-flash',max_tokens:2500},signal} as Parameters<typeof invoke>[0]);assert.equal(raw.body,'NEW_QUOTE_ONLY_RESULT');return {supported:[0],rejected:[]};}}});
- assert.equal(sends,1);const receipts=store.research.receipts(run.id);assert.equal(receipts.length,2);assert.equal(receipts[0]!.key,'model:0');assert.equal((receipts[0]!.result as {body:string}).body,'LEGACY_CONTEXT_RESULT');const current=receipts.find(r=>r.key==='model:0:quote_only_v1')!;assert.equal((current.request as {verificationPolicy:string}).verificationPolicy,'exact_quote/v1');assert.equal(store.research.budget(run.id,unlimited).modelCalls,2);assert.equal(store.research.checkpoint(run.id)!.quoteSupportPolicy,'exact_quote/v1');db.close();
+ assert.equal(sends,1);const receipts=store.research.receipts(run.id);assert.equal(receipts.length,2);assert.equal(receipts[0]!.key,'model:0');assert.equal((receipts[0]!.result as {body:string}).body,'LEGACY_CONTEXT_RESULT');const current=receipts.find(r=>r.key==='model:0:quote_only_v1:attribution_v1')!;assert.equal((current.request as {verificationPolicy:string}).verificationPolicy,'exact_quote/v1');assert.equal((current.request as {attributionPolicy:string}).attributionPolicy,'quote_attribution/v1');assert.equal(store.research.budget(run.id,unlimited).modelCalls,2);assert.equal(store.research.checkpoint(run.id)!.quoteSupportPolicy,'exact_quote/v1');db.close();
 });
 
 
@@ -536,4 +536,59 @@ for(const [limit,expected] of [[4,2],[6,3]] as const)test(`scoped repair can use
  tools:{async execute(){return {pages:[profile],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
  planner:{async decide(input){if(input.mode==='verify'){verifications++;return {supported:[],rejected:[{index:0,reason:'No support.'}]};}plans++;return {action:'finish',claims:[{sourceKey:'S1',quote:profile.text}]};}}});
  assert.equal(plans,expected);assert.equal(verifications,expected);assert.equal(store.research.checkpoint(run.id)!.steps,limit);assert.equal(result.state,'partial');db.close();
+});
+
+
+test('new attribution checks reject page biography, publication ownership and orphan article references despite model support',async()=>{
+ const {db,store,run}=setup();let round=0;
+ const quote='Ada Fixture is an AI researcher. Blog of Ada Fixture. Started March 2025.';
+ const original={...profile,text:quote,links:[]};
+ const proposed=[{sourceKey:'S1',quote,statement:'Ada自述自己是AI研究者。',kind:'attributed_statement',section:'background',facet:'background'},{sourceKey:'S1',quote,statement:'Ada本人开设博客。',kind:'page_statement',section:'work',facet:'work'},{sourceKey:'S1',quote,statement:'同文中介绍一个博客。',kind:'page_statement',section:'work'}];
+ const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(){return {pages:[original],requests:1,bytes:quote.length,estimatedUsd:0,credits:null,limitations:[]};}},planner:{async decide(input){if(input.mode==='verify'){assert.ok(input.claims!.every(c=>c.authorialBasis==='page_text'));return {supported:[0,1,2],rejected:[]};}round++;return {action:'finish',claims:proposed};}}});
+ assert.equal(round,3);assert.equal(result.observations.length,0);assert.equal(store.research.checkpoint(run.id)!.quoteAttributionPolicy,'quote_attribution/v1');assert.equal(store.research.checkpoint(run.id)!.pages[0]!.text,quote);assert.ok(result.limitations.some(n=>n.includes('第三人称')));assert.ok(result.limitations.some(n=>n.includes('代指')));db.close();
+});
+
+test('server authored-post binding cannot be supplied by model or inferred from a native profile ID',async()=>{
+ for(const nativePost of [false,true]){
+  const {db,store,run}=setup();let rounds=0;
+  const source={...profile,text:'The parser release is ready.',kind:nativePost?'work' as const:'profile' as const,author:'ada-fixture',links:[]};
+  const result=await runResearch({store,run,limits:unlimited,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+  tools:{async execute(){return {pages:[source],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
+  planner:{async decide(input){if(input.mode==='verify'){assert.equal(input.claims![0]!.authorialBasis,'page_text');return {supported:[0],rejected:[]};}rounds++;return {action:'finish',claims:[{sourceKey:'S1',quote:source.text,statement:source.text,kind:'attributed_statement',section:'work',authorialBasis:'native_authored_post'}]};}}});
+  // The profile read is retrieval=profile even if an adversarial provider says kind=work.
+  assert.equal(result.observations.length,0);assert.equal(rounds,3);db.close();
+ }
+});
+
+test('new attribution-marked canonical records cannot publish a supported-looking third-person self-description',()=>{
+ const {db,store,run}=setup();const quote='Ada Fixture is a researcher.',statement='Ada自述自己是研究者。';
+ store.addSource(run.id,{key:'S1',url:profile.url,title:'Synthetic',kind:'profile',publishedAt:null,excerpt:quote,excerptLocator:'Synthetic',identityLabel:'Synthetic',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);
+ store.addObservation(run.id,{statement,kind:'attributed_statement',sourceKeys:['S1'],limitations:[]},0);
+ const cp:ResearchCheckpoint={phase:'done',steps:2,startedAt:0,elapsedMs:0,anchorUrl:profile.url,identity:null,candidates:[],pages:[{...profile,sourceKey:'S1',text:quote,retrieval:'profile'}],claims:[{sourceKey:'S1',quote,statement,kind:'attributed_statement',section:'background',verified:true,authorialBasis:'page_text'}],unknowns:[],stopReason:'research_complete',quoteSupportPolicy:'exact_quote/v1',quoteAttributionPolicy:'quote_attribution/v1'};store.research.save(run.id,cp);
+ store.updateRun(run.id,{state:'completed',identity_json:JSON.stringify({displayName:'Ada Fixture',handle:'ada-fixture',profileUrl:profile.url,status:'resolved',note:'Synthetic',candidates:[]}),answer_json:JSON.stringify([{id:'background',heading:'Background',body:'',bullets:[{text:statement,sourceKeys:['S1'],kind:'attributed_statement'}]}])});
+ const view=store.buildCanonicalView(store.getRun(run.id)!);assert.equal(view.state,'partial');assert.equal(view.observations.length,0);assert.equal(view.answer.length,0);assert.equal(view.personObject!.claims.length,0);for(const rendered of [renderJson(view),renderMarkdown(view),renderReportHtml(view)])assert.equal(rendered.includes(statement),false);assert.equal(store.listObservations(run.id)[0]!.statement,statement);assert.equal(store.research.checkpoint(run.id)!.claims[0]!.statement,statement);db.close();
+});
+
+test('attribution and quantity guards preserve explicit page attribution, first-person quotations and historical records',async()=>{
+ const {claimAuthorialIssue,quoteHasFirstPerson}=await import('../shared/research-depth.js');
+ const quote='Ada Fixture is a researcher.';
+ assert.equal(claimAuthorialIssue({statement:'页面介绍Ada为研究者。',quote,kind:'page_statement',authorialBasis:'page_text'}),null);
+ assert.equal(claimAuthorialIssue({statement:'Ada自述是研究者。',quote,kind:'attributed_statement'}),null);
+ assert.ok(claimAuthorialIssue({statement:'此前约两年多。',quote:'The other ~2 years.',authorialBasis:'quote_first_person'}));
+ assert.equal(claimAuthorialIssue({statement:'此前约两年。',quote:'The other ~2 years.',authorialBasis:'quote_first_person'}),null);
+ assert.ok(claimAuthorialIssue({statement:'想成为某角色。',quote:'I wanted to be like a fictional character.',authorialBasis:'quote_first_person'}));
+ assert.equal(claimAuthorialIssue({statement:'想像某角色一样。',quote:'I wanted to be like a fictional character.',authorialBasis:'quote_first_person'}),null);
+ assert.ok(claimAuthorialIssue({statement:'喜欢训练网络。',quote:'I like to train networks.',facet:'background',authorialBasis:'quote_first_person'}));
+ assert.equal(quoteHasFirstPerson('<a href="https://fixture.test/i/">Ada is a researcher.</a>'),false);assert.equal(quoteHasFirstPerson('I wrote the parser.'),true);
+ assert.equal(quoteHasFirstPerson('我写了解析器。'),true);assert.equal(quoteHasFirstPerson('我想像某角色一样。'),true);assert.equal(quoteHasFirstPerson('他写了解析器，他想像某角色一样。'),false);assert.equal(quoteHasFirstPerson('<a href="https://fixture.test/我写">页面介绍Ada。</a>'),false);
+});
+
+test('original native authored posts support attribution without requiring first-person wording',async()=>{
+ const {db,store,run}=setup();let plans=0;const accountUrl='https://x.com/adafixture';
+ const post={...interview,url:accountUrl+'/status/123',text:'The parser release is ready.',kind:'work' as const,author:'adafixture',account:{platform:'x' as const,handle:'adafixture',id:'888',profileUrl:accountUrl},links:[]};
+ const result=await runResearch({store,run,limits:unlimited,socialAvailable:true,signal:new AbortController().signal,firstStepScope:{selectedAccountKeys:new Set(['selected']),independentAccountKeys:new Set(),accountKeyOf:()=> 'selected'},
+ tools:{async execute(action){return {pages:[action.type==='github_profile'?{...profile,links:[accountUrl]}:post],requests:1,bytes:40,estimatedUsd:0,credits:null,limitations:[]};}},
+ planner:{async decide(input){if(input.mode==='verify'){assert.equal(input.claims![0]!.authorialBasis,'native_authored_post');return {supported:[0],rejected:[]};}plans++;return plans===1?{action:'social_posts',url:accountUrl}:{action:'finish',claims:[{sourceKey:'S2',quote:post.text,statement:post.text,kind:'attributed_statement',section:'expression'}]};}}});
+ assert.equal(result.observations.length,1);assert.equal(store.research.checkpoint(run.id)!.claims[0]!.authorialBasis,'native_authored_post');db.close();
 });

@@ -1,4 +1,4 @@
-import { RESEARCH_FACETS, researchDepthCoverage, claimEvidenceIssue, type ResearchFacet } from '../../shared/research-depth.js';
+import { RESEARCH_FACETS, researchDepthCoverage, claimEvidenceIssue, quoteHasFirstPerson, type ResearchFacet } from '../../shared/research-depth.js';
 import { createHash } from 'node:crypto';
 import { NeedsInputError, type IdentityCandidate, type ProviderResult, type ResearchBudgetLimits, type SourceDraft } from '../../shared/types.js';
 import { extractGitHubHandle, normalizeResearchUrl, sanitizeText } from '../../shared/validation.js';
@@ -188,8 +188,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     active();if(activePages.some(p=>!store.isResearchSourceActive(run.id,p.sourceKey,run.ownerId)))throw new ResearchStop('source_revoked');if(!options.transport||!options.deepseekApiKey)throw new ProviderError('provider_unavailable','DeepSeek 未配置。');
     if(request.body.max_tokens!==2500)throw new ResearchStop('model_contract_violation');
     const verificationPolicy=mode==='verify'&&checkpoint.quoteSupportPolicy==='exact_quote/v1'?'exact_quote/v1':null;
-    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
-    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
+    const attributionPolicy=mode==='verify'?checkpoint.quoteAttributionPolicy:null;
+    const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
+    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
     if(old){if(old.state==='failed')throw new ProviderError('provider_bad_response','模型请求已有已结算失败回执，不自动重放。');return old.result as Awaited<ReturnType<typeof invokeDeepSeek>>;}
     try{const result=await invokeDeepSeek(options.transport,options.deepseekApiKey,request);
      const usage=parseMessagesUsage(result.body);
@@ -210,7 +211,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   return result;
  };
  const verify=async():Promise<ProviderResult|null>=>{
-  const claims=checkpoint.pendingClaims??[];
+  let claims=checkpoint.pendingClaims??[];
   const quoteFallback=(reason:'verification_budget'|'verification_unavailable'):ProviderResult=>{
    active();
    const pages=stillActivePages();
@@ -223,7 +224,14 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   if(limits.modelCalls>0&&(checkpoint.steps>=limits.modelCalls||store.research.budget(run.id,limits).modelCalls>=limits.modelCalls)){
    return quoteFallback('verification_budget');
   }
-  if(options.firstStepScope){checkpoint.quoteSupportPolicy='exact_quote/v1';save();}
+  if(options.firstStepScope){
+   claims=claims.map(c=>{
+    const page=stillActivePages().find(p=>p.sourceKey===c.sourceKey);
+    const nativeAuthor=page?.retrieval==='read'&&page.kind==='work'&&!!page.account?.id&&!!page.author&&page.author.toLowerCase()===page.account.handle.toLowerCase();
+    return {...c,authorialBasis:quoteHasFirstPerson(c.quote)?'quote_first_person' as const:nativeAuthor?'native_authored_post' as const:'page_text' as const};
+   });
+   checkpoint.pendingClaims=claims;checkpoint.quoteSupportPolicy='exact_quote/v1';checkpoint.quoteAttributionPolicy='quote_attribution/v1';save();
+  }
   progress('verifying');
   let checked:unknown;
   try{checked=await ask('verify',claims);}catch(error){

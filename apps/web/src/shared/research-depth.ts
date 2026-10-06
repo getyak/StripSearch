@@ -6,6 +6,7 @@ export const RESEARCH_FACETS = [
   { id: 'counterevidence', label: '反证、修正与限制' }
 ] as const;
 export type ResearchFacet = typeof RESEARCH_FACETS[number]['id'];
+export type ClaimAuthorialBasis = 'quote_first_person' | 'native_authored_post' | 'page_text';
 export interface ResearchFacetCoverage {
   id: ResearchFacet;
   label: string;
@@ -43,8 +44,33 @@ export function claimQuotedYearIssue(claim: { statement: string; quote: string }
 }
 
 /** Same policy gate for verification, stored canonical projection and exports. */
-export function claimEvidenceIssue(claim: { statement: string; quote: string }, policy?: 'exact_quote/v1'): string | null {
-  return claimScopeIssue(claim) ?? (policy === 'exact_quote/v1' ? claimQuotedYearIssue(claim) : null);
+export function quoteHasFirstPerson(quote:string):boolean {
+  const readable=quote.replace(/<[^>]*>/g,' ');
+  return /\b(?:I|me|my|mine|we|our|ours)\b|(?:我|本人)(?:的|们|曾|在|是|有|做|写|想|希望|觉得|说|讲述|学习|研究|参与|负责|建立|发布|训练|工作|设计|创建|认为|喜欢)/iu.test(readable);
+}
+
+/** New server-bound attribution gate; unmarked history is not relabeled. */
+export function claimAuthorialIssue(claim:{statement:string;quote:string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis}):string|null {
+  if(!claim.authorialBasis)return null;
+  if(claim.authorialBasis==='page_text'&&(claim.kind==='attributed_statement'||/自述|自我介绍|自称|他称|她称|本人(?:开设|创办|创建)|\b(?:he|she)\s+(?:says|said|states|claims)|self-description/iu.test(claim.statement)))
+    return '第三人称页面简介或一般页面文字不能改成本人自述；请使用页面陈述并保留来源归因，不增加创办或个人行动。';
+  if(/^(?:同文|同一(?:篇|文章|论文)|上文|[Ii]n\s+the\s+same\s+(?:article|paper))/u.test(claim.statement.trim()))
+    return '每条陈述必须独立指明来源与范围；不能用同文或上文跨条目代指，分组与导出不会维持该代指。';
+  if(claim.facet==='background'&&/\bI\s+(?:like|love|enjoy)\b|我喜欢|本人喜欢/iu.test(claim.quote)&&!/(?:\b(?:since|when|started|began|years?|months?)\b|(?:19|20)\d{2}|年|月)/iu.test(claim.quote))
+    return '账号简介中的偏好不是带时间的经历变化，不能填充经历维度；请寻找真正经历原文或保留缺口。';
+  if(claim.facet==='work'&&/\b(?:blog|channel|repository|website)\s+of\b/iu.test(claim.quote)&&!(/\b(?:wrote|built|created|founded|designed|developed|led|instructed)\b|编写|开发|设计|创办/u.test(claim.quote)))
+    return '博客或账号归属简介不能证明本人创办或具体贡献，不能填充个人作品行动维度。';
+  const digits:Record<string,string>={'1':'[1一]','2':'[2二两]','3':'[3三]','4':'[4四]','5':'[5五]','6':'[6六]','7':'[7七]','8':'[8八]','9':'[9九]','10':'(?:10|十)'};
+  for(const match of claim.quote.matchAll(/(?:~\s*|\b(?:about|approximately)\s+)(\d+)\s*(?:years?|年)/giu)){
+    const number=digits[match[1]!]??match[1]!;
+    if(new RegExp(`(?:${number}年(?:多|以上)|(?:超过|至少)${number}年)`,'u').test(claim.statement))return '原文约数不能扩写成超过、至少或多年限定；请保留约数的范围。';
+  }
+  if(/\bbe\s+like\b/iu.test(claim.quote)&&/成为/.test(claim.statement))return '原文的像某人一样不能扩写为成为该人；请保留比较与愿望的限定。';
+  return null;
+}
+
+export function claimEvidenceIssue(claim: { statement: string; quote: string;kind?:string;facet?:ResearchFacet;authorialBasis?:ClaimAuthorialBasis }, policy?: 'exact_quote/v1'): string | null {
+  return claimScopeIssue(claim) ?? (policy === 'exact_quote/v1' ? claimQuotedYearIssue(claim) ?? claimAuthorialIssue(claim) : null);
 }
 
 /** Evidence availability, never a percentage or a claim of complete history. */
