@@ -1,6 +1,9 @@
 import test from 'node:test';
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {seedFirstStep} from './first-step-fixtures.js';
+import {nativeUsernameLinkContext} from '../server/research/link-context.js';
+import type {ResearchPage} from '../server/research/tool-contracts.js';
 import type {FirstStepBinding} from '../server/research/research-store.js';
 
 const home='https://mira-semantic-fixture.dev/',book='https://github.com/book-publisher';
@@ -34,5 +37,38 @@ test('current semantic recheck preserves a legitimate encoded self-link and conf
   const view=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(view.mode!=='first_step')throw Error('mode');const account=view.view.accounts.find(a=>a.profileUrl===book)!;assert.equal(account.identity.validity,'valid');
   f.republish(v=>({...v,accounts:v.accounts.map(a=>a.accountId===account.accountId?{...a,identity:{...a.identity,conflicts:['Two disconnected person clusters link here.']}}:a)}));
   const conflicted=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(conflicted.mode!=='first_step')throw Error('mode');const current=conflicted.view.accounts.find(a=>a.profileUrl===book)!;assert.equal(current.defaultSuggestion.suggested,false);assert.equal(current.requiresIndependentScope,true);assert.equal(current.identity.conflicts.length,1);
+  const base={expectedRunRevision:f.store.getRun(f.run.id)!.revision,expectedScopeVersion:conflicted.view.selection.scopeVersion,discoveryRevision:conflicted.view.discoveryRevision,clusterId:'cluster-1',accounts:conflicted.view.accounts.map(a=>({accountId:a.accountId,selection:'selected' as const,excluded:false}))};
+  assert.throws(()=>f.firstStep.applyFirstStepSelection(f.run.ownerId,f.run.id,base,'conflict-person'),/冲突/);
+  const binding:FirstStepBinding={caseId:f.caseId,discoveryRevision:conflicted.view.discoveryRevision,scopeVersion:conflicted.view.selection.scopeVersion,clusterId:'cluster-1',displayName:'Mira',anchorUrl:home,selectedAccountIds:[current.accountId],independentAccountIds:[],identityDependencyAccountIds:[current.accountId],accountKeys:{[current.accountKey]:current.accountId},accounts:[{accountId:current.accountId,accountKey:current.accountKey,profileUrl:book,allowedScope:'public_history',independent:false,accessCoverage:'unassessed'}]};
+  assert.equal(f.store.isFirstStepIdentityActive(f.run.ownerId,binding),false);
+  assert.equal(f.store.isFirstStepIdentityActive(f.run.ownerId,{...binding,independentAccountIds:[current.accountId]}),true);
+ }finally{f.close();}
+});
+
+for(const heading of ['My colleague','Not my account; impersonator'])test(`cached narrow paragraph cannot override actual ancestor ${heading}`,()=>{
+ const quote=`<p>My GitHub: <a href="${book}">GitHub</a></p>`,text=`<section><h2>${heading}</h2>${quote}</section>`;
+ const f=seedFirstStep({accounts:[{url:home},{url:book,supportedBy:{sourceUrl:home,quote}}]});
+ try{
+  f.db.prepare('UPDATE research_case_source_revisions SET content_hash=? WHERE original_url=?').run(createHash('sha256').update(text).digest('hex'),home);
+  f.store.research.reserve(f.run.id,'original','tool',{type:'read',url:home},{inputTokens:0,outputTokens:0});
+  f.store.research.settle(f.run.id,'original',{pages:[null,{url:home,text,links:[book],kind:'profile',retrieval:'read'}]},{inputTokens:0,outputTokens:0});
+  const before=JSON.stringify(f.firstStep.currentDiscovery(f.run.id));
+  const view=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(view.mode!=='first_step')throw Error('mode');
+  assert.equal(view.view.accounts.find(a=>a.profileUrl===book)!.identity.validity,'review');
+  assert.equal(JSON.stringify(f.firstStep.currentDiscovery(f.run.id)),before);
+ }finally{f.close();}
+});
+
+for(const variant of ['valid','wrong-request','wrong-returned-account','wrong-id','wrong-offset'])test(`cached native username field requires actual profile request and field: ${variant}`,()=>{
+ const gh='https://github.com/mira-native-fixture',x='https://x.com/mira_social',quote='twitter_username: mira_social',text='Mira\n'+quote;
+ const f=seedFirstStep({accounts:[{url:gh},{url:x,supportedBy:{sourceUrl:gh,quote}}]});
+ try{
+  const context={...nativeUsernameLinkContext(text,'mira_social',x,5)!,nativeField:{name:'twitter_username' as const,offset:variant==='wrong-offset'?0:5,nativeId:variant==='wrong-id'?'456':'123'}};
+  const page:ResearchPage={url:gh,title:'Synthetic profile',text,kind:'profile',retrieval:'profile',publishedAt:null,links:[x],limitations:[],linkContexts:[context],account:{platform:'github',id:'123',handle:variant==='wrong-returned-account'?'other-person':'mira-native-fixture',profileUrl:variant==='wrong-returned-account'?'https://github.com/other-person':gh}};
+  f.db.prepare('UPDATE research_case_source_revisions SET content_hash=? WHERE original_url=?').run(createHash('sha256').update(text).digest('hex'),gh);
+  f.store.research.reserve(f.run.id,'native','tool',{type:'github_profile',url:variant==='wrong-request'?'https://github.com/other-person':gh},{inputTokens:0,outputTokens:0});
+  f.store.research.settle(f.run.id,'native',{pages:[page]},{inputTokens:0,outputTokens:0});
+  const view=f.firstStep.getFirstStepView(f.run.ownerId,f.run.id)!;if(view.mode!=='first_step')throw Error('mode');
+  assert.equal(view.view.accounts.find(a=>a.profileUrl===x)!.identity.validity,variant==='valid'?'valid':'review');
  }finally{f.close();}
 });

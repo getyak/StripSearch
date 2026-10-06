@@ -1,5 +1,5 @@
 import { researchDepthCoverage, claimEvidenceIssue, presentedResearchUnknowns } from '../shared/research-depth.js';
-import { classifyFirstStepUrl } from '../shared/first-step-discovery.js';
+import { classifyFirstStepUrl, type FirstStepDiscoveryView } from '../shared/first-step-discovery.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
@@ -620,10 +620,15 @@ export class Store {
     if (!this.cases.getCase(ownerId, binding.caseId)) return false;
     const report=this.cases.reportView(ownerId,binding.caseId);
     const semanticReview=identitySemanticReviewAccounts(this.db,report);
+    const conflicted=new Set<string>();
+    const rows=this.db.prepare(`SELECT d.view_json FROM first_step_discoveries d JOIN first_step_links l ON l.run_id=d.run_id WHERE l.case_id=? AND d.discovery_revision=(SELECT MAX(latest.discovery_revision) FROM first_step_discoveries latest WHERE latest.run_id=d.run_id)`).all(binding.caseId) as Array<{view_json:string}>;
+    for(const row of rows){
+      try{const view=JSON.parse(row.view_json) as FirstStepDiscoveryView;for(const account of view.accounts??[]){if(account.identity.conflicts.length||account.identity.nativeIdConflict)conflicted.add(account.accountId);}}catch{return false;}
+    }
     const current = new Map(report.accounts.map(account => [account.accountId, account]));
     return [...new Set(binding.identityDependencyAccountIds ?? merged)].every(id => {
       const account = current.get(id);
-      return account && !semanticReview.has(id) && account.identityValidity === 'valid' && !['disputed', 'rejected', 'revoked'].includes(account.identitySupport.state);
+      return account && !semanticReview.has(id) && !conflicted.has(id) && account.identitySupport.counterevidenceIds.length===0 && account.identityValidity === 'valid' && !['disputed', 'rejected', 'revoked'].includes(account.identitySupport.state);
     });
   }
 

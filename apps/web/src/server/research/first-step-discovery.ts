@@ -29,7 +29,7 @@ import { ProviderError } from '../adapters/types.js';
 import { invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { runDshDecision } from './dsh-decision.js';
 import { extractOriginalLinkContexts } from './link-context.js';
-import { verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext } from './toolkit.js';
+import { verifiedNativeAccountRequest, verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext } from './toolkit.js';
 import type { NativeWebsiteDeclaration } from '../../shared/native-website.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchPage, ResearchAliasProof } from './tool-contracts.js';
 import type { ResearchBudgetLimits } from '../../shared/types.js';
@@ -1073,7 +1073,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         // always retained); it gets no read permission by itself.
         register(page.url);
         const declaration=receipt?verifiedNativeWebsiteDeclaration(page,receipt.request as ResearchToolAction):null;
-        const validatedContexts=(page.linkContexts??[]).filter(context=>verifiedNativeFieldContext(page,context,declaration));
+        const nativeBound=Boolean(receipt&&verifiedNativeAccountRequest(page,receipt.request as ResearchToolAction));
+        const validatedContexts=(page.linkContexts??[]).filter(context=>(context.binding!=='native_profile_field'||nativeBound)&&verifiedNativeFieldContext(page,context,declaration));
         observed.push({ page:{...page,linkContexts:validatedContexts}, ref: source, retrieval: 'read', ...(receipt ? {receiptKey:receipt.key} : {}), ...(declaration?{nativeWebsiteDeclaration:declaration}:{}) });
         // Adapter-attested alias proofs may project duplicate candidates onto
         // the observed canonical returned ref (server re-verified below).
@@ -1094,7 +1095,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         const contexts = page.linkContexts ?? [];
         const byTarget = new Map<string, (typeof contexts)[number]>();
         for (const context of contexts) {
-          if (!verifiedNativeFieldContext(page,context,declaration)) {
+          if (context.binding==='native_profile_field'&&!nativeBound || !verifiedNativeFieldContext(page,context,declaration)) {
             gaps.push(`原生网站链接上下文未通过字段协议或偏移核验：${page.url}；不采用为身份依据。`);
             continue;
           }

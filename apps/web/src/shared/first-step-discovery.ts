@@ -1993,6 +1993,9 @@ export function validateSelectionDecision(
   if (account.identity.validity === 'review') {
     return { ok: false, error: '该账号的归属依据已失效，只能作为独立账号研究，不能并入人物结论。' };
   }
+  if (account.identity.conflicts.length > 0 || account.identity.counterevidence.length > 0) {
+    return {ok:false,error:'归属存在冲突，只能作为独立账号研究，不能并入人物结论。'};
+  }
   if (state === 'supported' || state === 'proposed' && options?.anchorAccountIds?.has(account.accountId) === true) {
     return { ok: true, allowedScope: 'public_history' };
   }

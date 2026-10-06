@@ -52,9 +52,21 @@ function nativeWebsiteDeclaration(account: ResearchAccount, requestedUrl: string
 }
 
 /** Re-check adapter metadata against the actual request and original field; no new IO. */
+export function verifiedNativeAccountRequest(page:ResearchPage,action:ResearchToolAction):boolean {
+  const account=page.account;
+  if(!account||page.retrieval!=='profile'||page.kind!=='profile'||account.profileUrl!==page.url||
+    typeof account.id!=='string'||!/^\d+$/.test(account.id)||typeof account.handle!=='string'||
+    !['github','x'].includes(account.platform)||action.type!==(account.platform==='github'?'github_profile':'social_profile'))return false;
+  try{
+    const requested=account.platform==='github'?extractGitHubHandle(publicUrl(action.url)):xHandle(action.url);
+    const returned=account.platform==='github'?extractGitHubHandle(publicUrl(page.url)):xHandle(page.url);
+    return Boolean(requested&&returned&&requested.toLowerCase()===account.handle.toLowerCase()&&returned===account.handle);
+  }catch{return false;}
+}
+
 export function verifiedNativeWebsiteDeclaration(page:ResearchPage,action:ResearchToolAction):NativeWebsiteDeclaration|null {
   const declaration=page.nativeWebsiteDeclaration,account=page.account;
-  if(!declaration||!account||action.type==='search'||page.retrieval!=='profile'||page.kind!=='profile'||account.profileUrl!==page.url||
+  if(!declaration||!account||!verifiedNativeAccountRequest(page,action)||action.type==='search'||page.retrieval!=='profile'||page.kind!=='profile'||account.profileUrl!==page.url||
     typeof account.id!=='string'||!/^\d+$/.test(account.id)||declaration.platform!==account.platform||declaration.nativeId!==account.id||
     declaration.requestedUrl!==action.url||declaration.returnedProfileUrl!==page.url||
     declaration.payloadField!==(account.platform==='github'?'blog':'website')||action.type!==(account.platform==='github'?'github_profile':'social_profile')||
