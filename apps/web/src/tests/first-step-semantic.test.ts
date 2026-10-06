@@ -1005,3 +1005,58 @@ for(const change of ['cancel','person_revision','input_revision'] as const) test
     assert.equal(h.store.cases.listAccounts(h.ownerId,h.firstStep.link(h.runId)!.caseId).length,0);
   }finally{h.db.close();}
 });
+
+
+for(const heading of ['This is not my About page','My colleague’s personal pages']) test(`identity navigation refuses an enclosing ownership veto: ${heading}`, async()=>{
+  const about=home+'about/me';
+  const text=`<section><h2>${heading}</h2><nav><a href="about/me">About</a></nav></section>`;
+  const h=harness({kind:'homepage_url',value:home},{read:url=>[originalPage(url,url===home?text:`<p>My GitHub: <a href="${github}">GitHub</a></p>`)]});
+  try{
+    const view=await discoverFirstStep(h.ctx);
+    assert.deepEqual(h.reads,[home]);
+    assert.equal(view.accounts.some(account=>account.profileUrl===github&&account.identity.state==='supported'),false);
+  }finally{h.db.close();}
+});
+
+test('a different article on the home page cannot veto the original identity navigation branch',async()=>{
+  const about=home+'about/me';
+  const text='<main><article><h2>This is not my About page</h2><p>I am quoting a colleague.</p></article><nav><a href="about/me">About</a></nav></main>';
+  const h=harness({kind:'homepage_url',value:home},{read:url=>[originalPage(url,url===home?text:'<p>I build compilers.</p>')]});
+  try{await discoverFirstStep(h.ctx);assert.deepEqual(h.reads,[home,about]);}finally{h.db.close();}
+});
+
+
+for(const violation of ['foreign_author','wrong_request_binding','wrong_return_binding'] as const) test(`checked intent rejects an unbound source document: ${violation}`,async()=>{
+  const requested='https://people-synthetic.edu/~mira/';
+  const source=violation==='foreign_author'?'https://people-synthetic.edu/~other/':requested;
+  const target=source+'about/me',text='<nav><a href="about/me">About</a></nav>';
+  const original=originalPage(source,text);
+  original.documentBinding={requestedUrl:violation==='wrong_request_binding'?source+'wrong':requested,returnedUrl:violation==='wrong_return_binding'?source+'wrong':source};
+  const h=harness({kind:'homepage_url',value:requested},{read:()=>[original]});
+  try{
+    const key='firststep:boundary:v10:profile:source';
+    await h.ctx.search.readIdentity(key,{type:'firecrawl',url:requested},h.ctx.signal);
+    const context=extractOriginalLinkContexts(text,source)[0]!;
+    const intent={...firstStepIdentityNavigation(source,target)!,sourceUrl:source,sourceContentHash:createHash('sha256').update(text).digest('hex'),sourceReceiptKey:key,quote:context.quote,locator:context.locator};
+    await assert.rejects(()=>h.ctx.search.readIdentity('firststep:boundary:v10:profile:about',{type:'firecrawl',url:target},h.ctx.signal,intent),/invalid_decision/);
+    assert.deepEqual(h.reads,[requested]);
+    assert.equal(h.store.research.receipts(h.runId).length,1);
+  }finally{h.db.close();}
+});
+
+test('legacy namespaced About input still replays its old canonical-root receipt and self-links',async()=>{
+  const root='https://people-synthetic.edu/~mira/',about=root+'About';
+  const input={kind:'homepage_url' as const,value:about};
+  const text=`<p>My GitHub: <a href="${github}">GitHub</a></p><nav><a href="About">About</a></nav>`;
+  const h=harness(input,{read:url=>[originalPage(url,url===root?text:'<p>Public profile.</p>')]});
+  try{
+    const hash=createHash('sha256').update(JSON.stringify({input,hint:null})).digest('hex').slice(0,24);
+    await h.ctx.search.readIdentity(`firststep:1-${hash}:profile:1`,{type:'read',url:root},h.ctx.signal);
+    const view=await discoverFirstStep(h.ctx);
+    assert.equal(view.policyVersion,'first-step/v9');
+    assert.equal(h.reads.filter(url=>url===root).length,1,'the canonical-root receipt is replayed without new IO');
+    assert.equal(h.reads.includes(about),false);
+    assert.equal(view.accounts.find(account=>account.profileUrl===github)!.identity.state,'supported');
+    assert.equal(view.gaps.some(gap=>gap.includes('invalid_decision')&&gap.includes(about)),false);
+  }finally{h.db.close();}
+});

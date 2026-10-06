@@ -79,8 +79,9 @@ test('Markdown quote and recommendation context remains distinct from own links'
 
 test('native website context is the actual verified account field, never synthesized prose', () => {
   const source = 'Fixture Author\nOriginal bio\nhttps://fixture-author.dev/';
-  assert.deepEqual(nativeProfileLinkContext(source, 'https://absent-author.dev/'), null);
-  const link = nativeProfileLinkContext(source, 'https://fixture-author.dev/')!;
+  const offset=source.lastIndexOf('https://fixture-author.dev/');
+  assert.deepEqual(nativeProfileLinkContext(source, 'https://absent-author.dev/',offset), null);
+  const link = nativeProfileLinkContext(source, 'https://fixture-author.dev/',offset)!;
   assert.equal(link.surface, 'profile_field');
   assert.equal(link.quote, 'https://fixture-author.dev/');
   assert.ok(source.includes(link.quote));

@@ -29,6 +29,7 @@ import type {
   AccessCoverage
 } from './research-case.js';
 import { ACCOUNT_KEY_PREFIX, canonicalJson } from './discovery-plan.js';
+import type { NativeWebsiteDeclaration } from './native-website.js';
 import type { DiscoveredAccountIdentity } from './discovery-plan.js';
 
 export const FIRST_STEP_SCHEMA_VERSION = 'stripsearch/first-step-discovery/v1';
@@ -1417,6 +1418,8 @@ export interface FirstStepAccountView {
   requiresIndependentScope: boolean;
   /** Actually read profile-to-profile links; discovery provenance, never ownership. */
   profileLinkSources?: Array<{ accountId: string; sourceUrl: string; targetUrl: string }>;
+  /** Self-supplied native website fields, distinct from transport and supported identity links. */
+  nativeWebsiteDeclarations?: NativeWebsiteDeclaration[];
 }
 
 export interface FirstStepPersonAtomView {

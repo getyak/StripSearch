@@ -1,4 +1,5 @@
 import type { HttpTransport } from '../adapters/types.js';
+import type { NativeWebsiteDeclaration } from '../../shared/native-website.js';
 export type ResearchToolAction =
  | { type: 'search'; query: string; numResults?: number; provider?: 'bluesky'; includeDomains?: readonly string[] }
  | { type: 'read' | 'firecrawl' | 'social_profile' | 'social_posts' | 'github_profile'; url: string };
@@ -45,6 +46,8 @@ export interface ResearchPage {
   aliasProof?: ResearchAliasProof;
  /** Adapter-observed document binding; requested URL is never a substitute for returned URL. */
  documentBinding?: { requestedUrl: string; returnedUrl: string };
+ /** Original native declaration; neither a verified website nor transport permission. */
+ nativeWebsiteDeclaration?: NativeWebsiteDeclaration;
 }
 export interface ResearchToolResult {
  pages: ResearchPage[]; requests: number; bytes: number;

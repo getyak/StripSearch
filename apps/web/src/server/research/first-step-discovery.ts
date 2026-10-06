@@ -213,16 +213,26 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
         const navigation = firstStepIdentityNavigation(intent.sourceUrl, action.url);
         const receipt = options.store.research.receipt(options.runId, intent.sourceReceiptKey);
         const prefix = namespace(requestKey);
-        const request = receipt?.request as {type?:unknown} | undefined;
+        const request = receipt?.request as {type?:unknown;url?:unknown} | undefined;
         const pages = (receipt?.result as ResearchToolResult | undefined)?.pages;
         const source = Array.isArray(pages) ? pages.find(page => page.url === intent.sourceUrl &&
           createHash('sha256').update(page.text).digest('hex') === intent.sourceContentHash) : undefined;
         const realContext = source && extractOriginalLinkContexts(source.text, source.url).find(context => context.url === action.url &&
           context.quote === intent.quote && context.locator === intent.locator && context.surface === 'authorial' &&
           !isExplicitDenialQuote(context.quote) && !isUntrustedInstructionText(context.quote) && classifyLinkContext(context.quote) !== 'third_party');
+        const sourceRequest = typeof request?.url === 'string' ? classifyFirstStepUrl(request.url) : null;
+        const sourceReturned = source ? classifyFirstStepUrl(source.url) : null;
+        let literalRequest: string | null = null;
+        try { if (typeof request?.url === 'string') {const parsed=new URL(request.url);parsed.hash='';literalRequest=parsed.href;} } catch { /* invalid request cannot bind original */ }
+        const sourceAlias = source?.aliasProof;
+        const provedAlias = sourceAlias?.kind==='same_document_redirect' && sourceAlias.requestedUrl===literalRequest && sourceAlias.returnedUrl===source?.url && verifyAliasProjection(sourceAlias).ok;
+        const sameAuthor = sourceRequest?.ok && sourceReturned?.ok && (sourceRequest.ref.accountKey===sourceReturned.ref.accountKey || provedAlias);
+        const boundDocument = source && (source.documentBinding
+          ? source.documentBinding.requestedUrl===literalRequest && source.documentBinding.returnedUrl===source.url
+          : source.url===literalRequest);
         if (!navigation || navigation.accountKey !== intent.accountKey || navigation.purpose !== intent.purpose || intent.url !== action.url ||
           !prefix || !intent.sourceReceiptKey.startsWith(prefix) || receipt?.kind !== 'tool' || receipt.state !== 'completed' ||
-          !['read', 'firecrawl'].includes(String(request?.type)) || !realContext || !['read', 'firecrawl'].includes(action.type)) throw new ResearchStop('invalid_decision');
+          !['read', 'firecrawl'].includes(String(request?.type)) || !sameAuthor || !boundDocument || !realContext || !['read', 'firecrawl'].includes(action.type)) throw new ResearchStop('invalid_decision');
       } else if (target.ref.entry !== 'profile') throw new ResearchStop('invalid_decision');
       if (action.type === 'firecrawl' && !['personal_site', 'linktree'].includes(target.ref.platform)) throw new ResearchStop('invalid_decision');
       return run(requestKey, 'profile_read', action.url, 'read', action, signal);
@@ -1059,6 +1069,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           else aliasNotes.add(`重复候选的别名证明未通过服务端核验（与实际请求或原生返回账号不绑定）：${proof.requestedUrl}；保持分离。`);
         }
         const flags = sourceFlags(page.url);
+        const declaration=page.nativeWebsiteDeclaration;
+        if (declaration && declaration.nativeId===page.account?.id && declaration.returnedProfileUrl===page.url &&
+          declaration.sourceContentHash===createHash('sha256').update(page.text).digest('hex') &&
+          declaration.protocol!=='https') gaps.push(`原生账号的网站声明尚未核对 HTTPS 入口：${declaration.rawLiteral}；保留原始声明，不推定协议对应关系或身份支持。`);
         // Consume the ACTUAL extractor-record link contexts: exact spans of
         // the retained original with their href binding and surface. Quotes
         // are never synthesized and the href never has to be visible in the
@@ -1175,8 +1189,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   if (explicitAnchor && explicitAnchor.ok) {
     register(ctx.input.value, { explicit: true });
     readKeys.add(resolveKey(explicitAnchor.ref.accountKey));
-    readUrls.add(ctx.input.value);
-    if (await readOnce(explicitAnchor.ref, ctx.input.value) === 'ok') anchorsRead.push(candidateRefs.get(resolveKey(explicitAnchor.ref.accountKey)) ?? explicitAnchor.ref);
+    const explicitUrl = legacyAttempt ? explicitAnchor.ref.profileUrl : ctx.input.value;
+    readUrls.add(explicitUrl);
+    if (await readOnce(explicitAnchor.ref, explicitUrl) === 'ok') anchorsRead.push(candidateRefs.get(resolveKey(explicitAnchor.ref.accountKey)) ?? explicitAnchor.ref);
   }
 
   // 2. Wide recall: deliberate family coverage; every query runs before reads
@@ -1521,6 +1536,14 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       accessLabel: accessReadable ? '原文可读' : '仅索引可见',
       defaultSuggestion: suggestion,
       requiresIndependentScope: Boolean(conflict)||identityState !== 'supported',
+      nativeWebsiteDeclarations: observed.filter(entry=>entry.retrieval==='read'&&resolveKey(entry.ref.accountKey)===resolveKey(ref.accountKey))
+        .flatMap(entry=>{
+          const declaration=entry.page.nativeWebsiteDeclaration;
+          return declaration && declaration.platform===entry.page.account?.platform && declaration.nativeId===entry.page.account.id &&
+            declaration.returnedProfileUrl===entry.page.url && declaration.sourceContentHash===createHash('sha256').update(entry.page.text).digest('hex') &&
+            Number.isInteger(declaration.fieldOffset) && declaration.fieldOffset>=0 &&
+            entry.page.text.slice(declaration.fieldOffset,declaration.fieldOffset+declaration.rawLiteral.length)===declaration.rawLiteral ? [declaration] : [];
+        }),
       profileLinkSources: applicable.filter(observation => {
         if (observation.retrieval === 'indexed' || observation.linkRole === 'explicit_denial' || observation.fromAccountKey === null) return false;
         const target = classifyFirstStepUrl(observation.targetUrl);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { createResearchTools } from '../server/research/toolkit.js';
 import type { ResearchToolAction, ResearchToolsOptions } from '../server/research/tool-contracts.js';
 import type { HttpRequestInit } from '../server/adapters/types.js';
@@ -300,4 +301,49 @@ test('Firecrawl binds relative hrefs and document kind to the actual same-host r
   assert.equal(r.pages[0]!.linkContexts![0]!.url,returned+'Contact');
   assert.ok(r.pages[0]!.links.includes(returned+'Contact'));
   assert.equal(r.pages[0]!.links.includes('https://synthetic-author.dev/about/Contact'),false);
+});
+
+
+for(const platform of ['github','x'] as const) test(`${platform} preserves raw website protocols and the assembled actual field offset without transport upgrades`, async()=>{
+  const cases=[['https://synthetic-author.dev/','https'],['http://synthetic-author.dev/path','http'],['synthetic-author.dev/path','protocol_less'],['//synthetic-author.dev/path','protocol_less'],['https://127.0.0.1/','invalid'],['http://private.local/','invalid'],['synthetic-author.dev:8443/','invalid'],['https://user:pass@synthetic-author.dev/','invalid'],['javascript:alert(1)','invalid']] as const;
+  for(const [value,protocol] of cases){
+    const raw=` ${value} `;
+    const action=platform==='github'?{type:'github_profile' as const,url:'https://github.com/fixtureauthor'}:profileAction;
+    const bio=`I once mentioned ${value} in my biography.`;
+    const body=platform==='github'?{login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',name:'Synthetic Author',bio,blog:raw}:{code:200,data:{...profile,desc:bio,website:raw}};
+    const h=harness(body);
+    const result=await h.execute(action),page=result.pages[0]!,declaration=page.nativeWebsiteDeclaration!;
+    assert.equal(declaration.rawLiteral,raw,'raw provider bytes are retained rather than trimmed into a new declaration');
+    assert.equal(declaration.protocol,protocol,value);
+    assert.equal(declaration.payloadField,platform==='github'?'blog':'website');
+    assert.equal(declaration.nativeId,page.account!.id);
+    assert.equal(declaration.requestedUrl,action.url);
+    assert.equal(declaration.returnedProfileUrl,page.url);
+    assert.equal(declaration.sourceContentHash,createHash('sha256').update(page.text).digest('hex'));
+    assert.equal(page.text.slice(declaration.fieldOffset,declaration.fieldOffset+raw.length),raw);
+    assert.ok(declaration.fieldOffset>page.text.indexOf(value),'a repeated biography URL is not the website field');
+    const native=page.linkContexts!.filter(context=>context.binding==='native_profile_field');
+    if(protocol==='https'){
+      assert.equal(declaration.publicHttpsUrl,value);
+      assert.equal(native.length,1);
+      assert.equal(native[0]!.quote,raw);
+      assert.match(native[0]!.locator,new RegExp(`第 ${declaration.fieldOffset+1}–`));
+    }else{
+      assert.equal(declaration.publicHttpsUrl,null);
+      assert.equal(native.length,0,'HTTP/protocol-less/invalid raw fields never become HTTPS original self-links');
+      if(protocol==='http'||protocol==='protocol_less')assert.equal(page.links.includes('https://synthetic-author.dev/path'),false);
+    }
+    assert.equal(h.calls.length,1,'reading the profile never follows or upgrades its raw website declaration');
+  }
+});
+
+test('GitHub twitter_username locator binds the appended actual field, not a matching biography substring', async()=>{
+  const field='twitter_username: DifferentHandle';
+  const h=harness({login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',bio:`Quoted metadata ${field}.`,twitter_username:'DifferentHandle'});
+  const r=await h.execute({type:'github_profile',url:'https://github.com/fixtureauthor'});
+  const page=r.pages[0]!,context=page.linkContexts![0]!;
+  assert.equal(context.quote,field);
+  const offset=page.text.lastIndexOf(field);
+  assert.ok(offset>page.text.indexOf(field));
+  assert.match(context.locator,new RegExp(`第 ${offset+1}–`));
 });

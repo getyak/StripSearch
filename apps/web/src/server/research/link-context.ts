@@ -26,6 +26,9 @@ function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment, branch: Tr
     if(sibling.nodeName==='#comment'||sibling.nodeName==='#text'&&'value' in sibling&&!sibling.value.trim())continue;
     if('tagName' in sibling&&!/^(?:h[1-6]|p)$/.test(sibling.tagName))break;
     if(!('tagName' in sibling)&&sibling.nodeName!=='#text')break;
+    const pending:Tree.Node[]=[sibling];let independentLink=false;
+    while(pending.length){const node=pending.pop()!;if('tagName' in node&&node.tagName==='a'){independentLink=true;break;}if('childNodes' in node)pending.push(...node.childNodes);}
+    if(independentLink)break;
     if(!sibling.sourceCodeLocation)break;
     if(direction<0)start=sibling.sourceCodeLocation.startOffset;else end=sibling.sourceCodeLocation.endOffset;
    }
@@ -63,7 +66,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
       // A nested paragraph cannot erase the heading or description of an
       // enclosing semantic container. Inspect actual ancestor text for a
       // conservative veto; retain its exact span rather than invent context.
-      if (relMe && semanticVeto === null && ancestor.sourceCodeLocation) {
+      if (semanticVeto === null && ancestor.sourceCodeLocation) {
         const relevant=PAGE_ROOTS.has(ancestor.tagName)?adjacentRootSpan(ancestor,branch):ancestor.sourceCodeLocation;
         const span=relevant?original.slice(relevant.startOffset,relevant.endOffset):'';
         if (relevant&&(isExplicitDenialQuote(span)||classifyLinkContext(span)==='third_party')) semanticVeto=relevant;
@@ -73,7 +76,7 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
     }
     // parseFragment removes body/html wrappers; their direct descriptions
     // remain siblings in the document fragment and must still constrain nav.
-    if(relMe&&semanticVeto===null&&ancestor===root){
+    if(semanticVeto===null&&ancestor===root){
       const relevant=adjacentRootSpan(root,branch);
       const span=relevant?original.slice(relevant.startOffset,relevant.endOffset):'';
       if(relevant&&(isExplicitDenialQuote(span)||classifyLinkContext(span)==='third_party'))semanticVeto=relevant;
@@ -107,15 +110,15 @@ export function extractOriginalLinkContexts(original: string, base: string): Res
 }
 
 /** The native adapter has verified the account; its website field is self-supplied. */
-export function nativeProfileLinkContext(original: string, url: string): ResearchLinkContext | null {
-  const index = original.indexOf(url);
+export function nativeProfileLinkContext(original: string, url: string, fieldOffset: number): ResearchLinkContext | null {
+  const index = Number.isInteger(fieldOffset) && fieldOffset >= 0 && original.slice(fieldOffset, fieldOffset + url.length) === url ? fieldOffset : -1;
   return index < 0 ? null : { url, quote: url, locator: `账号资料 website 字段，第 ${String(index + 1)}–${String(index + url.length)} 字符`, binding: 'native_profile_field', surface: 'profile_field' };
 }
 
 
 /** A verified native username field binds its documented profile URL without manufacturing a quote. */
-export function nativeUsernameLinkContext(original: string, username: string, url: string): ResearchLinkContext | null {
+export function nativeUsernameLinkContext(original: string, username: string, url: string, fieldOffset: number): ResearchLinkContext | null {
   const field = `twitter_username: ${username}`;
-  const index = original.indexOf(field);
+  const index = Number.isInteger(fieldOffset) && fieldOffset >= 0 && original.slice(fieldOffset, fieldOffset + field.length) === field ? fieldOffset : -1;
   return index < 0 ? null : { url, quote: field, locator: `GitHub 公开账号 twitter_username 字段，第 ${index + 1}–${index + field.length} 字符`, binding: 'native_profile_field', surface: 'profile_field' };
 }

@@ -605,6 +605,12 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     });
     const evidenceList = make('div', {});
     evidenceList.appendChild(make('p', {className:'first-step-reason', text:`${account.identity.basisLabel}；${account.defaultSuggestion.reason}`}));
+    for (const declaration of account.nativeWebsiteDeclarations ?? []) {
+      const block=make('div',{className:'first-step-evidence-item'});
+      block.append(make('p',{text:'账号自述的网站字段'}),make('p',{text:declaration.rawLiteral}),
+        make('small',{className:'first-step-limit',text:declaration.protocol==='https'?'网站字段由该账号自行填写；不代表独立身份核验。':'尚未核对安全 HTTPS 入口；不会自动改写协议或选择网站。'}));
+      evidenceList.appendChild(block);
+    }
     for (const item of account.identity.evidence) {
       const block = make('div', { className: 'first-step-evidence-item' });
       block.appendChild(make('p', { text: `${item.sourceTitle}（${shortUrl(item.sourceUrl)}）· ${item.role === 'identity_support' ? '归属依据' : '反证'}` }));
