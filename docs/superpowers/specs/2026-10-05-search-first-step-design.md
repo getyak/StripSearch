@@ -217,6 +217,8 @@ Account linkage and a named person's ownership are separate assertions. A native
 profile's actual `name` field may establish `self_declared` ownership when its
 literal name matches the name query; it never establishes independent support.
 An original first-person named introduction may supply the same limited claim.
+Inspect original HTML document roots and enclosing/inline nodes for hidden or
+quoted surfaces; complete documents and fragments retain exact source offsets.
 Titles, handles, matching domains, user choices and reciprocal account links do
 not establish named ownership. Native website fields remain website declarations.
 

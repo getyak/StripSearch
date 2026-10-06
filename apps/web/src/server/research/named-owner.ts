@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {parseFragment,type DefaultTreeAdapterTypes as Tree} from 'parse5';
+import {parse,type DefaultTreeAdapterTypes as Tree} from 'parse5';
 import type {ResearchPage,ResearchToolAction} from './tool-contracts.js';
 import {classifyFirstStepUrl,isUntrustedInstructionText,isExplicitDenialQuote,classifyLinkContext} from '../../shared/first-step-discovery.js';
 import {adjacentRootSpan} from './link-context.js';
@@ -46,7 +46,7 @@ export function namedOwnerQuote(page:ResearchPage,action:ResearchToolAction,pers
     return {quote:declaration.rawLiteral,offset:0,nativeField:{platform:account.platform,nativeId:account.id,payloadField:'name'}};
   }
   if(returned.ref.platform!=='personal_site'||page.documentBinding&&(page.documentBinding.requestedUrl!==action.url||page.documentBinding.returnedUrl!==page.url)||!page.documentBinding&&page.url!==action.url)return null;
-  const root=parseFragment(page.text,{sourceCodeLocationInfo:true}),pending:Tree.Node[]=[root];
+  const root=parse(page.text,{sourceCodeLocationInfo:true}),pending:Tree.Node[]=[root];
   while(pending.length){
     const node=pending.shift()!;
     if('tagName' in node&&restrictedElement(node))continue;
@@ -60,7 +60,7 @@ export function namedOwnerQuote(page:ResearchPage,action:ResearchToolAction,pers
     if(quote.length>2000||isUntrustedInstructionText(quote)||isExplicitDenialQuote(quote)||classifyLinkContext(quote)==='third_party')continue;
     let ancestor=node.parentNode,branch:Tree.Node=node,veto=false;
     while(ancestor){
-      const span=ancestor===root||'tagName' in ancestor&&['main','body','html'].includes(ancestor.tagName)?adjacentRootSpan(ancestor as Tree.Element|Tree.DocumentFragment,branch):ancestor.sourceCodeLocation;
+      const span=ancestor===root||'tagName' in ancestor&&['main','body','html'].includes(ancestor.tagName)?adjacentRootSpan(ancestor as Tree.Element|Tree.Document,branch):ancestor.sourceCodeLocation;
       const surrounding=span?page.text.slice(span.startOffset,span.endOffset):'';
       if(surrounding&&(isExplicitDenialQuote(surrounding)||classifyLinkContext(surrounding)==='third_party'||isUntrustedInstructionText(surrounding)))veto=true;
       branch=ancestor;ancestor='parentNode' in ancestor?ancestor.parentNode:null;

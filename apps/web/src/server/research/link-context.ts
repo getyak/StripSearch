@@ -17,7 +17,7 @@ const PAGE_ROOTS = new Set(['main', 'body', 'html']);
 
 /** A root's adjacent heading/description belongs to this branch; an
  * independent article elsewhere on the page does not. Keep a literal span. */
-export function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment, branch: Tree.Node): {startOffset:number;endOffset:number} | null {
+export function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment | Tree.Document, branch: Tree.Node): {startOffset:number;endOffset:number} | null {
   const location=branch.sourceCodeLocation;if(!location)return null;
   const index=root.childNodes.findIndex(node=>node===branch);let start=location.startOffset,end=location.endOffset;
   for(const direction of [-1,1]){
