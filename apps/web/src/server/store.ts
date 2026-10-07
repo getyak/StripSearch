@@ -3,6 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { ResearchStore } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
 import { CompletionStore } from './research/completion-store.js';
+import { FetchCoverageStore } from './research/fetch-coverage-store.js';
 import type {
   AnswerSectionDraft,
   CanonicalView,
@@ -245,10 +246,13 @@ export class Store {
   readonly cases: CaseStore;
   /** GET-60 frozen scope / completion policy foundations (same lifetime). */
   readonly completion: CompletionStore;
+  /** GET-95 fetch processing coverage receipts and projection (same lifetime). */
+  readonly fetchCoverage: FetchCoverageStore;
   constructor(private readonly db: DB) {
     this.research = new ResearchStore(db);
     this.cases = new CaseStore(db);
     this.completion = new CompletionStore(db, this.cases);
+    this.fetchCoverage = new FetchCoverageStore(db, this.cases, this.completion);
   }
 
   insertRun(input: CreateRunInput): RunRecord {
