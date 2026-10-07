@@ -82,4 +82,4 @@
 
 2026-10-02 旧 alpha 的[深度修复](research-depth-contract.md)纳入批次采集、原文 provenance、五类研究问题状态及撤回传播，并冻结 v2 合成回放。它不替代新 Search / Fetch 运行时、持续历史/评论分页和真实自主规划验收；相关任务继续保持未完成。
 
-2026-10-07：[Fetch 处理覆盖契约（GET-95 第一批）](fetch-coverage.md) 已落地：case + 账号 + sourceId + sourceRevision 内容身份上的 body / 媒体 / 默认一页首层评论 / 选定 thread 分支四维度处理回执（append-only + 重放身份 + 原子 owner/scope/权限校验 + 整批回滚）与只读覆盖投影（append-order supersession、未知/零分母 percent=null、枚举耗尽只认协议 conforming 的 GET-60 观测、媒体保守合并复用）。**这是离线覆盖地基：无 live Fetch、无质量 benchmark、无部署**；GET-94/95/99 运行时、provider 接入与效果验收仍未交付。
+2026-10-07：[Fetch 处理覆盖契约（GET-95）](fetch-coverage.md) 已落地：case + 账号 + sourceId + sourceRevision 内容身份上的 body / 媒体 / 默认一页首层评论 / 选定 thread 分支四维度处理回执与只读覆盖投影。回执支持原子校验、重放去重与整批回滚；投影复用 GET-60 传递依赖检查并隔离冻结范围，未知/零分母 percent=null。[注入式批次执行边界](research-runtime.md) 验证角色、阶段、作用域与回执快照。**这些是离线基础，无 live Fetch、无质量 benchmark、无部署**；GET-94/99 运行时、provider 接入与效果验收仍未交付。
