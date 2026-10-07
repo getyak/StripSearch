@@ -11,6 +11,7 @@
     "test": "node --import tsx --test src/tests/*.test.ts",
     "eval": "node --import tsx src/evals/run.ts",
     "eval:research": "node --import tsx src/evals/research-baseline-v1/run.ts",
+    "fetch:offline": "node --import tsx scripts/fetch-offline.ts",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",

@@ -59,10 +59,10 @@ function parseDecision(value: unknown, tools: ToolName[]): ModelCall | { yield: 
   TOOL_REGISTRY[tool].input(value.input, 'input');
   return { tool, input: value.input };
 }
-function validUsage(value: RuntimeModelUsage): boolean {
+export function isValidRuntimeModelUsage(value: unknown): value is RuntimeModelUsage {
   if (!object(value) || !exact(value, ['inputTokens', 'outputTokens', 'estimatedUsd'])) return false;
-  return [value.inputTokens, value.outputTokens].every(n => n === null || Number.isSafeInteger(n) && n >= 0)
-    && (value.estimatedUsd === null || Number.isFinite(value.estimatedUsd) && value.estimatedUsd >= 0);
+  return [value.inputTokens, value.outputTokens].every(n => n === null || typeof n === 'number' && Number.isSafeInteger(n) && n >= 0)
+    && (value.estimatedUsd === null || typeof value.estimatedUsd === 'number' && Number.isFinite(value.estimatedUsd) && value.estimatedUsd >= 0);
 }
 function authorityMatches(expected: TrustedContext, current: TrustedContext | null): current is TrustedContext {
   if (!current || current.cancelled || current.ownerId !== expected.ownerId || current.caseId !== expected.caseId || current.scopeVersion !== expected.scopeVersion || current.role !== expected.role || current.phase !== expected.phase) return false;
@@ -95,7 +95,7 @@ export async function runResearchRuntimeBatch(task: ResearchRuntimeTask, options
     try {
       live();
       const response = await options.model.invoke({ taskId: packet.taskId, role: expected.role, phase: expected.phase, instructions: packet.instructions, allowedTools: [...allowed], events: structuredClone(events) }, signal);
-      if (!validUsage(response.usage)) return result('failed', 'invalid_model_usage');
+      if (!isValidRuntimeModelUsage(response.usage)) return result('failed', 'invalid_model_usage');
       events.push({ kind: 'model', usage: structuredClone(response.usage) });
       steps += 1;
       const current = live();

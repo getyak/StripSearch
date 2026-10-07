@@ -255,6 +255,18 @@ export class Store {
     this.fetchCoverage = new FetchCoverageStore(db, this.cases, this.completion);
   }
 
+  /**
+   * Named controller-side transaction boundary: one atomic multi-store fold
+   * (case evidence, GET-60 observations, GET-95 receipts, local originals,
+   * pipeline checkpoint) across the stores sharing this database. Nested
+   * store writes join this transaction; a throw rolls every derived write
+   * back together. The callback must be synchronous (better-sqlite3 transaction API);
+   * async/provider work belongs outside the fold. Callers never reach into the private DB handle.
+   */
+  inTransaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
+
   insertRun(input: CreateRunInput): RunRecord {
     const timestamp = nowIso();
     const id = newId('run');

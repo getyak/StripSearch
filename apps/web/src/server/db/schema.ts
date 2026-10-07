@@ -588,4 +588,118 @@ CREATE INDEX IF NOT EXISTS research_case_fetch_receipts_content
   ON research_case_fetch_receipts(case_id, account_id, source_id, source_revision, seq);
 CREATE INDEX IF NOT EXISTS research_case_fetch_receipts_case
   ON research_case_fetch_receipts(case_id, seq);
+
+-- GET-99 local Fetch pipeline (synthetic/offline runs): durable run rows,
+-- append events, resumable checkpoints, trusted opaque cursors, complete
+-- local originals and pending findings. All of it is local scheduling state:
+-- no observation, assessment, claim or report is ever written from here, and
+-- pending findings never publish. Synthetic fixture content only; real
+-- provider ingestion remains pending.
+CREATE TABLE IF NOT EXISTS research_fetch_pipeline_runs (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  scope_spec_id TEXT NOT NULL,
+  scope_version INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  stop_reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_fetch_pipeline_runs_case
+  ON research_fetch_pipeline_runs(case_id, created_at);
+
+CREATE TABLE IF NOT EXISTS research_fetch_pipeline_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  run_id TEXT NOT NULL REFERENCES research_fetch_pipeline_runs(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_fetch_pipeline_events_run
+  ON research_fetch_pipeline_events(run_id, seq);
+
+CREATE TABLE IF NOT EXISTS research_fetch_pipeline_checkpoints (
+  run_id TEXT PRIMARY KEY REFERENCES research_fetch_pipeline_runs(id) ON DELETE CASCADE,
+  checkpoint_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS research_fetch_pipeline_cursors (
+  token TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES research_fetch_pipeline_runs(id) ON DELETE CASCADE,
+  binding_json TEXT NOT NULL,
+  native_cursor TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS research_fetch_pipeline_originals (
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  source_revision INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  fulltext TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (case_id, source_id, source_revision)
+);
+
+CREATE TABLE IF NOT EXISTS research_fetch_pipeline_findings (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES research_fetch_pipeline_runs(id) ON DELETE CASCADE,
+  case_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  statement TEXT NOT NULL,
+  account_ids_json TEXT NOT NULL,
+  dependencies_json TEXT NOT NULL,
+  support_json TEXT NOT NULL,
+  counter_json TEXT NOT NULL,
+  coverage_json TEXT NOT NULL,
+  note TEXT,
+  state TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_fetch_pipeline_findings_run
+  ON research_fetch_pipeline_findings(run_id, created_at);
+
+-- Dispatch intents: persisted BEFORE any provider request so a crash between
+-- request and fold can never silently replay a paid action. state is
+-- in_flight -> reported (raw outcome durable) -> folded (derived writes
+-- committed in one transaction) or abandoned (explicit reconciliation).
+CREATE TABLE IF NOT EXISTS research_fetch_pipeline_intents (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES research_fetch_pipeline_runs(id) ON DELETE CASCADE,
+  step_key TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  state TEXT NOT NULL,
+  outcome_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_fetch_pipeline_intents_run
+  ON research_fetch_pipeline_intents(run_id, created_at);
+
+-- Per-request gateway metering receipts (reserve -> settle), durable even
+-- when the case scope changes while a request is awaiting. This is run-local
+-- receipt retention, not a billing subsystem.
+CREATE TABLE IF NOT EXISTS research_fetch_pipeline_requests (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES research_fetch_pipeline_runs(id) ON DELETE CASCADE,
+  intent_id TEXT,
+  action_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  state TEXT NOT NULL,
+  estimated_usd REAL,
+  credits REAL,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  settled_at TEXT
+);
+CREATE INDEX IF NOT EXISTS research_fetch_pipeline_requests_run
+  ON research_fetch_pipeline_requests(run_id, created_at);
 `;

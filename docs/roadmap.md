@@ -83,3 +83,5 @@
 2026-10-02 旧 alpha 的[深度修复](research-depth-contract.md)纳入批次采集、原文 provenance、五类研究问题状态及撤回传播，并冻结 v2 合成回放。它不替代新 Search / Fetch 运行时、持续历史/评论分页和真实自主规划验收；相关任务继续保持未完成。
 
 2026-10-07：[Fetch 处理覆盖契约（GET-95）](fetch-coverage.md) 已落地：case + 账号 + sourceId + sourceRevision 内容身份上的 body / 媒体 / 默认一页首层评论 / 选定 thread 分支四维度处理回执与只读覆盖投影。回执支持原子校验、重放去重与整批回滚；投影复用 GET-60 传递依赖检查并隔离冻结范围，未知/零分母 percent=null。[注入式批次执行边界](research-runtime.md) 验证角色、阶段、作用域与回执快照。**这些是离线基础，无 live Fetch、无质量 benchmark、无部署**；GET-94/99 运行时、provider 接入与效果验收仍未交付。
+
+2026-10-07：[本地 Fetch 批次链（GET-99 本地原型）](fetch-pipeline.md) 已落地：本地 Fetch 控制器 + 确定性合成 harness + 可运行 CLI（`npm --prefix apps/web run fetch:offline`），组合 GET-58/60/95 存储、GET-59 `dispatch` 校验网关与 research-runtime 模型网关，暴露恰好 Fetch 10 / verify 3 工具；核心步骤（枚举授权页、全量正文、默认评论页、显式分支选择与祖先缺口保留、媒体显式未知/未读、证据绑定 pending finding、隔离 verify、确定性 GET-60 assessment、义务未尽继续）全链落地；持久 runs/checkpoints/append events 支持同库关闭重开后从精确账号游标/条目步骤续跑且不重放已知成功动作，dispatch intent + 原子折叠 + 显式调和保证崩溃后不重放付费调用。**这是离线合成链：全程禁网、无真实端点/付费 provider/付费模型、无部署、合成通过不验证任何 provider 档案、不主张 GET-79 租约与完整计费子系统**；真实 provider 摄取、Search 发现链与研究质量评测仍未交付。 GET-99 的核验、补查与综合循环尚未完整交付，任务保持进行中。
