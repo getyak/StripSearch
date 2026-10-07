@@ -27,10 +27,10 @@
 - **百分比诚实**：未知分母、游标未耗尽、已知缺口 → `percent=null`；零分母 → `percent=null`，绝不显示 100%。分母只来自去重内容身份。
 - **枚举耗尽只认 GET-60 协议**：只有协议 conforming 的 GET-60 `enumerate_history` 观测（成功、无访问边界、无阻断、显式 `endpoint_exhausted`、无游标、无已知缺口）才证明“接口可访问范围已读完”；游标为 null 本身不算耗尽，后来的游标/缺口会把它重开。
 - **媒体保守合并**：复用冻结 `mergeMediaMetadata`——任一回执记录过 `present` 义务永久保留、矛盾作为 limitation 保留；`unknown` 媒体不算完成；缺席只有可信元数据（成功且非阻断的枚举回执）才能确立。
-- **当前依赖有效性读取时派生**：证据事后撤回/缺失/角色不符的回执保留为历史（`dependencyValidity=review`）但不计为有效读取；stale scope 回执同样保留不计。独立有效的新回执可恢复覆盖。
+- **当前依赖有效性读取时派生**：证据事后撤回/缺失/角色不符的回执保留为历史（`dependencyValidity=review`）但不计为有效读取；stale scope 回执同样保留不计。旧冻结范围不能借用新范围回执恢复覆盖；当前冻结范围内独立有效的新回执可恢复计数。
 - **无第二个完成判定**：视图只有计数与 null-safe 百分比，complete verdict 仍由 GET-60 assessment 独占；视图永不产生自动 completed/报告写入。
 
-已知限制：枚举耗尽判定复用 GET-60 的协议门槛（`isEligibleInvestigation` + 显式 `endpoint_exhausted`）与直接证据依赖检查；前置观测的传递依赖链完整判定仍以 GET-60 评估为准。持久哈希只证明记录未被改写，不证明网络原文真实性。
+枚举耗尽与可信媒体缺席复用 GET-60 当前快照的完整传递依赖检查，包括前置观测、来源版本和固定 coverage 引用。整个视图在同一 SQLite 读取事务中生成，冻结账号范围和 scopeVersion 不与新范围混算。旧冻结范围标记 `scopeStale`，分母与百分比保持未知。持久哈希只证明记录未被改写，不证明网络原文真实性。
 
 ## 持久化
 
