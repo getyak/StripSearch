@@ -1041,6 +1041,25 @@ export class CompletionStore {
     };
   }
 
+  /**
+   * Read-only current snapshot of one frozen scope spec: the same persisted
+   * input `assessCompletion` evaluates, read in one transaction with owner /
+   * case / scope-spec checks. No assessment, observation or any other write is
+   * created here — callers (e.g. the GET-95 fetch projection) can run the
+   * shared dependency-validation helper over it and stay in agreement with
+   * GET-60 without re-deriving the rules.
+   */
+  getCurrentCompletionSnapshot(ownerId: string, caseId: string, scopeSpecId: string): CompletionSnapshot | null {
+    return this.write(() => {
+      const caseRow = this.loadCase(ownerId, caseId);
+      const row = this.db
+        .prepare('SELECT * FROM research_case_completion_scopes WHERE id = ? AND case_id = ?')
+        .get(scopeSpecId, caseId) as CompletionScopeRow | undefined;
+      if (!row) return null;
+      return this.buildSnapshot(caseRow, row);
+    });
+  }
+
   private loadCoveragePin(caseId: string, itemId: string, revision: number): PinnedCoverageRecord {
     const item = this.db
       .prepare('SELECT * FROM research_case_item_coverage WHERE id = ? AND case_id = ?')

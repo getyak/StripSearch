@@ -547,4 +547,45 @@ CREATE TABLE IF NOT EXISTS research_case_completion_assessments (
 );
 CREATE INDEX IF NOT EXISTS research_case_completion_assessments_case
   ON research_case_completion_assessments(case_id, created_at, id);
+
+-- GET-95 fetch processing coverage (shared/research-fetch-coverage.ts).
+-- Additive only. Append-only per-content processing receipts with caller
+-- replay identity: re-recording the same receipt key with the same body is a
+-- no-op and the same key with a different body is a rejected conflict. Every
+-- receipt binds one immutable case source revision and one independent
+-- processing dimension (body / media / default first-page comments / one
+-- selected thread branch). seq is the only ordering authority (never the
+-- clock). Successes and skips here never change frozen completion rules,
+-- identity or publication state; nothing in this table is a GET-60 policy
+-- observation, assessment or report.
+CREATE TABLE IF NOT EXISTS research_case_fetch_receipts (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  receipt_key TEXT NOT NULL,
+  scope_version INTEGER NOT NULL,
+  account_id TEXT NOT NULL REFERENCES research_case_accounts(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  source_revision INTEGER NOT NULL,
+  dimension TEXT NOT NULL,
+  branch_key TEXT,
+  state TEXT NOT NULL,
+  reason TEXT,
+  occurred_at TEXT NOT NULL,
+  parents_json TEXT NOT NULL DEFAULT '[]',
+  evidence_json TEXT NOT NULL DEFAULT '[]',
+  counterevidence_json TEXT NOT NULL DEFAULT '[]',
+  note TEXT,
+  synthetic INTEGER NOT NULL DEFAULT 0,
+  provenance_json TEXT NOT NULL DEFAULT '{}',
+  body_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(case_id, receipt_key),
+  FOREIGN KEY (source_id, source_revision)
+    REFERENCES research_case_source_revisions(source_id, revision)
+);
+CREATE INDEX IF NOT EXISTS research_case_fetch_receipts_content
+  ON research_case_fetch_receipts(case_id, account_id, source_id, source_revision, seq);
+CREATE INDEX IF NOT EXISTS research_case_fetch_receipts_case
+  ON research_case_fetch_receipts(case_id, seq);
 `;
