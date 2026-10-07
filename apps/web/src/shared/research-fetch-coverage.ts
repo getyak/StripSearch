@@ -51,6 +51,7 @@
 
 import type {
   AllowedScopeState,
+  ConsentProvenance,
   CoverageLocator,
   RecordProvenance,
   ScopeVersion
@@ -295,6 +296,13 @@ const DRAFT_KEYS = [
 const CONTENT_KEYS = ['accountId', 'sourceId', 'sourceRevision'] as const;
 const PROVENANCE_KEYS = ['authorization', 'collector', 'note'] as const;
 
+/** The shared three allowed `ConsentProvenance` values; consent is never invented. */
+export const CONSENT_PROVENANCE_VALUES: readonly ConsentProvenance[] = [
+  'user_confirmed',
+  'legacy_no_authorization',
+  'not_recorded'
+];
+
 /**
  * Structural protocol check of one receipt draft (ownership, scope and
  * dependency checks happen atomically in the store). Unknown keys are rejected
@@ -383,6 +391,11 @@ export function validateFetchReceiptDraft(draft: FetchProcessingReceiptDraft): v
     throw new FetchReceiptProtocolError('provenance must be an object');
   }
   exactKeys(draft.provenance as unknown as Record<string, unknown>, PROVENANCE_KEYS, 'provenance');
+  if (!CONSENT_PROVENANCE_VALUES.includes(draft.provenance.authorization)) {
+    throw new FetchReceiptProtocolError(
+      `provenance.authorization must be one of ${CONSENT_PROVENANCE_VALUES.join('/')}, got ${String(draft.provenance.authorization)}`
+    );
+  }
   if (!isNonEmptyString(draft.provenance.collector)) {
     throw new FetchReceiptProtocolError('provenance.collector must be a non-empty string');
   }
@@ -531,6 +544,7 @@ export interface FetchAccountCoverage {
   outOfWindowItems: number;
   /** Explicit: in-window items outside the frozen account range (not counted). */
   outOfRangeItems: number;
+  /** Known only for a current frozen scope with protocol exhaustion; a stale frozen scope is never current-known. */
   denominatorKnown: boolean;
   /** Null when the denominator is unknown; zero stays zero (percent still null). */
   total: number | null;
@@ -542,13 +556,23 @@ export interface FetchAccountCoverage {
  * Read-only projection: per-platform/account counters over the frozen
  * publication window plus per-item state/reason/history. Deliberately carries
  * no completion verdict — GET-60 assessments own completion claims.
+ *
+ * The projection is cut on the FROZEN scope's account slice and scope version
+ * consistently: account membership and range come from the frozen
+ * `accountSlice`, and a frozen scope whose scopeVersion no longer matches the
+ * current case scope is explicitly stale (`scopeStale`) — a stale scope never
+ * presents a current-known denominator or a percentage (never 100%).
  */
 export interface FetchCoverageView {
   schemaVersion: typeof FETCH_COVERAGE_SCHEMA_VERSION;
   caseId: string;
   scopeSpecId: string;
+  /** Scope version the frozen spec is bound to (the projection's authority). */
+  frozenScopeVersion: ScopeVersion;
   /** Current authoritative case scope version used for stale markings. */
   currentScopeVersion: ScopeVersion;
+  /** True when the frozen scope no longer matches the current case scope. */
+  scopeStale: boolean;
   /** Frozen publication window (GET-60 frozen spec) the counters are cut at. */
   window: TimeRangeSpec;
   threadDepth: number;

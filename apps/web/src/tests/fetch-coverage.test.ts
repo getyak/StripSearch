@@ -1372,15 +1372,30 @@ test('stale-scope receipts are preserved but never count as valid reads', (t) =>
   assert.equal(counterOf(accountOf(view, account.accountId), 'body').validReads, 0);
   assert.ok(view.limitations.some((line) => line.includes('旧范围')));
 
-  // New work at the new scope supersedes and counts again.
+  // New work cannot become a valid read of an older frozen scope.
   recordFetch(receiptDraft({ receiptKey: 'stale-2', content }));
   view = fixture.view();
   body = dimOf(itemOf(view, account.accountId, source.sourceId, 1), { name: 'body' });
-  assert.equal(body.scopeValidity, 'valid');
-  assert.equal(body.countsAsValidRead, true);
+  assert.equal(view.scopeStale, true);
+  assert.equal(body.scopeValidity, 'review');
+  assert.equal(body.countsAsValidRead, false);
   assert.equal(body.history.length, 2);
   assert.equal(body.history[0]?.scopeValidity, 'review');
-  assert.equal(counterOf(accountOf(view, account.accountId), 'body').validReads, 1);
+  assert.equal(counterOf(accountOf(view, account.accountId), 'body').validReads, 0);
+  assert.equal(counterOf(accountOf(view, account.accountId), 'body').percent, null);
+
+  // Freeze current rules explicitly and record new work for that version.
+  const fresh = store.completion.reviseCompletionScope({
+    ownerId: OWNER, caseId: record.caseId,
+    expectedScopeVersion: currentVersion(store, record.caseId),
+    spec: fixture.frozen.spec, reason: 'synthetic refreshed scope'
+  });
+  recordFetch(receiptDraft({receiptKey: 'stale-3', content}));
+  const freshView = store.fetchCoverage.getFetchCoverageView(OWNER, record.caseId, fresh.scopeSpecId);
+  assert.ok(freshView);
+  assert.equal(freshView.scopeStale, false);
+  assert.equal(counterOf(accountOf(freshView, account.accountId), 'body').validReads, 1);
+  assert.equal(counterOf(accountOf(freshView, account.accountId), 'body').percent, null);
 });
 
 /* ------------------------------------------------------------------ */
@@ -1718,4 +1733,244 @@ test('processing receipts never change completion, identity or publication state
   assert.deepEqual(after, before);
   assert.equal(store.fetchCoverage.listFetchReceipts(OWNER, record.caseId).length, 2);
   assert.equal(frozen.scopeSpecId, fixture.view().scopeSpecId);
+});
+
+/* ------------------------------------------------------------------ */
+/* Independent review regressions (adapted from the review probe)      */
+/* ------------------------------------------------------------------ */
+
+test('REVIEW: withdrawn predecessor must reopen enumeration denominator', (t) => {
+  const f = baseFixture(t);
+  const { store, record, account, source, recordObs, recordFetch } = f;
+  const e = store.cases.addEvidence(caseCtx(store, record, account.accountId), {
+    sourceId: source.sourceId,
+    sourceRevision: 1,
+    role: 'factual_support',
+    quote: 'synthetic',
+    locator: 'p1',
+    provenance: PROVENANCE
+  });
+  const first = recordObs(
+    obsDraft('enumerate_history', 'items_found', { kind: 'account_history', accountId: account.accountId }, {
+      items: [{ sourceId: source.sourceId, sourceRevision: 1, hasMedia: 'unknown' }],
+      nextCursor: 'page2',
+      knownGaps: [],
+      refs: { ...emptyRefs(), evidenceIds: [e.evidenceId] }
+    })
+  );
+  recordObs(
+    obsDraft('enumerate_history', 'items_found', { kind: 'account_history', accountId: account.accountId }, {
+      items: [],
+      nextCursor: null,
+      knownGaps: [],
+      stopReason: 'endpoint_exhausted',
+      refs: { ...emptyRefs(), observationIds: [first.observationId] }
+    })
+  );
+  recordFetch(receiptDraft({ content: { accountId: account.accountId, sourceId: source.sourceId, sourceRevision: 1 } }));
+  store.cases.revokeEvidence(caseCtx(store, record, account.accountId), e.evidenceId);
+  const assessment = store.completion.assessCompletion({
+    ownerId: OWNER,
+    caseId: record.caseId,
+    expectedScopeVersion: currentVersion(store, record.caseId),
+    scopeSpecId: f.frozen.scopeSpecId
+  });
+  const a = accountOf(f.view(), account.accountId);
+  assert.equal(a.denominatorKnown, false);
+  assert.equal(counterOf(a, 'body').percent, null);
+  // GET-60 and Fetch must agree: the transitive dependency withdrawal is the
+  // same authority on both sides (no second evaluator).
+  const historyReport = assessment.evaluation.dimensions.find((d) => d.dimension === 'history_enumeration');
+  assert.equal(historyReport?.unresolvedItems[0]?.reason, 'dependency_withdrawn');
+  const bodyReport = assessment.evaluation.dimensions.find((d) => d.dimension === 'body');
+  assert.equal(bodyReport?.state, 'unknown_denominator');
+  assert.equal(bodyReport?.percent, null);
+  assert.equal(a.enumeration.basis, 'dependency_withdrawn');
+});
+
+test('REVIEW: old frozen scope cannot validate current reads against old denominator', (t) => {
+  const f = baseFixture(t);
+  const { store, record, account, source, recordObs } = f;
+  recordObs(
+    obsDraft('enumerate_history', 'items_found', { kind: 'account_history', accountId: account.accountId }, {
+      items: [{ sourceId: source.sourceId, sourceRevision: 1, hasMedia: 'none' }],
+      nextCursor: null,
+      knownGaps: [],
+      stopReason: 'endpoint_exhausted'
+    })
+  );
+  store.cases.applyScopeChange({
+    ownerId: OWNER,
+    caseId: record.caseId,
+    expectedScopeVersion: currentVersion(store, record.caseId),
+    reason: 'revoke account',
+    accounts: [{ accountId: account.accountId, allowedScope: { state: 'none', note: 'revoked' } }]
+  });
+  const old = f.view();
+  const a = accountOf(old, account.accountId);
+  assert.equal(counterOf(a, 'media').percent, null);
+});
+
+test('REVIEW: withdrawn page cannot satisfy media by absence', (t) => {
+  const f = baseFixture(t);
+  const { store, record, account, source, recordObs } = f;
+  const e = store.cases.addEvidence(caseCtx(store, record, account.accountId), {
+    sourceId: source.sourceId,
+    sourceRevision: 1,
+    role: 'factual_support',
+    quote: 'synthetic',
+    locator: 'p1',
+    provenance: PROVENANCE
+  });
+  recordObs(
+    obsDraft('enumerate_history', 'items_found', { kind: 'account_history', accountId: account.accountId }, {
+      items: [{ sourceId: source.sourceId, sourceRevision: 1, hasMedia: 'none' }],
+      nextCursor: 'page2',
+      knownGaps: [],
+      refs: { ...emptyRefs(), evidenceIds: [e.evidenceId] }
+    })
+  );
+  recordObs(
+    obsDraft('enumerate_history', 'items_found', { kind: 'account_history', accountId: account.accountId }, {
+      items: [],
+      nextCursor: null,
+      knownGaps: [],
+      stopReason: 'endpoint_exhausted'
+    })
+  );
+  store.cases.revokeEvidence(caseCtx(store, record, account.accountId), e.evidenceId);
+  const a = accountOf(f.view(), account.accountId);
+  assert.equal(counterOf(a, 'media').satisfiedByAbsence, 0);
+});
+
+test('REVIEW: stale frozen scope must not count new-scope read', (t) => {
+  const f = baseFixture(t);
+  const { store, record, account, source, recordObs, recordFetch } = f;
+  recordObs(
+    obsDraft('enumerate_history', 'items_found', { kind: 'account_history', accountId: account.accountId }, {
+      items: [{ sourceId: source.sourceId, sourceRevision: 1, hasMedia: 'none' }],
+      nextCursor: null,
+      knownGaps: [],
+      stopReason: 'endpoint_exhausted'
+    })
+  );
+  store.cases.applyScopeChange({
+    ownerId: OWNER,
+    caseId: record.caseId,
+    expectedScopeVersion: currentVersion(store, record.caseId),
+    reason: 'scope advance',
+    accounts: [{ accountId: account.accountId, userSelection: { state: 'only_this_account', note: 'synthetic', recordedAt: '2026-02-01' } }]
+  });
+  recordFetch(receiptDraft({ content: { accountId: account.accountId, sourceId: source.sourceId, sourceRevision: 1 } }));
+  const v = f.view();
+  assert.equal(counterOf(accountOf(v, account.accountId), 'body').percent, null);
+  // Explicit staleness: the old frozen scope is never a current-known
+  // denominator and never renders 100%.
+  assert.equal(v.scopeStale, true);
+  assert.equal(v.frozenScopeVersion !== v.currentScopeVersion, true);
+  const a = accountOf(v, account.accountId);
+  assert.equal(a.denominatorKnown, false);
+  assert.equal(a.total, null);
+  for (const counter of a.dimensions) assert.equal(counter.percent, null);
+  assert.ok(v.limitations.some((line) => line.includes('旧范围')));
+});
+
+test('REVIEW: invalid authorization provenance fails protocol', (t) => {
+  const f = baseFixture(t);
+  const { account, source, recordFetch } = f;
+  assert.throws(
+    () =>
+      recordFetch(
+        receiptDraft({
+          content: { accountId: account.accountId, sourceId: source.sourceId, sourceRevision: 1 },
+          provenance: { ...PROVENANCE, authorization: 'invented_grant' as never }
+        })
+      ),
+    FetchReceiptProtocolError
+  );
+  // The shared three ConsentProvenance values stay accepted; anything else
+  // (including empty strings and lookalike names) is refused.
+  for (const authorization of ['user_confirmed', 'legacy_no_authorization', 'not_recorded'] as const) {
+    assert.equal(
+      (() => {
+        try {
+          recordFetch(
+            receiptDraft({
+              receiptKey: `auth-${authorization}`,
+              content: { accountId: account.accountId, sourceId: source.sourceId, sourceRevision: 1 },
+              provenance: { ...PROVENANCE, authorization }
+            })
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      })(),
+      true
+    );
+  }
+  for (const authorization of ['', 'user_confirmed ', 'USER_CONFIRMED', 'none', 'consent'] as const) {
+    assert.throws(
+      () =>
+        recordFetch(
+          receiptDraft({
+            receiptKey: `bad-auth-${String(authorization.length)}`,
+            content: { accountId: account.accountId, sourceId: source.sourceId, sourceRevision: 1 },
+            provenance: { ...PROVENANCE, authorization: authorization as never }
+          })
+        ),
+      FetchReceiptProtocolError
+    );
+  }
+});
+
+test('REVIEW: media merge preserves present and conflicts under revocation', (t) => {
+  const f = baseFixture(t);
+  const { store, record, account, source, recordObs } = f;
+  const second = store.cases.recordSourceRevision(
+    caseCtx(store, record, account.accountId),
+    sourceDraft({ originalUrl: 'https://fixture.test/fetch/post-b' })
+  );
+  const e = store.cases.addEvidence(caseCtx(store, record, account.accountId), {
+    sourceId: source.sourceId,
+    sourceRevision: 1,
+    role: 'factual_support',
+    quote: 'synthetic',
+    locator: 'p1',
+    provenance: PROVENANCE
+  });
+  // Revoked page: `present` and a `none` that may never satisfy by absence.
+  recordObs(
+    obsDraft('enumerate_history', 'items_found', { kind: 'account_history', accountId: account.accountId }, {
+      items: [
+        { sourceId: source.sourceId, sourceRevision: 1, hasMedia: 'present' },
+        { sourceId: second.sourceId, sourceRevision: 1, hasMedia: 'none' }
+      ],
+      nextCursor: null,
+      knownGaps: [],
+      stopReason: 'endpoint_exhausted',
+      refs: { ...emptyRefs(), evidenceIds: [e.evidenceId] }
+    })
+  );
+  // Independent credible page disagrees about the second item.
+  recordObs(
+    obsDraft('enumerate_history', 'items_found', { kind: 'account_history', accountId: account.accountId }, {
+      items: [{ sourceId: second.sourceId, sourceRevision: 1, hasMedia: 'present' }],
+      nextCursor: null,
+      knownGaps: [],
+      stopReason: 'endpoint_exhausted'
+    })
+  );
+  store.cases.revokeEvidence(caseCtx(store, record, account.accountId), e.evidenceId);
+  const view = f.view();
+  const revoked = itemOf(view, account.accountId, source.sourceId, 1);
+  // `present` survives its own withdrawal (obligation is never erased) ...
+  assert.equal(revoked.media.applicability, 'present');
+  const conflicted = itemOf(view, account.accountId, second.sourceId, 1);
+  // ... and contradictions stay visible instead of being smoothed over.
+  assert.equal(conflicted.media.conflict, true);
+  assert.deepEqual(conflicted.media.recorded, ['none', 'present']);
+  assert.equal(conflicted.media.applicability, 'present');
+  const media = counterOf(accountOf(view, account.accountId), 'media');
+  assert.equal(media.satisfiedByAbsence, 0);
 });

@@ -283,6 +283,39 @@ function investigationChainOk(
 }
 
 /* ------------------------------------------------------------------ */
+/* Read-side dependency validation (shared with the GET-95 projection)  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Small read-only helper: current transitive dependency validity of every
+ * observation in one persisted snapshot, keyed by observationId. It reuses
+ * the exact private `buildIndex` / `dependencyValid` logic the deterministic
+ * evaluator uses (each observation is rooted at its own obligation account),
+ * so other read-side projections — notably the GET-95 fetch coverage view —
+ * agree with GET-60 instead of re-implementing the dependency rules.
+ *
+ * Pure and deterministic: it reads the snapshot only and writes nothing.
+ */
+export function dependencyValidationMap(snapshot: CompletionSnapshot): Map<string, boolean> {
+  const index = buildIndex(snapshot);
+  const memo = new Map<string, boolean>();
+  const result = new Map<string, boolean>();
+  for (const observation of snapshot.observations) {
+    result.set(
+      observation.observationId,
+      dependencyValid(
+        observation,
+        index,
+        memo,
+        new Set(),
+        'accountId' in observation.obligationRef ? observation.obligationRef.accountId : null
+      )
+    );
+  }
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
 /* Evaluation                                                         */
 /* ------------------------------------------------------------------ */
 

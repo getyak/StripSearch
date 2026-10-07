@@ -20,7 +20,10 @@
  *   append order (`seq`), never by `occurredAt` or `created_at`; a later
  *   failed/inaccessible receipt reopens a prior success. Duplicate pages and
  *   replayed receipts never double count because counters aggregate distinct
- *   content identities and current dimension states.
+ *   content identities and current dimension states. The projection is cut on
+ *   the frozen scope's account slice and scopeVersion consistently: a stale
+ *   frozen scope is explicitly stale and never presents a current-known
+ *   denominator or percentage.
  *
  * Current dependency validity is derived at read time: evidence withdrawn
  * after a receipt was recorded keeps the record as history but stops it from
@@ -32,7 +35,12 @@
  * media applicability are read from protocol-conforming GET-60 observations
  * (`isEligibleInvestigation` + explicit `endpoint_exhausted`, frozen
  * `mergeMediaMetadata`); a fetch-layer cursor going null is never exhaustion
- * and unknown media is never treated as completed.
+ * and unknown media is never treated as completed. Observation dependency
+ * validity (including transitive predecessor pages and pinned coverage) comes
+ * from the authoritative GET-60 dependency logic
+ * (`CompletionStore.getCurrentCompletionSnapshot` +
+ * `completion-eval.dependencyValidationMap`), so Fetch and GET-60 agree; a
+ * revoked `none` can never establish credible media absence.
  *
  * Foundation only: no network, provider, worker or runtime wiring. Reads
  * enforce owner/case isolation (owner mismatch reports "not found").
@@ -93,12 +101,11 @@ import {
   mergeMediaMetadata
 } from '../../shared/research-completion.js';
 import type {
-  CompletionObservation,
   CompletionScopeSpec,
   HistoryEnumerationObservation,
   MediaMetadataEntry
 } from '../../shared/research-completion.js';
-import { sha256Hex, stableStringify } from './completion-eval.js';
+import { dependencyValidationMap, sha256Hex, stableStringify } from './completion-eval.js';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -419,6 +426,11 @@ export class FetchCoverageStore {
    * second completion verdict exists in the result.
    */
   getFetchCoverageView(ownerId: string, caseId: string, scopeSpecId: string): FetchCoverageView | null {
+    // Keep scope, receipt and dependency reads in one SQLite snapshot.
+    return this.db.transaction(() => this.projectFetchCoverageView(ownerId, caseId, scopeSpecId))();
+  }
+
+  private projectFetchCoverageView(ownerId: string, caseId: string, scopeSpecId: string): FetchCoverageView | null {
     const caseRecord = this.cases.getCase(ownerId, caseId);
     if (!caseRecord) return null;
     const frozen = this.completion.getCompletionScope(ownerId, caseId, scopeSpecId);
@@ -426,7 +438,19 @@ export class FetchCoverageStore {
     const report = this.cases.reportView(ownerId, caseId);
     const spec: CompletionScopeSpec = frozen.spec;
     const currentScope = caseRecord.scopeVersion;
+    // Frozen scope + scopeVersion used consistently: the projection is cut on
+    // the frozen account slice (like GET-60's evaluator) and a frozen scope
+    // whose bound scopeVersion is no longer current is explicitly stale.
+    const scopeStale = frozen.scopeVersion !== currentScope;
 
+    // Authoritative dependency logic: the SAME transitive rules GET-60 uses
+    // (evidence, pinned coverage and predecessor observations), not a second
+    // evaluator. A final observation whose predecessor page or pinned
+    // coverage lost its dependency is withdrawn here exactly as in GET-60.
+    const snapshot = this.completion.getCurrentCompletionSnapshot(ownerId, caseId, scopeSpecId);
+    const dependencyValid = snapshot ? dependencyValidationMap(snapshot) : new Map<string, boolean>();
+
+    const sliceById = new Map(frozen.accountSlice.map((entry) => [entry.accountId, entry]));
     const accountById = new Map(report.accounts.map((account) => [account.accountId, account]));
     const evidenceById = new Map<string, EvidenceRef>(report.evidence.map((entry) => [entry.evidenceId, entry]));
     const publishedByKey = new Map<string, string | null>();
@@ -505,7 +529,11 @@ export class FetchCoverageStore {
         const credible =
           observation.attemptState === 'succeeded' &&
           observation.accessBoundary === null &&
-          (observation.stopReason === null || observation.stopReason === 'endpoint_exhausted');
+          (observation.stopReason === null || observation.stopReason === 'endpoint_exhausted') &&
+          // Credible absence also requires currently valid FULL dependencies:
+          // a revoked `none` can never satisfy media (present and recorded
+          // contradictions are still preserved by the frozen merge).
+          dependencyValid.get(observation.observationId) === true;
         for (const item of observation.items) {
           const key = itemKey(accountId, item.sourceId, item.sourceRevision);
           contentByKey.set(key, {
@@ -579,14 +607,20 @@ export class FetchCoverageStore {
     });
 
     const limitations: string[] = [];
+    if (scopeStale) {
+      limitations.push(
+        `冻结范围已过期（scope v${String(frozen.scopeVersion)}，当前 v${String(currentScope)}）：旧范围不给当前已知分母与百分比。`
+      );
+    }
     const items: FetchCoverageItemView[] = allKeys.map((key) => {
       const content = contentByKey.get(key) as CoverageLocator;
       const account = accountById.get(content.accountId);
-      const platform = account?.platform ?? 'unknown';
+      const sliceEntry = sliceById.get(content.accountId);
+      const platform = sliceEntry?.platform ?? account?.platform ?? 'unknown';
       const publishedAt = publishedByKey.get(key) ?? null;
       const dateKnown = publishedAt !== null;
       const inWindow = inFrozenPublicationWindow(publishedAt, spec.timeRange);
-      const inAccountRange = inSpecAccountRange(spec, content.accountId, account?.allowedScope.state ?? 'none');
+      const inAccountRange = inSpecAccountRange(spec, content.accountId, sliceEntry?.allowedScope.state ?? null);
       const isEnumerated = enumerated.has(key);
       const itemLimitations: string[] = [];
       if (!dateKnown) {
@@ -618,7 +652,7 @@ export class FetchCoverageStore {
       const itemReceipts = receiptsByItem.get(key) ?? [];
       const dimensions: FetchDimensionView[] = [];
       for (const name of ['body', 'media', 'comments'] as const) {
-        dimensions.push(this.dimensionView({ name }, itemReceipts, currentScope, [], false));
+        dimensions.push(this.dimensionView({ name }, itemReceipts, frozen.scopeVersion, [], false));
       }
       const branchKeys = new Set<string>();
       for (const branchKey of selectedBranches.get(key) ?? []) branchKeys.add(branchKey);
@@ -641,7 +675,7 @@ export class FetchCoverageStore {
         const view = this.dimensionView(
           { name: 'thread_branch', branchKey },
           itemReceipts,
-          currentScope,
+          frozen.scopeVersion,
           parents,
           selection
         );
@@ -686,8 +720,9 @@ export class FetchCoverageStore {
     accountIds.sort(compareText);
     const accounts: FetchAccountCoverage[] = accountIds.map((accountId) => {
       const account = accountById.get(accountId);
+      const sliceEntry = sliceById.get(accountId);
       const accountItems = items.filter((entry) => entry.content.accountId === accountId);
-      const enumeration = enumerationStatus(enumerationByAccount.get(accountId) ?? [], spec, evidenceById);
+      const enumeration = enumerationStatus(enumerationByAccount.get(accountId) ?? [], spec, dependencyValid);
       const enumeratedItems = accountItems.filter((entry) => entry.enumerated).length;
       const receiptOnlyItems = accountItems.filter((entry) => !entry.enumerated).length;
       const outOfWindowItems = accountItems.filter((entry) => !entry.inWindow).length;
@@ -695,12 +730,19 @@ export class FetchCoverageStore {
       const inWindowItems = accountItems.filter((entry) => entry.inWindow).length;
       const inScopeItems = accountItems.filter((entry) => entry.inWindow && entry.inAccountRange);
       const outOfRangeItems = accountItems.filter((entry) => entry.inWindow && !entry.inAccountRange).length;
-      const denominatorKnown = enumeration.exhausted;
+      // A stale frozen scope is never a CURRENT-known denominator; only a
+      // current frozen scope with protocol exhaustion may know one.
+      const denominatorKnown = !scopeStale && enumeration.exhausted;
       const accountLimitations: string[] = [];
-      if (!denominatorKnown) {
+      if (scopeStale) {
+        accountLimitations.push('冻结范围已过期：分母与 percent 不作为当前已知值（不显示 100%）。');
+      } else if (!denominatorKnown) {
         accountLimitations.push(`枚举未耗尽（${enumeration.basis}）：分母未知，所有维度 percent 为 null。`);
       } else if (inScopeItems.length === 0) {
         accountLimitations.push('分母为 0：percent 保持 null，不显示 100%。');
+      }
+      if (sliceEntry === undefined) {
+        accountLimitations.push('账号不在冻结 accountSlice 内，未计入分母。');
       }
       if (unknownDateItems > 0) {
         accountLimitations.push(`${String(unknownDateItems)} 项发布日期未知，保留在冻结时间窗内。`);
@@ -751,9 +793,9 @@ export class FetchCoverageStore {
       });
       return {
         accountId,
-        platform: account?.platform ?? 'unknown',
-        allowedScope: account?.allowedScope.state ?? 'none',
-        inAccountRange: inSpecAccountRange(spec, accountId, account?.allowedScope.state ?? 'none'),
+        platform: sliceEntry?.platform ?? account?.platform ?? 'unknown',
+        allowedScope: sliceEntry?.allowedScope.state ?? account?.allowedScope.state ?? 'none',
+        inAccountRange: inSpecAccountRange(spec, accountId, sliceEntry?.allowedScope.state ?? null),
         enumeration,
         enumeratedItems,
         receiptOnlyItems,
@@ -791,7 +833,9 @@ export class FetchCoverageStore {
       schemaVersion: FETCH_COVERAGE_SCHEMA_VERSION,
       caseId,
       scopeSpecId,
+      frozenScopeVersion: frozen.scopeVersion,
       currentScopeVersion: currentScope,
+      scopeStale,
       window: { from: spec.timeRange.from, to: spec.timeRange.to },
       threadDepth: spec.threadDepth > 0 ? spec.threadDepth : DEFAULT_THREAD_DEPTH,
       accounts,
@@ -849,6 +893,7 @@ export class FetchCoverageStore {
       reason: pick.record.reason,
       countsAsValidRead:
         pick.record.state === FETCH_SUCCESS_STATE &&
+        pick.record.scopeVersion === currentScope &&
         pick.scopeValidity === 'valid' &&
         pick.dependencyValidity === 'valid',
       scopeValidity: pick.scopeValidity,
@@ -868,7 +913,7 @@ export class FetchCoverageStore {
 function inSpecAccountRange(
   spec: CompletionScopeSpec,
   accountId: string,
-  allowedScope: string
+  allowedScope: string | null
 ): boolean {
   return spec.accountRange.mode === 'explicit'
     ? spec.accountRange.accountIds.includes(accountId)
@@ -918,13 +963,15 @@ function mergeParentEntries(groups: ParentContextEntry[][]): ParentContextEntry[
  * known gaps, blocking stop reason, access boundary, explicit exhaustion).
  * Exhaustion requires a protocol-conforming observation: succeeded, unblocked,
  * no access boundary and an explicit `endpoint_exhausted` — a null cursor
- * alone never establishes it. Transitive predecessor chains stay the GET-60
- * evaluator's authority (documented limitation).
+ * alone never establishes it. Dependency validity is the authoritative GET-60
+ * transitive check (evidence, pinned coverage and predecessor observations),
+ * so a final page whose prior page dependency was revoked loses the known
+ * denominator exactly like GET-60.
  */
 function enumerationStatus(
   observations: HistoryEnumerationObservation[],
   spec: CompletionScopeSpec,
-  evidenceById: Map<string, EvidenceRef>
+  dependencyValid: ReadonlyMap<string, boolean>
 ): FetchEnumerationStatus {
   const latest = observations.length > 0 ? observations[observations.length - 1] : undefined;
   if (latest === undefined) {
@@ -943,7 +990,7 @@ function enumerationStatus(
   if (latest.attemptState === 'failed') return done(false, 'failed');
   if (latest.attemptState === 'cancelled') return done(false, 'cancelled');
   if (latest.attemptState === 'needs_input') return done(false, 'needs_input');
-  if (!observationDepsValid(latest, evidenceById)) return done(false, 'dependency_withdrawn');
+  if (dependencyValid.get(latest.observationId) !== true) return done(false, 'dependency_withdrawn');
   if (latest.nextCursor !== null) return done(false, 'cursor_open');
   if (latest.knownGaps.length > 0) return done(false, 'known_gap');
   if (latest.stopReason !== null && latest.stopReason !== 'endpoint_exhausted') return done(false, 'blocked');
@@ -952,25 +999,4 @@ function enumerationStatus(
     return done(true, 'endpoint_exhausted');
   }
   return done(false, 'not_exhausted');
-}
-
-/** Light current-dependency check for the establishing enumeration receipt. */
-function observationDepsValid(
-  observation: CompletionObservation,
-  evidenceById: Map<string, EvidenceRef>
-): boolean {
-  const ref = observation.obligationRef;
-  const accountId = 'accountId' in ref ? ref.accountId : null;
-  for (const [ids, supportPolarity] of [
-    [observation.refs.evidenceIds, true],
-    [observation.refs.counterevidenceIds, false]
-  ] as const) {
-    for (const evidenceId of ids) {
-      if (accountId === null) return false;
-      if (evidenceProblem(evidenceById.get(evidenceId), supportPolarity, observation.caseId, accountId) !== null) {
-        return false;
-      }
-    }
-  }
-  return true;
 }
