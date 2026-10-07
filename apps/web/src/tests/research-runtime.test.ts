@@ -32,6 +32,21 @@ test('verify phase exposes only evidence, pinned skill and pending finding tools
   assert.equal(result.state, 'blocked');
 });
 
+test('gateway object reuse cannot rewrite already observed tool receipts', async () => {
+  const ctx = context(); let calls = 0;
+  const shared = envelope('report_progress');
+  const result = await runResearchRuntimeBatch(task(ctx), {
+    readContext: () => ctx, maxStepsPerBatch: 2,
+    model: {invoke: async request => {
+      if (calls === 1) assert.deepEqual(request.events.find(event => event.kind === 'tool')?.envelope.content, {call: 1});
+      return {decision, usage};
+    }},
+    tools: {dispatch: async () => {shared.content = {call: ++calls}; return shared;}}
+  }, new AbortController().signal);
+  shared.content = {call: 3};
+  assert.deepEqual(result.events.filter(event => event.kind === 'tool').map(event => event.envelope.content), [{call: 1}, {call: 2}]);
+});
+
 test('scope, cancellation and permission drift during model await prevent dispatch', async () => {
   for (const change of ['scope', 'cancel', 'permission'] as const) {
     const ctx = context(); let dispatched = false;

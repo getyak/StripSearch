@@ -101,7 +101,7 @@ export async function runResearchRuntimeBatch(task: ResearchRuntimeTask, options
       const current = live();
       const decision = parseDecision(response.decision, allowed);
       if ('yield' in decision) return result('yielded', decision.yield);
-      const envelope = await options.tools.dispatch(current, decision, signal);
+      const envelope = structuredClone(await options.tools.dispatch(current, decision, signal));
       events.push({ kind: 'tool', envelope });
       live();
       if (envelope.status === 'blocked' || envelope.status === 'failed' || envelope.status === 'not_implemented') return result('blocked', envelope.reason ?? envelope.status);
