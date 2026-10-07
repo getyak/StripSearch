@@ -1355,7 +1355,9 @@ export async function runFetchPipeline(
       task,
       {
         tools: {
-          dispatch: async (current: TrustedContext, call: ModelCall, batchSignal: AbortSignal) => {
+          dispatch: async (current: TrustedContext, rawCall: ModelCall, batchSignal: AbortSignal) => {
+            // Keep the approved controller call separate from mutable gateway inputs.
+            const call = clone(rawCall);
             // Before EVERY dispatch: compare the exact call to the fresh plan /
             // phase and the durable done/refused/in-flight state.
             const preRefusal = authorityOk();
@@ -1393,7 +1395,7 @@ export async function runFetchPipeline(
             const intent = runs.beginIntent({ runId, stepKey, tool: call.tool, input: clone(call.input as Record<string, unknown>) });
             let envelope: ToolEnvelope;
             try {
-              envelope = await options.tools.dispatch(current, call, batchSignal);
+              envelope = clone(await options.tools.dispatch(clone(current), clone(call), batchSignal));
             } catch (error) {
               // The attempt may have executed: the raw outcome is durable and
               // the intent stays unresolved (never auto-replayed).
@@ -1410,6 +1412,11 @@ export async function runFetchPipeline(
               envelope: clone(envelope)
             });
             runs.recordOutcome(intent.intentId, clone(envelope), 'reported');
+            if (envelope.tool !== call.tool) {
+              runs.appendEvent(runId, 'fold_skipped', { stepKey, tool: call.tool, reason: 'gateway_tool_mismatch' });
+              ctx.stop = { state: 'stopped', reason: 'unreconciled_action' };
+              return envelope;
+            }
             // Atomic derived fold (evidence/originals/observations/receipts/
             // checkpoint) — rolls back together on any fault.
             fold(intent.intentId, stepKey, call, envelope);

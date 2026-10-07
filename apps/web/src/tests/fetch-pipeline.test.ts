@@ -863,3 +863,28 @@ test('a new run on a stale frozen scope cannot dispatch any action', async (t) =
   assert.equal(dispatched, 0);
   assert.equal(result.counts.modelCalls, 0);
 });
+
+
+test('gateway call mutation cannot change the approved action or materialize an unplanned body', async (t) => {
+  const fx = fixture(t);
+  const summary = await fx.harness.run({ maxBatches: 1, tools: { dispatch: async (context, call, signal) => {
+    assert.equal(call.tool, 'list_posts');
+    call.tool = 'read_post';
+    call.input = { accountId: 'acct-alpha', itemId: 'itm-alpha-01' };
+    return fx.harness.tools.dispatch(context, call, signal);
+  } } });
+  assert.equal(summary.stopReason, 'unreconciled_action');
+  assert.equal(summary.counts.bodiesRead, 0);
+  assert.equal(summary.counts.listedItems, 0);
+  assert.equal(fx.harness.store.cases.reportView(SYNTHETIC_OWNER, SYNTHETIC_CASE_ID).evidence.length, 0);
+  const intent = fx.harness.runs.listUnresolvedIntents(summary.runId)[0]!;
+  assert.equal(intent.tool, 'list_posts');
+  assert.equal(intent.state, 'reported');
+  assert.equal((intent.outcome as ToolEnvelope).tool, 'read_post');
+  assert.equal((intent.outcome as ToolEnvelope).usage.providerRequests, 1);
+  assert.equal(fx.harness.runs.loadCheckpoint(summary.runId)!.doneSteps.includes(intent.stepKey), false);
+  const before = summary.counts.toolActions;
+  const reopened = await fx.harness.run();
+  assert.equal(reopened.counts.toolActions, before);
+  assert.equal(reopened.stopReason, 'unreconciled_action');
+});
