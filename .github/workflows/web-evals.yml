@@ -44,8 +44,16 @@ jobs:
           "$CHROMIUM_EXECUTABLE_PATH" --version
       - name: Runtime tests (offline providers)
         working-directory: apps/web
-        # Keep CPU-heavy DOM fixtures from starving the real Chrome PDF check.
-        run: node --import tsx --test --test-concurrency=2 src/tests/*.test.ts
+        # Run Chrome separately from CPU-heavy DOM fixtures.
+        run: |
+          tests=()
+          for file in src/tests/*.test.ts; do
+            if [[ "$file" != "src/tests/report-exports.test.ts" ]]; then
+              tests+=("$file")
+            fi
+          done
+          node --import tsx --test --test-concurrency=2 "${tests[@]}"
+          node --import tsx --test src/tests/report-exports.test.ts
       - name: Dataset integrity (no answer grading)
         run: python3 scripts/check_eval_datasets.py
       - name: Frozen provider evaluations (no external requests)
