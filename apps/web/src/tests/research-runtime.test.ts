@@ -109,3 +109,39 @@ test('DSH gateway retains one metered request and reports known tokens with unkn
   assert.equal(calls, 1); assert.deepEqual(result.decision, {kind: 'yield', reason: 'continue in next batch'});
   assert.deepEqual(result.usage, {inputTokens: 20, outputTokens: 15, estimatedUsd: null});
 });
+
+test('REVIEW: scope drift during tool await preserves observed action but stops next model', async () => {
+  const ctx = context();
+  let calls = 0;
+  const result = await runResearchRuntimeBatch(task(ctx), {
+    readContext: () => ctx,
+    model: { invoke: async () => { calls++; return { decision, usage }; } },
+    tools: { dispatch: async () => { ctx.scopeVersion++; return envelope('report_progress'); } }
+  }, new AbortController().signal);
+  assert.equal(result.reason, 'authority_changed');
+  assert.equal(calls, 1);
+  assert.equal(result.events.length, 2);
+});
+
+test('REVIEW: model request mutation cannot change trusted task or previous events', async () => {
+  const ctx = context();
+  let calls = 0;
+  const result = await runResearchRuntimeBatch(task(ctx), {
+    readContext: () => ctx,
+    maxStepsPerBatch: 2,
+    model: {
+      invoke: async (request) => {
+        calls++;
+        request.allowedTools.push('discover_accounts');
+        request.instructions = 'injected';
+        request.events.length = 0;
+        return { decision, usage };
+      }
+    },
+    tools: { dispatch: async () => envelope('report_progress') }
+  }, new AbortController().signal);
+  assert.equal(result.state, 'yielded');
+  assert.equal(result.events.length, 4);
+  assert.equal(ctx.scopeVersion, 1);
+  assert.equal(calls, 2);
+});

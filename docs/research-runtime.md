@@ -9,3 +9,5 @@
 当前边界经过合成离线测试，尚未提供持久任务调度、真实平台适配、自动研究质量结论或部署。GET-95 处理回执及 GET-60 完成判定是独立的存储和策略组件。
 
 验证：`apps/web/src/tests/research-runtime.test.ts` 覆盖跨批次继续执行、verify 权限、异步作用域变化、权限注入、取消、未结算动作和单次 DSH usage。
+
+本地合成 Fetch 链复用本批次边界与 GET-59 网关，提供单进程持久 checkpoint/intent；真实调度与模型策略质量仍未验收，见 [本地 Fetch 批次链](fetch-pipeline.md)。

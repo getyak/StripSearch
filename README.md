@@ -36,6 +36,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 | Search / Fetch 工具接口、角色权限与返回封套（地基） | [工具接口契约](docs/research-tool-contracts.md) |
 | Fetch 处理覆盖回执与覆盖投影（GET-95；离线覆盖基础，无 live Fetch、无质量 benchmark） | [Fetch 处理覆盖契约](docs/fetch-coverage.md) |
 | Search / Fetch 批次执行边界（注入式离线接口，未接线） | [批次执行边界](docs/research-runtime.md) |
+| 本地 Fetch 批次链、断点恢复与合成测试（GET-99 局部原型；未接入真实 provider、未部署） | [本地 Fetch 批次链](docs/fetch-pipeline.md) |
 | 版本化平台目录、逐能力状态与三个投影（地基） | [平台目录契约](docs/platform-catalog.md) |
 | 公共账号规则导入、组合身份与独立受限执行器（地基） | [公共账号规则](docs/public-account-rules.md) |
 | 发现路线规划、请求键与保守账号键（纯计划器，未接线） | [发现路线规划契约](docs/discovery-route-planning.md) |
