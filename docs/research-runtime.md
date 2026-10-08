@@ -10,4 +10,4 @@
 
 验证：`apps/web/src/tests/research-runtime.test.ts` 覆盖跨批次继续执行、verify 权限、异步作用域变化、权限注入、取消、未结算动作和单次 DSH usage。
 
-本地合成 Fetch 链复用本批次边界与 GET-59 网关，提供单进程持久 checkpoint/intent；真实调度与模型策略质量仍未验收，见 [本地 Fetch 批次链](fetch-pipeline.md)。
+本地合成 Fetch 链复用本批次边界与 GET-59 网关，提供单进程持久 checkpoint/intent；真实调度与模型策略质量仍未验收，见 [本地 Fetch 批次链](fetch-pipeline.md)。真实 GitHub 切片的阶段 2 也复用本边界：其调度器是确定性本地调度器，**外部模型请求/令牌为诚实零**，绝不把本地调度决策呈现为真实 LLM 使用，见 [Web Fetch 真实 GitHub 接入](fetch-integration.md)。

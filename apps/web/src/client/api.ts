@@ -15,6 +15,12 @@ import type {
   ReviewQueueItem
 } from '../shared/review.js';
 import type { ResearchTaskInput, ResearchTaskListItem, ResearchTaskView } from '../shared/research-task.js';
+import type {
+  FetchGithubResumeRequest,
+  FetchGithubRunSummary,
+  FetchGithubRunView,
+  FetchGithubStartRequest
+} from '../shared/research-fetch-github.js';
 
 export class ApiError extends Error {
   constructor(
@@ -56,7 +62,7 @@ export interface HealthResponse {
   status: string;
   app: string;
   version: string;
-  capabilities: { github: boolean; exa: boolean; research?: boolean };
+  capabilities: { github: boolean; exa: boolean; research?: boolean; fetchGithub?: boolean };
   limits: Record<string, number>;
 }
 
@@ -96,6 +102,45 @@ export class ApiClient {
 
   async health(): Promise<HealthResponse> {
     return this.request<HealthResponse>('/api/health');
+  }
+
+  /* ---------------- Web Fetch (real GitHub public slice) ---------------- */
+
+  async fetchStart(input: FetchGithubStartRequest, idempotencyKey: string): Promise<{ run: FetchGithubRunView; idempotent: boolean }> {
+    return this.request<{ run: FetchGithubRunView; idempotent: boolean }>('/api/fetch/start', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { 'idempotency-key': idempotencyKey }
+    });
+  }
+
+  async fetchList(): Promise<{ runs: FetchGithubRunSummary[] }> {
+    return this.request<{ runs: FetchGithubRunSummary[] }>('/api/fetch/runs');
+  }
+
+  async fetchView(runId: string): Promise<{ run: FetchGithubRunView }> {
+    return this.request<{ run: FetchGithubRunView }>(`/api/fetch/runs/${encodeURIComponent(runId)}`);
+  }
+
+  async fetchPause(runId: string, expectedRevision?: number): Promise<{ run: FetchGithubRunView }> {
+    return this.request<{ run: FetchGithubRunView }>(`/api/fetch/runs/${encodeURIComponent(runId)}/pause`, {
+      method: 'POST',
+      body: JSON.stringify(expectedRevision === undefined ? {} : { expectedRevision })
+    });
+  }
+
+  async fetchResume(runId: string, input: FetchGithubResumeRequest): Promise<{ run: FetchGithubRunView }> {
+    return this.request<{ run: FetchGithubRunView }>(`/api/fetch/runs/${encodeURIComponent(runId)}/resume`, {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  }
+
+  async fetchStop(runId: string, expectedRevision?: number): Promise<{ run: FetchGithubRunView }> {
+    return this.request<{ run: FetchGithubRunView }>(`/api/fetch/runs/${encodeURIComponent(runId)}/stop`, {
+      method: 'POST',
+      body: JSON.stringify(expectedRevision === undefined ? {} : { expectedRevision })
+    });
   }
 
   async session(): Promise<{ user: SessionUser; session: { id: string } } | null> {

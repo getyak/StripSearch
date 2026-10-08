@@ -18,12 +18,14 @@ import {
 import { registerRunRoutes } from './routes/runs.js';
 import { registerReviewRoutes } from './routes/review.js';
 import { registerDiscoveryRoutes } from './routes/discovery.js';
+import { registerFetchRoutes } from './routes/fetch.js';
 import type { Runner } from './services/runner.js';
 import type { DiscoveryRunner } from './services/discovery-runner.js';
 import type { PlatformRegistry } from '../shared/platform-discovery.js';
 import type { PlatformCatalogSnapshot } from '../shared/platform-catalog.js';
 import type { ReviewStore } from './review-store.js';
 import type { DiscoveryStore } from './discovery-store.js';
+import type { FetchGithubRunner } from './research/fetch-github-runner.js';
 import type { Store } from './store.js';
 
 export interface AppDeps {
@@ -37,6 +39,7 @@ export interface AppDeps {
   discoveryCatalog?: PlatformCatalogSnapshot | null;
   auth: Auth;
   runner: Runner;
+  fetchRunner: FetchGithubRunner;
   clientDir: string;
 }
 
@@ -67,7 +70,10 @@ export function createApp(deps: AppDeps): Express {
       capabilities: {
         github: true,
         exa: Boolean(deps.config.exaApiKey),
-        research: Boolean(deps.config.deepseekApiKey && deps.config.exaApiKey)
+        research: Boolean(deps.config.deepseekApiKey && deps.config.exaApiKey),
+        // Real GitHub Fetch (public slice) works without any provider key;
+        // this is independent of the legacy DeepSeek+Exa research surface.
+        fetchGithub: true
       },
       limits: {
         questionMax: LIMITS.questionMax,
@@ -100,6 +106,10 @@ export function createApp(deps: AppDeps): Express {
     runner: deps.discoveryRunner,
     registry: deps.discoveryRegistry,
     catalog: deps.discoveryCatalog ?? null
+  });
+  registerFetchRoutes(apiRouter, {
+    fetchRunner: deps.fetchRunner,
+    runner: deps.runner
   });
   app.use('/api', apiRouter);
 

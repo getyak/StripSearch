@@ -23,6 +23,7 @@ import {
 import type { PlatformRegistry } from '../shared/platform-discovery.js';
 import type { PlatformCatalogSnapshot } from '../shared/platform-catalog.js';
 import { Store } from './store.js';
+import { FetchGithubRunner } from './research/fetch-github-runner.js';
 import type { ResearchTools } from './research/tool-contracts.js';
 import { createResearchTools } from './research/toolkit.js';
 import { LIMITS } from '../shared/limits.js';
@@ -52,9 +53,11 @@ export interface BootstrappedApp {
   discoveryStore: DiscoveryStore;
   discoveryRunner: DiscoveryRunner;
   runner: Runner;
+  fetchRunner: FetchGithubRunner;
   app: ReturnType<typeof createApp>;
   interrupted: number;
   interruptedDiscovery: number;
+  interruptedFetch: number;
 }
 
 export async function bootstrap(
@@ -101,6 +104,16 @@ export async function bootstrap(
     transport,
     registry: discoveryRegistry
   });
+  // Single-instance Web Fetch worker: real GitHub public acquisition plus
+  // cached-snapshot processing, one controlled transport, shutdown-wired.
+  const fetchRunner = new FetchGithubRunner({
+    db,
+    store,
+    transport,
+    githubToken: config.githubToken
+  });
+  const interruptedFetch = fetchRunner.recoverInterrupted();
+  fetchRunner.ensureRunning();
   const clientDir = overrides.clientDir ?? defaultClientDir();
   const app = createApp({
     config,
@@ -112,10 +125,14 @@ export async function bootstrap(
     discoveryCatalog,
     auth,
     runner,
+    fetchRunner,
     clientDir
   });
   void runner.pump();
-  return { config, db, store, reviewStore, discoveryStore, discoveryRunner, runner, app, interrupted, interruptedDiscovery };
+  return {
+    config, db, store, reviewStore, discoveryStore, discoveryRunner, runner, fetchRunner, app,
+    interrupted, interruptedDiscovery, interruptedFetch
+  };
 }
 
 function isMain(): boolean {
@@ -125,7 +142,7 @@ function isMain(): boolean {
 }
 
 async function main(): Promise<void> {
-  const { config, app, interrupted, runner, discoveryRunner, interruptedDiscovery } = await bootstrap();
+  const { config, app, interrupted, runner, discoveryRunner, interruptedDiscovery, fetchRunner, interruptedFetch } = await bootstrap();
   let failed = false;
   const server = app.listen(config.port, config.host, (error?: Error) => {
     if (error) {
@@ -142,6 +159,11 @@ async function main(): Promise<void> {
         `[stripsearch] paused ${interruptedDiscovery} discovery task(s) at their checkpoints`
       );
     }
+    if (interruptedFetch > 0) {
+      console.log(
+        `[stripsearch] stopped ${interruptedFetch} Web Fetch run(s) after restart (unreconciled or paused; never auto-replayed)`
+      );
+    }
   });
   server.on('error', (error: NodeJS.ErrnoException) => {
     if (failed) return;
@@ -152,6 +174,7 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     runner.stopAll();
     discoveryRunner.stopAll();
+    void fetchRunner.stopAll();
     server.close();
     // Drop lingering SSE / keep-alive sockets so the process can exit promptly.
     server.closeAllConnections?.();

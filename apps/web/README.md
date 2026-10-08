@@ -5,6 +5,10 @@
 同一份 Person Object 的 Markdown / JSON / HTML / PDF 导出。运行边界见[人物研究说明](../../docs/person-research-release.md)。
 
 > 状态：**可运行 alpha**。它不改变仓库既有的 M1–M4 验收，也不代表 Exa 回答质量、MCP 宿主或评测已经通过。
+>
+> 已包含 **Web Fetch 真实 GitHub 公开接入**（GET-99 第一切片）：登录后的应用导航中的 Web Fetch 入口与同源 `/api/fetch` API，
+> 显式确认目标/冻结问题/访问范围后才发请求，真实抓取与冻结快照处理两阶段分离。范围与边界见
+> [Web Fetch 真实 GitHub 接入](../../docs/fetch-integration.md)；本切片不启用 Exa/X/网站抓取，真实线上验收归父级。
 > 静态设计原稿仍保留在 [design/web](../../design/web/DESIGN.md)，未修改。
 
 ## 运行

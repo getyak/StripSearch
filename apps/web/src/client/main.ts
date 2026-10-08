@@ -8,6 +8,7 @@ import {
 import { ApiClient, ApiError } from './api.js';
 import type { ExportFormat, ResumeInput } from './api.js';
 import { createAuthController, renderUserNav, showToast } from './auth.js';
+import { createFetchPanel } from './fetch.js';
 import { createCitationReturn } from './citation-return.js';
 import { byId, clear, make, setText, show } from './dom.js';
 import { createHomeMotion } from './home-motion.js';
@@ -160,8 +161,17 @@ const els = {
   sourceDrawer: byId<HTMLDialogElement>('source-drawer'),
   historyDrawer: byId<HTMLDialogElement>('history-drawer'),
   review: byId('view-review'),
-  openReview: byId<HTMLButtonElement>('open-review')
+  openReview: byId<HTMLButtonElement>('open-review'),
+  fetch: byId('view-fetch'),
+  openFetch: byId<HTMLButtonElement>('open-fetch')
 };
+
+/** Web Fetch panel (GET-99 real GitHub public slice), integrated in-app. */
+const fetchPanel = createFetchPanel({
+  api,
+  byId,
+  onUnauthorized: () => auth.open('signin', handleAuthSuccess)
+});
 
 /* ---------------- citation return & local search ---------------- */
 
@@ -317,6 +327,7 @@ function clearPrivateState(): void {
   // Render the cleared DOM synchronously so an identity switch can never
   // flash the previous account's research while its run list is pending.
   renderAll();
+  fetchPanel.reset();
 }
 
 /** A review request returning 401 means the session ended; drop all private state. */
@@ -347,7 +358,8 @@ function route(): void {
   const wantsApp = Boolean(appMatch);
   const reviewMatch = hash.match(/^#\/review(?:\/([^/?#]+))?/);
   const wantsReview = Boolean(reviewMatch);
-  if ((wantsApp || wantsReview) && !state.user) {
+  const wantsFetch = hash === '#/fetch';
+  if ((wantsApp || wantsReview || wantsFetch) && !state.user) {
     window.location.hash = '#/';
     auth.open('signin', (user) => {
       handleAuthSuccess(user);
@@ -355,12 +367,18 @@ function route(): void {
     });
     return;
   }
-  els.home.hidden = wantsApp || wantsReview;
+  els.home.hidden = wantsApp || wantsReview || wantsFetch;
   els.app.hidden = !wantsApp;
   els.review.hidden = !wantsReview;
-  els.footer.hidden = wantsApp || wantsReview;
-  document.body.dataset.view = wantsApp ? 'app' : wantsReview ? 'review' : 'home';
-  homeMotion.setActive(!wantsApp && !wantsReview);
+  els.fetch.hidden = !wantsFetch;
+  els.footer.hidden = wantsApp || wantsReview || wantsFetch;
+  document.body.dataset.view = wantsApp ? 'app' : wantsReview ? 'review' : wantsFetch ? 'fetch' : 'home';
+  homeMotion.setActive(!wantsApp && !wantsReview && !wantsFetch);
+  if (wantsFetch) {
+    // Persisted Web Fetch runs restore after refresh from the owner-scoped API.
+    void fetchPanel.refresh();
+    return;
+  }
   if (wantsReview) {
     let caseId: string | null = null;
     if (reviewMatch?.[1]) {
@@ -1433,6 +1451,13 @@ function wire(): void {
       window.location.hash = '#/review';
     }
   });
+  els.openFetch.addEventListener('click', () => {
+    if (window.location.hash === '#/fetch') {
+      void fetchPanel.refresh();
+    } else {
+      window.location.hash = '#/fetch';
+    }
+  });
   byId<HTMLButtonElement>('sign-out').addEventListener('click', () => void signOut());
   byId<HTMLButtonElement>('open-app').addEventListener('click', () => {
     window.location.hash = '#/app';
@@ -1606,5 +1631,6 @@ export const __test = {
   homeMotion,
   localSearch,
   citationReturn,
-  focusSource
+  focusSource,
+  fetchPanel
 };
