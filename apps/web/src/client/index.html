@@ -27,6 +27,7 @@
             <span class="user-name" id="user-name"></span>
             <button class="button" type="button" id="open-app">已保存研究</button>
             <details class="account-options"><summary aria-label="账号选项">更多</summary><div>
+              <button class="button ghost" type="button" id="open-fetch">Web Fetch</button>
               <button class="button ghost" type="button" id="open-review">资料标注</button>
               <button class="button ghost" type="button" id="sign-out">退出登录</button>
             </div></details>
@@ -275,6 +276,72 @@
         </div>
         <!-- ============ REVIEW ============ -->
         <div id="view-review" hidden></div>
+
+        <!-- ============ WEB FETCH (GET-99 real GitHub public slice) ============ -->
+        <div id="view-fetch" hidden>
+          <section class="fetch-shell container" aria-labelledby="fetch-title">
+            <header class="fetch-header">
+              <h1 id="fetch-title">Web Fetch</h1>
+              <p class="helper">抓取真实 GitHub 公开资料：账号切片保存公开资料、公开自有仓库列表与 README/当前公开工作快照；仓库切片枚举 issues（含 PR）正文与每条首页 issue 评论。只读取公开资源；不做语义综合，研究问题保持未回答。</p>
+            </header>
+            <form class="composer fetch-form" id="fetch-form" novalidate>
+              <div class="field">
+                <label for="fetch-target">目标 GitHub 账号或仓库</label>
+                <input id="fetch-target" name="target" type="text" placeholder="https://github.com/&lt;账号&gt; 或 https://github.com/&lt;账号&gt;/&lt;仓库&gt;" autocomplete="off" />
+                <p class="helper" id="fetch-target-echo" aria-live="polite"></p>
+              </div>
+              <div class="field">
+                <label for="fetch-question">冻结的研究问题</label>
+                <textarea id="fetch-question" name="question" rows="2" placeholder="这次抓取你想核对什么？"></textarea>
+              </div>
+              <div class="field">
+                <label class="confirm-line" for="fetch-confirm">
+                  <input type="checkbox" id="fetch-confirm" />
+                  <span>我确认以上目标、冻结的问题与支持的访问范围，允许在抓取前发出 GitHub 公开 API 请求。</span>
+                </label>
+              </div>
+              <div class="composer-actions">
+                <button class="button primary" type="submit" id="fetch-submit">开始抓取</button>
+              </div>
+              <p class="form-status" id="fetch-form-status" role="status"></p>
+            </form>
+
+            <section class="fetch-runs" aria-labelledby="fetch-runs-title">
+              <div class="fetch-runs-head">
+                <h2 id="fetch-runs-title">抓取运行</h2>
+                <button class="button ghost" type="button" id="fetch-refresh">刷新</button>
+              </div>
+              <ul class="fetch-run-list" id="fetch-run-list"></ul>
+            </section>
+
+            <section class="fetch-detail" id="fetch-detail" aria-labelledby="fetch-detail-title" hidden>
+              <h2 id="fetch-detail-title"></h2>
+              <p id="fetch-detail-state"></p>
+              <p id="fetch-detail-progress"></p>
+              <div class="fetch-controls">
+                <button class="button" type="button" id="fetch-pause">暂停</button>
+                <button class="button" type="button" id="fetch-resume">恢复</button>
+                <label class="helper" for="fetch-resume-choice" id="fetch-resume-choice-label">
+                  <select id="fetch-resume-choice" hidden>
+                    <option value="">请选择如何处理未确认的请求</option>
+                    <option value="skip">结果未知的请求：保留为缺口</option>
+                    <option value="retry">结果未知的请求：重新发起（先前费用未知）</option>
+                  </select>
+                </label>
+                <button class="button ghost" type="button" id="fetch-stop">停止</button>
+              </div>
+              <p class="form-status" id="fetch-detail-status" role="status"></p>
+              <h3>限制</h3>
+              <ul class="fetch-list" id="fetch-limitations"></ul>
+              <h3>缺口</h3>
+              <ul class="fetch-list" id="fetch-gaps"></ul>
+              <h3>待核证据</h3>
+              <ul class="fetch-evidence-list" id="fetch-evidence"></ul>
+              <h3>快照处理</h3>
+              <p id="fetch-processing"></p>
+            </section>
+          </section>
+        </div>
       </main>
 
       <footer class="site-footer" id="site-footer">

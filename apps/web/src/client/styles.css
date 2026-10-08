@@ -964,3 +964,96 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 @media (prefers-reduced-motion: reduce) {
   #view-home *, #view-home *::before, #view-home *::after { animation: none !important; transition: none !important; }
 }
+
+/* ============ Web Fetch (GET-99 real GitHub public slice) ============ */
+.fetch-shell {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 16px 64px;
+  overflow-wrap: anywhere;
+}
+.fetch-header h1 {
+  margin-bottom: 4px;
+}
+.fetch-form {
+  margin: 24px 0;
+}
+.fetch-form .confirm-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.fetch-form .confirm-line input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  flex: 0 0 20px;
+  padding: 0;
+  margin-top: 2px;
+}
+.fetch-form .composer-actions .button.primary {
+  flex: 0 0 auto;
+  width: 100%;
+}
+.fetch-controls .helper {
+  min-width: 0;
+  max-width: 100%;
+}
+.fetch-controls select {
+  font: inherit;
+  max-width: 100%;
+}
+.fetch-runs {
+  margin: 24px 0;
+}
+.fetch-runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.fetch-run-list,
+.fetch-list,
+.fetch-evidence-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.fetch-run-list li,
+.fetch-list li {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+.fetch-run-list small,
+.fetch-list small,
+.fetch-evidence-list small {
+  display: block;
+  opacity: 0.75;
+}
+.fetch-evidence-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+.fetch-evidence-list blockquote {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid rgba(127, 127, 127, 0.5);
+  white-space: pre-wrap;
+}
+.fetch-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.link-button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  text-decoration: underline;
+}

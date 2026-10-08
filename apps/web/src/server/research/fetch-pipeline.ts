@@ -123,6 +123,17 @@ export interface FetchCatalogItem {
   itemId: string;
   sourceId: string;
   sourceRevision: number;
+  /**
+   * ACTUAL captured author identity and its relation to the subject
+   * (repository material is often authored by third parties). Absent means
+   * ordinary account-post mode where the account is the author. The separate
+   * `accountId` above stays the permission/publisher boundary
+   * (`sourceAccountId` in the GET-59 output).
+   */
+  authorAccountId?: string;
+  authorRole?: 'subject' | 'third_party' | 'unknown';
+  /** Structural comment-surface inapplicability (frozen reason), never fabricated. */
+  commentsStructuralNa?: { reason: string };
   title: string;
   publishedAt: string | null;
   /** Complete captured full text; its canonical hash pins the source revision. */
@@ -147,6 +158,13 @@ export interface FetchCatalogAccount {
   pages: FetchCatalogItem[][];
   /** Continuation native cursor after each page; null = the adapter's explicit terminal boundary. */
   pageCursors: (string | null)[];
+  /**
+   * Trusted acquisition-boundary gaps (failed/unknown/rejected/cyclic/
+   * unreadable listing rows and material) merged into every enumeration
+   * observation. Exhausting this cached snapshot is NEVER proof that the real
+   * provider history was exhausted: these gaps keep the denominator unknown.
+   */
+  listingGaps?: { code: string; detail: string }[];
 }
 
 export interface FetchSourceCatalog {
@@ -163,6 +181,18 @@ export interface FetchPipelineFoldHooks {
   beforeCheckpointCommit?: () => void;
 }
 
+/**
+ * Trusted capability injection for production runs over captured provider
+ * material. When present, these operations replace the synthetic capability
+ * declaration entirely — a production run never carries an unconditional
+ * synthetic capability claim. Injected capabilities describe exactly what the
+ * captured snapshot supports and keep explicit provider limitations.
+ */
+export interface FetchPipelineCapabilityInjection {
+  registryVersion: string;
+  operations: CapabilityOperation[];
+}
+
 export interface FetchPipelineOptions {
   store: Store;
   runs: FetchPipelineStore;
@@ -177,6 +207,8 @@ export interface FetchPipelineOptions {
   /** Resume an existing run instead of creating one. */
   runId?: string;
   synthetic?: boolean;
+  /** Trusted capability snapshot (production); defaults to the synthetic declaration. */
+  capabilityInjection?: FetchPipelineCapabilityInjection;
   provenance?: RecordProvenance;
   /** Explicit authoritative reconciliation of unresolved intents ('abandon'). */
   reconcileUnresolvedIntents?: 'abandon';
@@ -426,17 +458,19 @@ export async function runFetchPipeline(
         allowedScope: account.allowedScope.state
       }));
     const operations: CapabilityOperation[] = [];
-    for (const account of catalog.accounts) {
-      for (const operation of ['list_posts', 'list_comments', 'read_thread'] as const) {
-        operations.push({
-          platform: account.platform,
-          operation,
-          state: 'supported',
-          sortOptions: ['provider_default'],
-          dateRange: 'unsupported',
-          maxDepth: frozen.spec.threadDepth > 0 ? frozen.spec.threadDepth : 8,
-          limitation: 'synthetic adapter capability: offline fixture only, no live endpoint'
-        });
+    if (!options.capabilityInjection) {
+      for (const account of catalog.accounts) {
+        for (const operation of ['list_posts', 'list_comments', 'read_thread'] as const) {
+          operations.push({
+            platform: account.platform,
+            operation,
+            state: 'supported',
+            sortOptions: ['provider_default'],
+            dateRange: 'unsupported',
+            maxDepth: frozen.spec.threadDepth > 0 ? frozen.spec.threadDepth : 8,
+            limitation: 'synthetic adapter capability: offline fixture only, no live endpoint'
+          });
+        }
       }
     }
     return {
@@ -447,7 +481,12 @@ export async function runFetchPipeline(
       scopeVersion: record.scopeVersion,
       cancelled: false,
       accounts,
-      capabilities: { registryVersion: catalog.registryVersion, operations },
+      capabilities: options.capabilityInjection
+        ? {
+            registryVersion: options.capabilityInjection.registryVersion,
+            operations: clone(options.capabilityInjection.operations)
+          }
+        : { registryVersion: catalog.registryVersion, operations },
       skillPins: [],
       mediaConversionAuthorized: false
     };
@@ -735,6 +774,10 @@ export async function runFetchPipeline(
       enumItems.push({ sourceId: item.sourceId, sourceRevision: item.sourceRevision, hasMedia: item.hasMedia });
     }
     for (const gap of envelope.gaps) knownGaps.push(`${gap.code}:${gap.detail}`);
+    // Trusted acquisition-boundary gaps: exhausting the cached snapshot is
+    // never proof that the real provider history was exhausted.
+    const catalogAccount = catalog.accounts.find((entry) => entry.accountId === accountId) ?? null;
+    for (const gap of catalogAccount?.listingGaps ?? []) knownGaps.push(`${gap.code}:${gap.detail}`);
     if (state) state.pagesDone += 1;
     const native = envelope.cursor.nativeCursor;
     const cycle = native !== null && (state?.seenNativeCursors ?? []).includes(native);
@@ -794,10 +837,15 @@ export async function runFetchPipeline(
     // Canonical source binding: exact returned item/source/account identity
     // AND revision AND full-text hash. Identical hashes from distinct sources
     // never prove attribution; a metadata-only hash is never a body pin.
+    // The account identity of the binding is the PERMISSION/publisher
+    // boundary: with an explicit sourceAccountId the actual author may differ
+    // (captured repository material), without it the author must be the
+    // account itself (ordinary account-post mode).
+    const boundAccount = (posted.sourceAccountId ?? posted.authorAccountId) === item.accountId;
     const bound =
       posted.itemId === item.itemId &&
       posted.sourceId === item.sourceId &&
-      posted.authorAccountId === item.accountId &&
+      boundAccount &&
       sourceRevision === item.sourceRevision &&
       metadata?.sourceRevision === item.sourceRevision &&
       sha256Hex(text) === item.contentHash;
@@ -1402,9 +1450,37 @@ export async function runFetchPipeline(
       bodySteps.push(bodyKey);
       if (!settled(bodyKey)) steps.push({ key: bodyKey, tool: 'read_post', input: bodyInput });
       const commentsInput: Record<string, unknown> = { accountId: identity.accountId, itemId: item.itemId };
-      const commentsKey = fetchPlanStepKey('list_comments', commentsInput, identityRef);
-      commentsSteps.push(commentsKey);
-      if (!settled(commentsKey)) steps.push({ key: commentsKey, tool: 'list_comments', input: commentsInput });
+      if (item.commentsStructuralNa) {
+        // Structural comment-surface inapplicability with its frozen reason
+        // (e.g. README snapshots have no comment surface): recorded locally
+        // as an explicit unread/structural receipt — a successful comments
+        // endpoint is NEVER fabricated for such material.
+        const naReason = item.commentsStructuralNa.reason;
+        const naKey = fetchLocalStepKey('comments_structural_na', {
+          accountId: identity.accountId,
+          itemId: item.itemId,
+          sourceId: item.sourceId,
+          sourceRevision: item.sourceRevision
+        });
+        commentsSteps.push(naKey);
+        if (!settled(naKey)) {
+          if (!allowLocalWrites) {
+            steps.push({ key: naKey, tool: 'local_comments_na', input: commentsInput });
+          } else {
+            store.inTransaction(() => {
+              receipt(item, { name: 'comments' }, 'unread', naReason, [], [], [], `${naKey}:unread`);
+              checkpoint.doneSteps = [...new Set([...checkpoint.doneSteps, naKey])].sort();
+              runs.updateCheckpoint(runId, checkpoint);
+            });
+            runs.appendEvent(runId, 'local', { stepKey: naKey, note: 'structural comments inapplicability (frozen reason)' });
+            done.add(naKey);
+          }
+        }
+      } else {
+        const commentsKey = fetchPlanStepKey('list_comments', commentsInput, identityRef);
+        commentsSteps.push(commentsKey);
+        if (!settled(commentsKey)) steps.push({ key: commentsKey, tool: 'list_comments', input: commentsInput });
+      }
       if (item.hasMedia === 'present' && item.mediaRef !== null) {
         const mediaInput: Record<string, unknown> = {
           accountId: identity.accountId,
@@ -1425,25 +1501,25 @@ export async function runFetchPipeline(
         if (!settled(mediaKey)) {
           if (!allowLocalWrites) {
             steps.push({ key: mediaKey, tool: 'local_media_unknown', input: bodyInput });
-            continue;
+          } else {
+            // Local-only write with the same atomic discipline as a fold.
+            store.inTransaction(() => {
+              receipt(
+                item,
+                { name: 'media' },
+                'unread',
+                'hasMedia=unknown：媒体是否存在未知，显式记录未知/未读，未按无媒体处理',
+                [],
+                [],
+                [],
+                `${mediaKey}:unread`
+              );
+              checkpoint.doneSteps = [...new Set([...checkpoint.doneSteps, mediaKey])].sort();
+              runs.updateCheckpoint(runId, checkpoint);
+            });
+            runs.appendEvent(runId, 'local', { stepKey: mediaKey, note: 'explicit unknown/unread media state' });
+            done.add(mediaKey);
           }
-          // Local-only write with the same atomic discipline as a fold.
-          store.inTransaction(() => {
-            receipt(
-              item,
-              { name: 'media' },
-              'unread',
-              'hasMedia=unknown：媒体是否存在未知，显式记录未知/未读，未按无媒体处理',
-              [],
-              [],
-              [],
-              `${mediaKey}:unread`
-            );
-            checkpoint.doneSteps = [...new Set([...checkpoint.doneSteps, mediaKey])].sort();
-            runs.updateCheckpoint(runId, checkpoint);
-          });
-          runs.appendEvent(runId, 'local', { stepKey: mediaKey, note: 'explicit unknown/unread media state' });
-          done.add(mediaKey);
         }
       }
       for (const branch of selectFetchBranches(

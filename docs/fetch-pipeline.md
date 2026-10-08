@@ -61,3 +61,7 @@ GET-59 的每调用/每 finding 限额（`save_findings` 每次至多 50 条 fin
 评论反证使用独立的不可变评论摘录来源：保留说话者、父评论 ID 与 adapter 原始 permalink，正文来源只作上下文关联；摘录 hash 不代表评论全文或主体正文。无法绑定的评论保留 gap。
 
 CLI 的 `state=finished` 只表示本地计划已排空；研究是否完成看 `assessment.verdict`。本合成场景仍为 partial，问题/check 未回答，不能发布完成结论。
+
+## 与真实 GitHub 接入（GET-99 第一切片）的关系
+
+本文件描述的**离线合成链**保持原样（合成通过不验证任何 provider 档案）。真实 GitHub 公开抓取接入在[Web Fetch 真实 GitHub 接入](fetch-integration.md)：它复用本链的 `runFetchPipeline` 源绑定处理与隔离 verify（阶段 2，零新 HTTP 的生产缓存处理器 + 可信能力注入），但**不导入任何合成 fixture 模块、不捏造 token 用量、不携带无条件合成 capability 声明**。阶段 1（真实采集）的每请求 intent/outcome、精确正文、语义校验（HTTP 落定与语义捕获分离）、控制栅栏与未知结果停机语义见该文件；本文件的 manifest/read-back/分块语义未被修改，既有回归保持全绿。

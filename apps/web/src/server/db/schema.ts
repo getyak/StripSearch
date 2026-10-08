@@ -702,4 +702,143 @@ CREATE TABLE IF NOT EXISTS research_fetch_pipeline_requests (
 );
 CREATE INDEX IF NOT EXISTS research_fetch_pipeline_requests_run
   ON research_fetch_pipeline_requests(run_id, created_at);
+
+-- GET-99 real GitHub Fetch integration (additive): the durable phase-1
+-- acquisition journal for the public GitHub slice. One controlled transport,
+-- per-request intent BEFORE any HTTP, the exact complete returned body with
+-- its SHA-256, parsed listing rows, captured README/issue material and the
+-- first page of issue comments with actual login/id attribution. Phase 2
+-- (cached processing over the frozen snapshot) reads these immutable rows and
+-- performs zero new HTTP. No cumulative request/item cap: the checkpoint and
+-- request keys make the acquisition resumable without replaying persisted
+-- successful requests.
+CREATE TABLE IF NOT EXISTS research_fetch_github_runs (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  case_id TEXT NOT NULL REFERENCES research_cases(id) ON DELETE CASCADE,
+  scope_spec_id TEXT NOT NULL,
+  scope_version INTEGER NOT NULL,
+  pipeline_run_id TEXT,
+  target_json TEXT NOT NULL,
+  access_scope TEXT NOT NULL,
+  question TEXT NOT NULL,
+  confirmation_json TEXT NOT NULL,
+  idempotency_key TEXT,
+  body_fingerprint TEXT,
+  state TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0,
+  checkpoint_json TEXT NOT NULL,
+  stop_reason TEXT,
+  snapshot_frozen_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_fetch_github_runs_owner
+  ON research_fetch_github_runs(owner_id, created_at);
+
+-- Per-request durable intent/outcome rows. The intent row is written BEFORE
+-- any HTTP request. A persisted successful request is never repeated
+-- (request_key dedupe across attempts); unresolved in-flight rows stop the
+-- run as unreconciled and are never blindly replayed. The exact complete
+-- returned body and its hash are stored here, never a truncation.
+CREATE TABLE IF NOT EXISTS research_fetch_github_requests (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES research_fetch_github_runs(id) ON DELETE CASCADE,
+  request_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  url TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  state TEXT NOT NULL,
+  status INTEGER,
+  body TEXT,
+  body_hash TEXT,
+  body_bytes INTEGER,
+  link_header TEXT,
+  api_version TEXT,
+  gap TEXT,
+  reconciled_at TEXT,
+  -- Validated SEMANTIC capture outcome, separate from HTTP settlement: an
+  -- HTTP 200 with a malformed/unparseable payload is 'invalid' or 'partial'
+  -- and never counts as a successful captured read.
+  semantic_state TEXT,
+  created_at TEXT NOT NULL,
+  settled_at TEXT
+);
+CREATE INDEX IF NOT EXISTS research_fetch_github_requests_run
+  ON research_fetch_github_requests(run_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS research_fetch_github_requests_key
+  ON research_fetch_github_requests(run_id, request_key, attempt);
+
+-- Parsed listing rows folded atomically with their settled response (repos
+-- and issues pages). Source pins for captured bodies are recorded in the
+-- authoritative CaseStore; these rows only carry the raw enumerated metadata.
+CREATE TABLE IF NOT EXISTS research_fetch_github_listing_rows (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES research_fetch_github_runs(id) ON DELETE CASCADE,
+  listing_kind TEXT NOT NULL,
+  row_key TEXT NOT NULL,
+  request_key TEXT NOT NULL,
+  row_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(run_id, listing_kind, row_key)
+);
+
+-- Captured material: README / current public work snapshots and issue/PR
+-- bodies. Same-source dedupe on (run_id, item_key): a repeated capture with
+-- the same hash never duplicates, a changed hash is a gap and never silently
+-- replaces the frozen capture.
+CREATE TABLE IF NOT EXISTS research_fetch_github_items (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES research_fetch_github_runs(id) ON DELETE CASCADE,
+  item_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  original_url TEXT,
+  author_login TEXT,
+  author_id INTEGER,
+  published_at TEXT,
+  fulltext TEXT NOT NULL,
+  body_hash TEXT NOT NULL,
+  body_bytes INTEGER NOT NULL,
+  source_id TEXT NOT NULL,
+  source_revision INTEGER NOT NULL,
+  request_key TEXT NOT NULL,
+  processing_eligible INTEGER NOT NULL DEFAULT 1,
+  processing_gap TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(run_id, item_key)
+);
+
+-- First page of issue comments per material item: actual login/id
+-- attribution, original permalink and complete captured body preserved;
+-- third-party/unknown roles stay explicit.
+CREATE TABLE IF NOT EXISTS research_fetch_github_comments (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES research_fetch_github_runs(id) ON DELETE CASCADE,
+  item_key TEXT NOT NULL,
+  comment_id TEXT NOT NULL,
+  author_login TEXT,
+  author_id INTEGER,
+  author_role TEXT NOT NULL,
+  original_url TEXT,
+  body TEXT NOT NULL,
+  body_hash TEXT NOT NULL,
+  excerpt TEXT NOT NULL,
+  comment_created_at TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(run_id, item_key, comment_id)
+);
+
+CREATE TABLE IF NOT EXISTS research_fetch_github_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  run_id TEXT NOT NULL REFERENCES research_fetch_github_runs(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS research_fetch_github_events_run
+  ON research_fetch_github_events(run_id, seq);
 `;

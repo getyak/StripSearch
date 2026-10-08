@@ -855,7 +855,21 @@ function metadataOf(value: unknown): ContentMetadata | null {
 }
 
 /** Semantic output checks: request subject, locator binding and honesty rules. */
-function semanticViolation(tool: ToolName, trusted: TrustedContext, input: Record<string, unknown>, output: Record<string, unknown>): string | null {
+/**
+ * Trusted source-pin verifier for captured repository material: the exact
+ * (sourceId, sourceRevision) must provably belong to the authorized account
+ * through an immutable CaseStore source revision. Without such a pin an
+ * alternate source binding is refused — never inferred from the response.
+ */
+type SourcePinVerifier = (accountId: string, sourceId: string, sourceRevision: number) => boolean;
+
+function semanticViolation(
+  tool: ToolName,
+  trusted: TrustedContext,
+  input: Record<string, unknown>,
+  output: Record<string, unknown>,
+  verifySourcePin?: SourcePinVerifier
+): string | null {
   const requireApplicable = (item: unknown, label: string): string | null => {
     const meta = metadataOf(item);
     if (!meta || meta.applicable !== true) return `${label}: applicable content metadata required`;
@@ -866,6 +880,43 @@ function semanticViolation(tool: ToolName, trusted: TrustedContext, input: Recor
     const role = item.authorRole;
     if (isSubject && role !== 'subject') return `${String(item.nodeId ?? item.commentId)}: subject author declared as ${String(role)}`;
     if (!isSubject && role === 'subject') return `${String(item.nodeId ?? item.commentId)}: foreign author declared as subject`;
+    return null;
+  };
+  /**
+   * Captured repository material may carry an explicit source/publisher
+   * boundary (`sourceAccountId`) separate from the actual author. Acceptance
+   * rules: the boundary must be the requested account, the author/role
+   * relation must be explicit and consistent, and the exact captured source
+   * revision must be pin-proven to belong to that account. Without
+   * `sourceAccountId` the old strict account-post rule applies unchanged.
+   */
+  const sourceBoundAuthor = (
+    item: Record<string, unknown>,
+    subjectId: string,
+    label: string
+  ): string | null => {
+    const boundary = item.sourceAccountId;
+    if (boundary === undefined || boundary === null) {
+      // Ordinary account-post mode: the author must be the requested account.
+      return item.authorAccountId === subjectId ? null : `${label}: post bound to a foreign account`;
+    }
+    if (typeof boundary !== 'string' || boundary !== subjectId) {
+      return `${label}: source boundary is not the requested authorized account`;
+    }
+    const role = item.authorRole;
+    if (role !== 'subject' && role !== 'third_party' && role !== 'unknown') {
+      return `${label}: source-bound material must state authorRole explicitly`;
+    }
+    const violation = subjectRole({ ...item, commentId: label }, subjectId);
+    if (violation !== null) return violation;
+    const sourceId = item.sourceId;
+    const sourceRevision = item.sourceRevision;
+    if (typeof sourceId !== 'string' || typeof sourceRevision !== 'number') {
+      return `${label}: source-bound material lacks a source pin identity`;
+    }
+    if (verifySourcePin && !verifySourcePin(boundary, sourceId, sourceRevision)) {
+      return `${label}: no trusted source pin proves ${sourceId}@${String(sourceRevision)} belongs to the authorized account`;
+    }
     return null;
   };
   switch (tool) {
@@ -896,8 +947,7 @@ function semanticViolation(tool: ToolName, trusted: TrustedContext, input: Recor
       const items = output.items as Record<string, unknown>[];
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i] as Record<string, unknown>;
-        if (item.authorAccountId !== subjectId) return `items[${i}]: post bound to a foreign account`;
-        const violation = requireApplicable(item, `items[${i}]`);
+        const violation = sourceBoundAuthor(item, subjectId, `items[${i}]`) ?? requireApplicable(item, `items[${i}]`);
         if (violation) return violation;
       }
       return null;
@@ -906,8 +956,7 @@ function semanticViolation(tool: ToolName, trusted: TrustedContext, input: Recor
       const subjectId = input.accountId as string;
       const item = output.item as Record<string, unknown>;
       if (item.itemId !== input.itemId) return 'item: substituted target locator';
-      if (item.authorAccountId !== subjectId) return 'item: post bound to a foreign account';
-      return requireApplicable(item, 'item');
+      return sourceBoundAuthor(item, subjectId, 'item') ?? requireApplicable(item, 'item');
     }
     case 'list_comments': {
       const subjectId = input.accountId as string;
@@ -1627,7 +1676,15 @@ export async function dispatch(
       output = null;
     }
     if (reason === null && output !== null) {
-      const violation = semanticViolation(name, trusted, input, output as Record<string, unknown>);
+      const violation = semanticViolation(name, trusted, input, output as Record<string, unknown>, (accountId, sourceId, sourceRevision) =>
+        args.ports.evidence?.readSourceRevision({
+          ownerId: trusted.ownerId,
+          caseId: trusted.caseId,
+          accountId,
+          sourceId,
+          sourceRevision
+        }) != null
+      );
       if (violation) {
         status = 'failed';
         reason = `output refused (semantic: ${violation}); executed requests stay settled`;

@@ -2,7 +2,7 @@
 
 状态：2026-09-30 离线接口契约。**Search 8 个与 Fetch 10 个工具接口**收敛为 15 个去重后的模型工具：权威注册表与严格输入/输出 schema 在 [`apps/web/src/server/research/research-tool-contracts.ts`](../apps/web/src/server/research/research-tool-contracts.ts)，可执行入口 `dispatch(trustedContext, modelCall, ports, signal)`、可信注入端口与可复用 server factory 在 [`apps/web/src/server/research/research-tool-dispatch.ts`](../apps/web/src/server/research/research-tool-dispatch.ts)。类型直接复用 GET-58（`ResearchCase / AccountSelection / ScopeVersion / SourceRevision / EvidenceRef / CoverageLocator`）与 GET-60 契约，不另造范围或账本模型。
 
-**这是离线接口契约与验证网关地基，不是上线的 Search / Fetch。** 不接 legacy Web 研究循环、不跑 provider、不建 GET-76 技能目录、GET-78 持久预算、GET-79 租约或 GET-95 批次 worker。遗留 alpha 工具面（`tool-contracts.ts` / `toolkit.ts` / `research-store.ts`）保持原样并与本契约完全分离。
+**2026-09-30 基线是离线接口契约与验证网关地基。** 2026-10-08 的受限 GitHub Fetch 接入复用此网关，范围与验证状态见 [fetch-integration.md](fetch-integration.md)；不因此声明更广泛的 Search / Fetch 已上线。该离线基线不接 legacy Web 研究循环、不跑 provider、不建 GET-76 技能目录、GET-78 持久预算、GET-79 租约或 GET-95 批次 worker。遗留 alpha 工具面（`tool-contracts.ts` / `toolkit.ts` / `research-store.ts`）保持原样并与本契约完全分离。
 
 ## 15 个工具与角色 × 阶段
 
@@ -41,3 +41,7 @@ owner / case / scopeVersion / role / phase / 账号允许范围 / capability 快
 ## 验证
 
 `apps/web/src/tests/research-tool-contracts.test.ts` 以 fake 端口 + 真实 SQLite CaseStore 覆盖：exact 名称集合与完整 role×phase 矩阵、注入字段/账号/scope/游标/capability 拒绝、撤回与固定历史回读、异步晚到范围变更/撤回/取消、技能 pin 不符、pending-only 提交与核验隔离、逐条输出元数据与非法 handler 响应、逐请求记账顺序/次数、部分失败 fail-stop、未知费用、预算拒绝、结算失败 fail-stop，以及边界回归的正反向对照：缺 fresh state fail closed、step 后/逐请求前权威复查与 AbortSignal 防绕过、真实 Store 切片外/none/profile_only 证据边界、控制器 commit 义务、跨帖子/跨查询游标重放拒绝、unverified capability 拒绝、thread/media locator 绑定与第三方父链正文、HTTP 失败/非法费用诚实计量、批次 partial 回执与未知 commit 结果、逐 finding 账号集合、thread 正文可表示性、原型键拒绝。静态检查 `python3 scripts/check_design.py` 不验证运行时行为；legacy 回归（`research-toolkit.test.ts` / `research-controller.test.ts`）证明旧边界未被改动。
+
+## GitHub 发布主体与实际作者（2026-10-08）
+
+帖子材料输出可携带 `sourceAccountId` 与 `authorRole`，将用户授权的发布主体和实际 `authorAccountId` 分开。另一个作者的材料只有在 `sourceId` + `sourceRevision` 精确匹配当前 case、授权发布主体的可信不可变来源 pin，且作者角色一致时才接受；缺失、外来 pin 或错误角色均拒绝。未声明替代发布主体的旧输出继续遵守严格账号归属规则。组织 README、仓库 issue 和第三方评论不因此成为目标本人创作，也不证明同一人关联。对应新增网关正反例在 `fetch-github-integration.test.ts`，既有严格边界在 `research-tool-contracts.test.ts`；实际抓取与冻结处理的独立验证见 GitHub 接入文档。

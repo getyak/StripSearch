@@ -303,6 +303,26 @@ export const envelopeV: Validator<ToolEnvelope> = obj({
 /* Per-tool payloads (output schemas)                                  */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Source boundary vs actual authorship (GET-99 captured repository
+ * material):
+ *
+ * - `sourceAccountId` is the PERMISSION / PUBLISHER boundary: the authorized
+ *   case account the captured source revision provably belongs to (its exact
+ *   CaseStore source pin must exist under that account). Supplying it is the
+ *   ONLY way a read may leave the gateway for material authored by someone
+ *   other than the requested account, and the gateway re-verifies the pin.
+ * - `authorAccountId` is the ACTUAL captured author (provider login/id);
+ *   `authorRole` states its relation to the subject explicitly
+ *   (`subject` iff the author IS the requested account, otherwise
+ *   `third_party` or `unknown`). An unknown author stays unknown — a
+ *   repository's ownership never implies authorship.
+ *
+ * Account-post mode without `sourceAccountId` retains the old strict rule:
+ * the post author must be the requested account. Tool views and public views
+ * both keep the original permalink, quote and attribution independently.
+ */
+
 const localMeta = (reason: string): Validator<ContentMetadata> => (value, path) => {
   const meta = contentMetadata(value, path);
   if (meta.applicable !== false || meta.reason !== reason) fail(path, `expected inapplicable metadata with reason ${reason}`);
@@ -420,6 +440,10 @@ export const listPostsOutputV = obj({
     sourceId: str(200),
     sourceRevision: int(1, Number.MAX_SAFE_INTEGER),
     authorAccountId: str(200),
+    /** Permission/publisher boundary; pin-verified by the gateway. */
+    sourceAccountId: opt(strNull(200)),
+    /** Actual author relation to the subject; required with sourceAccountId. */
+    authorRole: opt(enumOf(['subject', 'third_party', 'unknown'] as const)),
     title: str(500),
     excerpt: str(8000),
     metadata: contentMetadata
@@ -434,6 +458,10 @@ export const readPostOutputV = obj({
     sourceId: str(200),
     sourceRevision: int(1, Number.MAX_SAFE_INTEGER),
     authorAccountId: str(200),
+    /** Permission/publisher boundary; pin-verified by the gateway. */
+    sourceAccountId: opt(strNull(200)),
+    /** Actual author relation to the subject; required with sourceAccountId. */
+    authorRole: opt(enumOf(['subject', 'third_party', 'unknown'] as const)),
     title: str(500),
     text: str(100000),
     metadata: contentMetadata
