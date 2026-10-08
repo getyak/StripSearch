@@ -5,7 +5,7 @@
 ## 范围与硬边界
 
 - **只读公开资源**：`https://api.github.com` 生成路径（API 版本 `2026-03-10`），严格 `private=false` 目标；即使配置 `GITHUB_TOKEN` 也不读取私有资源。账号与组织端点区分（组织仓库列表走 `/orgs/{login}/repos`，个人走 `/users/{login}/repos?type=owner`）。
-- **账号切片**：公开用户/组织资料 → 公开自有仓库列表（真实 Link 分页）→ 每仓库 README / 当前公开工作快照。**明确不是完整贡献历史**（不抓 commit、贡献者、star、参与度）。
+- **账号切片**：公开用户/组织资料 → 公开自有仓库列表（真实 Link 分页）→ 每仓库 README / 当前公开工作快照。账号资料须验证 login、正整数 numeric ID 与 User/Organization 类型；HTTP 200 但语义无效只保留缺口，不猜测账号类型继续枚举。**明确不是完整贡献历史**（不抓 commit、贡献者、star、参与度）。
 - **仓库切片**：显式选定仓库的 issues（**含 PR**，`state=all`，真实 Link 续页）→ issue/PR 正文 → 每条目的**首页** issue 评论。不抓 review 线程、完整评论线程、代码或媒体。
 - **归属边界**：`sourceAccountId`（权限/发布边界，即用户确认的目标账号）与 `authorAccountId`（实际作者）严格分开；评论归属保留实际 login/id、原始 permalink 与完整正文，第三方/未知角色原样保留。组织/仓库作者**不假定**为研究对象；账号研究**不认定**同一人关联；README 仓库归属不代表作者身份。
 - **无语义综合、无质量结论**：研究问题保持未回答（除非有已实现的验证器支持）；待核证据与覆盖是有用输出。确定性调度器**零外部模型请求/令牌**，绝不把本地调度决策呈现为真实 LLM 使用。
@@ -35,6 +35,6 @@
 
 ## 验证状态（离线、零外网/付费调用）
 
-- 仓库测试（`apps/web/src/tests/fetch-*.test.ts`，32 项新增）：真实 SQLite 文件关闭重开 + 注入 HttpTransport 的采集链（真实 Link 多页、精确正文 hash（含超长正文）、同源去重、逐评论归属、私有目标、迟到包、未知结果、重启 fail-stop、零重复成功 HTTP）；真实 worker 全链（采集 → 冻结 → GET-59/95/60，未回答问题/诚实 partial、错误评论页不产生成功回执、媒体 unknown、零外部模型用量）；共享 `sourceAccountId` 绑定（可信 pin + 第三方作者接受，foreign/缺 pin/错误角色拒绝，旧跨账号拒绝不变）；认证 HTTP API（Origin/owner 404/幂等 409/无确认零 HTTP/速率 429/控制路径非 500）；重试失败/再次 unknown 后 skip、真实 worker 关机 AbortError/正文传输故障、同评论 ID 变更正文保留首次捕获并记录缺口、调和事务写入失败回滚、旧裸 retry key 迁移的显式 retry/skip；DOM 竞态（迟到 list/detail/start/control、stale 401/finally、新选择不被覆盖）。既有合成链回归（immutable manifests/read-back/chunking）保持全绿。
+- 仓库测试（`apps/web/src/tests/fetch-*.test.ts`，36 项新增）：真实 SQLite 文件关闭重开 + 注入 HttpTransport 的采集链（真实 Link 多页、精确正文 hash（含超长正文）、同源去重、逐评论归属、私有目标、迟到包、未知结果、重启 fail-stop、零重复成功 HTTP）；真实 worker 全链（采集 → 冻结 → GET-59/95/60，未回答问题/诚实 partial、错误评论页不产生成功回执、媒体 unknown、零外部模型用量）；共享 `sourceAccountId` 绑定（可信 pin + 第三方作者接受，foreign/缺 pin/错误角色拒绝，旧跨账号拒绝不变）；认证 HTTP API（Origin/owner 404/幂等 409/无确认零 HTTP/速率 429/控制路径非 500）；重试失败/再次 unknown 后 skip、真实 worker 关机 AbortError/正文传输故障、同评论 ID 变更正文保留首次捕获并记录缺口、调和事务写入失败回滚、旧裸 retry key 迁移的显式 retry/skip；DOM 竞态（迟到 list/detail/start/control、stale 401/finally、新选择不被覆盖）。既有合成链回归（immutable manifests/read-back/chunking）保持全绿。
 - 独立不可变探针（父级持有）：pagination 19/19、parser 6/6、comment-boundary 2/2、start 3/3（零外部请求）。
 - **仍属父级**：真实 GitHub 线上验收、托管部署、PR/当前头 CI、合并。本切片不声明 GET-99 全部完成。

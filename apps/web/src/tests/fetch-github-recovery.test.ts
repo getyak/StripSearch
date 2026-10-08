@@ -34,6 +34,44 @@ function fixture(transport: HttpTransport) {
   };
 }
 
+for (const profile of [
+  { login: 'different-account', id: 42, type: 'User' },
+  { login: 'fixture', id: 42, type: 'Unexpected' },
+  { login: 'fixture', type: 'User' },
+  null
+]) {
+  test(`HTTP 200 unverifiable account profile stops before listing: ${JSON.stringify(profile)}`, async () => {
+    const db = openDatabase(':memory:'); applyCoreSchema(db);
+    const store = new Store(db), journal = new FetchGithubStore(db, store);
+    const calls: string[] = [];
+    const transport: HttpTransport = { fetch: async (url) => {
+      calls.push(url);
+      return profile === null
+        ? { ...response({}), text: async () => 'Synthetic non-JSON response' }
+        : response(profile);
+    } };
+    const runner = new FetchGithubRunner({ db, store, transport, githubToken: null });
+    const targetUrl = 'https://github.com/fixture', question = 'Synthetic account profile verification boundary';
+    const run = runner.start({ ownerId: 'synthetic-profile-owner', targetUrl, question,
+      accessScope: 'github_public_account', confirmation: true, confirmedTarget: targetUrl,
+      confirmedQuestion: question, confirmedAccessScope: 'github_public_account' });
+    try {
+      const outcomes: string[] = [];
+      for (let i = 0; i < 4; i++) outcomes.push((await executeAcquisitionQuantum(journal.requireRun(run.runId),
+        { store, journal, transport, githubToken: null }, new AbortController().signal)).outcome);
+      assert.deepEqual(calls, ['https://api.github.com/users/fixture']);
+      assert.deepEqual(outcomes, ['settled', 'done', 'done', 'done']);
+      const current = journal.requireRun(run.runId);
+      assert.equal(current.checkpoint.accountKind, null);
+      assert.equal(current.checkpoint.verified.accountId, null);
+      assert.equal(current.checkpoint.gaps.some((gap) =>
+        gap.code === (profile === null ? 'unparseable_body' : 'profile_mismatch')), true);
+      assert.equal(journal.listRequests(run.runId)[0]!.semanticState, 'invalid');
+      assert.equal(journal.listListingRows(run.runId, 'repos').length, 0);
+    } finally { await runner.stopAll(); db.close(); }
+  });
+}
+
 for (const status of [404, 429, 500]) {
   test(`one authorized retry ending HTTP ${status} never dispatches that key again`, async () => {
     const calls: string[] = [];

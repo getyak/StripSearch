@@ -270,7 +270,7 @@ function sameGithubRepoUrl(url: string | null, owner: string, name: string): boo
 
 export interface ParsedProfile {
   login: string;
-  numericId: number | null;
+  numericId: number;
   accountKind: 'user' | 'org';
 }
 
@@ -280,7 +280,9 @@ export function parseProfileResponse(raw: unknown, expectedLogin: string): Parse
   if (!login || login.toLowerCase() !== expectedLogin.toLowerCase()) return null;
   const type = asString(object.type);
   if (type !== 'User' && type !== 'Organization') return null;
-  return { login, numericId: asNumber(object.id), accountKind: type === 'Organization' ? 'org' : 'user' };
+  const numericId = asNumber(object.id);
+  if (numericId === null || !Number.isSafeInteger(numericId) || numericId < 1) return null;
+  return { login, numericId, accountKind: type === 'Organization' ? 'org' : 'user' };
 }
 
 export interface ParsedRepoRow {
@@ -535,7 +537,7 @@ function targetLogin(target: FetchGithubTarget): string {
 }
 
 function reposFrozenQuery(cp: FetchGithubCheckpoint): Record<string, string> {
-  return cp.accountKind === 'user' ? { per_page: '30', type: 'owner' } : { ...frozenQueryFor('repos_list') };
+  return cp.accountKind === 'org' ? { ...frozenQueryFor('repos_list') } : { per_page: '30', type: 'owner' };
 }
 
 /**
@@ -590,7 +592,9 @@ export function planNextRequest(
 
   // 3. Account target: public owned repositories (real Link pagination),
   //    then each owned repository's README / current public work snapshot.
-  if (succeeded('profile')) {
+  // HTTP success alone cannot authorize account enumeration: the profile
+  // must bind the requested login, numeric identity, and user/org endpoint.
+  if (succeeded('profile') && cp.verified.accountId !== null && cp.accountKind !== null) {
     const listing = planListingContinuation(run.runId, 'repos', cp, journal, canIssue);
     if (listing) return listing;
     if (cp.listings.repos?.done === true) {
