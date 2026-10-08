@@ -18,7 +18,7 @@
 
 ## 两个持久阶段（阶段边界）
 
-1. **阶段 1 · 真实采集**（`fetch-github-acquisition.ts`）：所有真实 HTTP 只经**一个受控 transport**，且必须在**持久 intent 之后**发出（绝不预取）；每次落定的 响应 + 语义校验 + 折叠 + checkpoint **同一事务原子提交**。请求键幂等：**已成功的请求绝不重复**；失败/限流/超限/私有/缺失保留为显式缺口（不是零结果、不是完成）；**结果未知**（超时/传输故障/被控制栅栏拒绝的迟到包）立即 `unreconciled` 停止，绝不自动重试，只能显式 `retry`（新记账尝试、先前费用未知）或 `skip`（永久缺口）。HTTP 落定与**语义捕获**分开记账：`semantic_state=valid/partial/invalid`——200 非数组/不可解析行/非字符串正文**绝不**算成功读取，也绝不伪造空正文。暂停/恢复/停止用控制 revision 栅栏拒绝旧代迟到包（不持久化正文/捕获）；scope/owner 漂移在请求前与原子折叠内都拒绝。快照冻结与阶段移交原子且拒绝未决 intent。
+1. **阶段 1 · 真实采集**（`fetch-github-acquisition.ts`）：所有真实 HTTP 只经**一个受控 transport**，且必须在**持久 intent 之后**发出（绝不预取）；每次落定的 响应 + 语义校验 + 折叠 + checkpoint **同一事务原子提交**。请求键幂等：**已成功的请求绝不重复**；失败/限流/超限/私有/缺失保留为显式缺口（不是零结果、不是完成）；**结果未知**（超时/传输故障/被控制栅栏拒绝的迟到包）立即 `unreconciled` 停止，绝不自动重试，只能显式 `retry`（新记账尝试、先前费用未知）或 `skip`（永久缺口）；retry 授权在同一 intent 事务中仅消费一次，后续失败/再次未知不能继承它；关机取消及响应正文读取故障保留 unknown；调和记录、版本化授权与恢复状态同一事务提交，旧版裸 retry key 失效停机，必须重新明确选择，不能覆盖历史 skip。HTTP 落定与**语义捕获**分开记账：`semantic_state=valid/partial/invalid`——200 非数组/不可解析行/非字符串正文**绝不**算成功读取，也绝不伪造空正文。暂停/恢复/停止用控制 revision 栅栏拒绝旧代迟到包（不持久化正文/捕获）；scope/owner 漂移在请求前与原子折叠内都拒绝。快照冻结与阶段移交原子且拒绝未决 intent。
 2. **阶段 2 · 冻结快照处理**（现有 `runFetchPipeline`）：**零新 HTTP、不重复计费**；生产缓存处理器（`fetch-github-catalog.ts`）只为精确捕获材料服务，经 GET-59 `dispatch` 校验网关 → GET-95 覆盖回执 → GET-60 确定性评估 + 隔离 verify。可信能力注入声明真实能力面（`read_thread`/`read_media` 显式 unsupported、评论只读首页），**不携带合成 capability 声明、不捏造 token 用量**。媒体显式 unknown/未读（绝不假造缺席）；README 评论面为**冻结理由的结构性不适用**；语义校验失败的评论页在缓存处理器中显式失败（绝不变成成功空页）。采集缺口（失败/未知/被拒/循环/不可读行）注入 GET-60 枚举观测：**耗尽快照 ≠ 耗尽真实历史**，分母保持未知。
 
 ## `/api/fetch` 请求/视图契约（`shared/research-fetch-github.ts`）
@@ -35,6 +35,6 @@
 
 ## 验证状态（离线、零外网/付费调用）
 
-- 仓库测试（`apps/web/src/tests/fetch-*.test.ts`，21 项新增）：真实 SQLite 文件关闭重开 + 注入 HttpTransport 的采集链（真实 Link 多页、精确正文 hash（含超长正文）、同源去重、逐评论归属、私有目标、迟到包、未知结果、重启 fail-stop、零重复成功 HTTP）；真实 worker 全链（采集 → 冻结 → GET-59/95/60，未回答问题/诚实 partial、错误评论页不产生成功回执、媒体 unknown、零外部模型用量）；共享 `sourceAccountId` 绑定（可信 pin + 第三方作者接受，foreign/缺 pin/错误角色拒绝，旧跨账号拒绝不变）；认证 HTTP API（Origin/owner 404/幂等 409/无确认零 HTTP/速率 429/控制路径非 500）；DOM 竞态（迟到 list/detail/start/control、stale 401/finally、新选择不被覆盖）。既有合成链回归（immutable manifests/read-back/chunking）保持全绿。
+- 仓库测试（`apps/web/src/tests/fetch-*.test.ts`，32 项新增）：真实 SQLite 文件关闭重开 + 注入 HttpTransport 的采集链（真实 Link 多页、精确正文 hash（含超长正文）、同源去重、逐评论归属、私有目标、迟到包、未知结果、重启 fail-stop、零重复成功 HTTP）；真实 worker 全链（采集 → 冻结 → GET-59/95/60，未回答问题/诚实 partial、错误评论页不产生成功回执、媒体 unknown、零外部模型用量）；共享 `sourceAccountId` 绑定（可信 pin + 第三方作者接受，foreign/缺 pin/错误角色拒绝，旧跨账号拒绝不变）；认证 HTTP API（Origin/owner 404/幂等 409/无确认零 HTTP/速率 429/控制路径非 500）；重试失败/再次 unknown 后 skip、真实 worker 关机 AbortError/正文传输故障、同评论 ID 变更正文保留首次捕获并记录缺口、调和事务写入失败回滚、旧裸 retry key 迁移的显式 retry/skip；DOM 竞态（迟到 list/detail/start/control、stale 401/finally、新选择不被覆盖）。既有合成链回归（immutable manifests/read-back/chunking）保持全绿。
 - 独立不可变探针（父级持有）：pagination 19/19、parser 6/6、comment-boundary 2/2、start 3/3（零外部请求）。
 - **仍属父级**：真实 GitHub 线上验收、托管部署、PR/当前头 CI、合并。本切片不声明 GET-99 全部完成。

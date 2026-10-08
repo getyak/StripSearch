@@ -190,7 +190,9 @@ export async function executeGithubRequest(options: ExecuteGithubRequestOptions)
     } catch (error) {
       if (error instanceof TransportRefusedError) throw error;
       if (error instanceof ProviderError) throw error;
-      if (options.signal.aborted) throw error;
+      if (options.signal.aborted) {
+        throw new ProviderError('provider_error', '请求已取消，结果未知。');
+      }
       if (timedOut || controller.signal.aborted) {
         throw new ProviderError('provider_timeout', '供应商请求超时。');
       }
@@ -207,6 +209,14 @@ export async function executeGithubRequest(options: ExecuteGithubRequestOptions)
       apiVersion: headerOf(response.headers, 'x-github-api-version'),
       rateRemaining: headerOf(response.headers, 'x-ratelimit-remaining')
     };
+  } catch (error) {
+    // Body reads can fail/abort after headers arrive too. Dispatch already
+    // happened, so an unclassified transport fault never means definite failure.
+    if (error instanceof ProviderError || error instanceof TransportRefusedError) throw error;
+    throw new ProviderError(
+      timedOut ? 'provider_timeout' : 'provider_error',
+      timedOut ? '供应商请求超时。' : '供应商请求失败，结果未知。'
+    );
   } finally {
     clearTimeout(timer);
     options.signal.removeEventListener('abort', onAbort);
@@ -548,7 +558,10 @@ export function planNextRequest(
   const retryKeys = new Set(cp.retryRequestKeys ?? []);
   const canIssue = (descriptor: FetchGithubRequestDescriptor): boolean => {
     const key = fetchGithubRequestKey(descriptor);
-    return !attempted.has(key) || (retryKeys.has(key) && !requests.some((r) => r.requestKey === key && r.state === 'succeeded'));
+    const latest = requests.filter((r) => r.requestKey === key).sort((a, b) => b.attempt - a.attempt)[0];
+    return !attempted.has(key) ||
+      (cp.retryAuthorizationVersion === 2 && retryKeys.has(key) && latest?.state === 'unknown' && latest.reconciledAt !== null &&
+        !requests.some((r) => r.requestKey === key && r.state === 'succeeded'));
   };
   const succeeded = (kind: string): boolean => requests.some((request) => request.kind === kind && request.state === 'succeeded');
   const login = targetLogin(cp.target);
@@ -751,17 +764,25 @@ export async function executeAcquisitionQuantum(
   // belonging to an older generation is rejected, never folded.
   const startRevision = freshAtStart.revision;
   // Durable intent BEFORE any HTTP ("never prefetch outside the journal").
-  const { request } = journal.beginRequest({
-    runId: run.runId,
-    requestKey,
-    kind: plan.descriptor.kind,
-    url: plan.descriptor.url
-  });
-  journal.appendEvent(run.runId, 'request_intent', {
-    requestKey,
-    kind: plan.descriptor.kind,
-    purpose: plan.purpose,
-    attempt: request.attempt
+  const request = journal.inTransaction(() => {
+    const { request: attempt } = journal.beginRequest({
+      runId: run.runId,
+      requestKey,
+      kind: plan.descriptor.kind,
+      url: plan.descriptor.url
+    });
+    // One explicit choice authorizes ONE attempt, consumed with its durable
+    // intent. A failed/unknown retry cannot inherit that choice on restart.
+    const checkpoint = journal.requireRun(run.runId).checkpoint;
+    checkpoint.retryRequestKeys = checkpoint.retryRequestKeys.filter((key) => key !== requestKey);
+    journal.updateCheckpoint(run.runId, checkpoint);
+    journal.appendEvent(run.runId, 'request_intent', {
+      requestKey,
+      kind: plan.descriptor.kind,
+      purpose: plan.purpose,
+      attempt: attempt.attempt
+    });
+    return attempt;
   });
 
   let response: GithubAcquisitionResponse | null = null;
@@ -1085,8 +1106,9 @@ function foldResponse(
       const rows = asArray(parsed)
         .map((entry) => parseCommentRow(entry, commentTarget.owner, commentTarget.name, requestedNumber, subjectLogin))
         .filter((entry): entry is ParsedCommentRow => entry !== null);
+      let changed = 0;
       for (const row of rows) {
-        journal.putComment({
+        const result = journal.putComment({
           runId: run.runId,
           itemKey,
           commentId: row.commentId,
@@ -1099,6 +1121,10 @@ function foldResponse(
           excerpt: row.excerpt,
           commentCreatedAt: row.commentCreatedAt
         });
+        if (result === 'hash_changed') {
+          changed += 1;
+          cp.gaps.push({ code: 'source_changed', detail: `${itemKey} 评论 ${String(row.commentId)} 正文发生冲突；保留首次捕获，未替换来源。` });
+        }
       }
       const rejected = asArray(parsed).length - rows.length;
       if (rejected > 0) {
@@ -1112,7 +1138,7 @@ function foldResponse(
           detail: `${itemKey} 的评论超出首页（存在 next Link）；本切片只读取首页评论`
         });
       }
-      return rejected > 0 ? 'partial' : 'valid';
+      return rejected > 0 || changed > 0 ? 'partial' : 'valid';
     }
   }
 }

@@ -122,12 +122,14 @@ export class FetchGithubRunner {
   recoverInterrupted(): number {
     let count = 0;
     for (const run of this.allRuns()) {
-      if (run.state !== 'acquiring' && run.state !== 'processing') continue;
+      const legacyRetry = this.legacyRetryKeys(run).length > 0;
+      if (run.state !== 'acquiring' && run.state !== 'processing' && !(legacyRetry && run.state === 'paused')) continue;
       const unresolved = this.journal.listUnresolvedRequests(run.runId);
-      if (unresolved.length > 0) {
-        this.journal.updateRun(run.runId, { state: 'unreconciled', stopReason: 'restart_in_flight' });
+      if (unresolved.length > 0 || legacyRetry) {
+        const reason = legacyRetry ? 'legacy_retry_authorization_ambiguous' : 'restart_in_flight';
+        this.journal.updateRun(run.runId, { state: 'unreconciled', stopReason: reason });
         this.journal.appendEvent(run.runId, 'interrupted', {
-          reason: 'restart_in_flight',
+          reason,
           unresolvedRequests: unresolved.map((request) => request.requestKey)
         });
       } else {
@@ -137,6 +139,16 @@ export class FetchGithubRunner {
       count += 1;
     }
     return count;
+  }
+
+  private legacyRetryKeys(run: FetchGithubRunRecord): string[] {
+    if (run.checkpoint.retryAuthorizationVersion === 2) return [];
+    const requests = this.journal.listRequests(run.runId);
+    return [...new Set(run.checkpoint.retryRequestKeys)].filter((key) => {
+      const latest = requests.filter((request) => request.requestKey === key)
+        .sort((a, b) => b.attempt - a.attempt)[0];
+      return latest?.state === 'unknown' && latest.reconciledAt !== null;
+    });
   }
 
   private allRuns(): FetchGithubRunRecord[] {
@@ -338,39 +350,51 @@ export class FetchGithubRunner {
     ownerId: string,
     options: FetchGithubResumeRequest
   ): FetchGithubRunView {
-    const run = this.requireOwned(runId, ownerId);
-    this.checkRevision(run, options.expectedRevision);
-    if (run.state !== 'paused' && run.state !== 'unreconciled') {
-      throw new FetchGithubRequestError('run_not_resumable', '该 Web Fetch 运行当前不需要恢复。', 409);
-    }
-    const unresolved = this.journal.listUnresolvedRequests(runId);
-    if (run.state === 'unreconciled' || unresolved.length > 0) {
-      if (options.reconcileUnknown !== 'retry' && options.reconcileUnknown !== 'skip') {
-        throw new FetchGithubRequestError(
-          'reconcile_choice_required',
-          '恢复前需要显式选择如何处理结果未知的请求：retry（重新发起，费用未知）或 skip（保留为缺口）。'
-        );
+    return this.journal.inTransaction(() => {
+      const run = this.requireOwned(runId, ownerId);
+      this.checkRevision(run, options.expectedRevision);
+      if (run.state !== 'paused' && run.state !== 'unreconciled') {
+        throw new FetchGithubRequestError('run_not_resumable', '该 Web Fetch 运行当前不需要恢复。', 409);
       }
-      const cp = run.checkpoint;
-      for (const request of this.journal.reconcileUnknownRequests(runId, 'abandon')) {
-        if (options.reconcileUnknown === 'retry') {
-          // Explicit user authorization only: unknown outcomes are NEVER
-          // retried automatically.
-          cp.retryRequestKeys = [...new Set([...cp.retryRequestKeys, request.requestKey])].sort();
+      const unresolved = this.journal.listUnresolvedRequests(runId);
+      const legacyRetryKeys = this.legacyRetryKeys(run);
+      if (run.state === 'unreconciled' || unresolved.length > 0 || legacyRetryKeys.length > 0) {
+        if (options.reconcileUnknown !== 'retry' && options.reconcileUnknown !== 'skip') {
+          throw new FetchGithubRequestError(
+            'reconcile_choice_required',
+            '恢复前需要显式选择如何处理结果未知的请求：retry（重新发起，费用未知）或 skip（保留为缺口）。'
+          );
         }
-        cp.gaps.push({
-          code: 'outcome_unknown',
-          detail: `${request.requestKey} 的结果未知（第 ${String(request.attempt)} 次尝试）；已显式${options.reconcileUnknown === 'retry' ? '授权重新发起（先前费用未知）' : '保留为永久缺口'}`
-        });
+        const cp = run.checkpoint;
+        // Legacy bare keys cannot distinguish an old retry from a later skip.
+        // Only this fresh explicit choice may create a consumable v2 permission.
+        cp.retryRequestKeys = options.reconcileUnknown === 'retry'
+          ? [...new Set([...legacyRetryKeys,
+            ...(cp.retryAuthorizationVersion === 2 ? cp.retryRequestKeys : [])])]
+          : [];
+        cp.retryAuthorizationVersion = 2;
+        for (const request of this.journal.reconcileUnknownRequests(runId, 'abandon')) {
+          if (options.reconcileUnknown === 'retry') {
+            // Explicit user authorization only: unknown outcomes are NEVER
+            // retried automatically.
+            cp.retryRequestKeys = [...new Set([...cp.retryRequestKeys, request.requestKey])].sort();
+          } else {
+            cp.retryRequestKeys = cp.retryRequestKeys.filter((key) => key !== request.requestKey);
+          }
+          cp.gaps.push({
+            code: 'outcome_unknown',
+            detail: `${request.requestKey} 的结果未知（第 ${String(request.attempt)} 次尝试）；已显式${options.reconcileUnknown === 'retry' ? '授权重新发起（先前费用未知）' : '保留为永久缺口'}`
+          });
+        }
+        this.journal.updateCheckpoint(runId, cp);
+        this.journal.appendEvent(runId, 'reconciled', { resolution: options.reconcileUnknown });
       }
-      this.journal.updateCheckpoint(runId, cp);
-      this.journal.appendEvent(runId, 'reconciled', { resolution: options.reconcileUnknown });
-    }
-    const next: FetchGithubRunState = run.checkpoint.snapshot.frozen ? 'processing' : 'acquiring';
-    this.journal.updateRun(runId, { state: next, stopReason: null });
-    this.journal.appendEvent(runId, 'resumed', { state: next });
-    this.wake();
-    return this.view(runId, ownerId) as FetchGithubRunView;
+      const next: FetchGithubRunState = run.checkpoint.snapshot.frozen ? 'processing' : 'acquiring';
+      this.journal.updateRun(runId, { state: next, stopReason: null });
+      this.journal.appendEvent(runId, 'resumed', { state: next });
+      this.wake();
+      return this.view(runId, ownerId) as FetchGithubRunView;
+    });
   }
 
   stop(runId: string, ownerId: string, expectedRevision?: number): FetchGithubRunView {
@@ -493,7 +517,7 @@ export class FetchGithubRunner {
       state: run.state,
       phase: run.phase,
       target: run.target,
-      needsReconciliation: run.state === 'unreconciled' || this.journal.listUnresolvedRequests(run.runId).length > 0,
+      needsReconciliation: run.state === 'unreconciled' || this.journal.listUnresolvedRequests(run.runId).length > 0 || this.legacyRetryKeys(run).length > 0,
       accessScope: run.accessScope,
       question: run.question,
       confirmation: run.confirmation,

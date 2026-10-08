@@ -166,6 +166,8 @@ export interface FetchGithubCheckpoint {
    * outcomes are never retried automatically.
    */
   retryRequestKeys: string[];
+  /** Missing on legacy checkpoints whose bare retry keys are ambiguous. */
+  retryAuthorizationVersion?: 2;
   listings: {
     repos: FetchGithubListingCursor | null;
     issues: FetchGithubListingCursor | null;
@@ -184,6 +186,7 @@ export function createFetchGithubCheckpoint(target: FetchGithubTarget, accountId
     publicConfirmed: false,
     reposListingBuilt: false,
     retryRequestKeys: [],
+    retryAuthorizationVersion: 2,
     listings: { repos: null, issues: null },
     gaps: [],
     snapshot: { frozen: false, digest: null, frozenAt: null }
@@ -749,13 +752,13 @@ export class FetchGithubStore {
     bodyHash: string;
     excerpt: string;
     commentCreatedAt: string | null;
-  }): 'created' | 'duplicate' {
+  }): 'created' | 'duplicate' | 'hash_changed' {
     const existing = this.db
       .prepare('SELECT id, body_hash FROM research_fetch_github_comments WHERE run_id = ? AND item_key = ? AND comment_id = ?')
       .get(input.runId, input.itemKey, input.commentId) as { id: string; body_hash: string } | undefined;
     if (existing) {
       // Same-source dedupe: an identical comment body is stored once.
-      return existing.body_hash === input.bodyHash ? 'duplicate' : 'duplicate';
+      return existing.body_hash === input.bodyHash ? 'duplicate' : 'hash_changed';
     }
     this.db
       .prepare(
