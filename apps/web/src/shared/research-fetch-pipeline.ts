@@ -28,6 +28,42 @@
  * source pins (sourceId + sourceRevision + canonical full-text hash); a
  * metadata-only hash is never a body pin and a changed hash/revision is
  * refused, never silently accepted.
+ *
+ * Chunked stage/verify plans (server/research/fetch-pipeline-plan.ts): the
+ * GET-59 per-call/per-finding bounds (50 findings per save_findings call,
+ * 100 support + 100 counter + 100 coverage identities per finding, 100
+ * evidence refs per read_evidence call) are respected by DETERMINISTIC
+ * chunking that preserves every dependency and coverage identity exactly
+ * once — never silent slice losses and never cumulative caps (a chunk size
+ * is a per-call bound only).
+ *
+ * Immutable phase manifests: every stage / read_evidence /
+ * verification-save call plan is FROZEN durably in the checkpoint (with an
+ * explicit planner version) before its first dispatch and never re-packed
+ * from successful subsets. A partially submitted or refused call keeps its
+ * exact step key: rejected material is never turned into a fresh key and
+ * auto-retried; it stays explicitly incomplete (`stage_incomplete`). The
+ * read manifest is fixed only once ALL stage material is actually staged;
+ * the verification-save manifest only once the read manifest has settled and
+ * is built from actually validated fresh pinned read-backs (partial subsets
+ * allowed with honest gaps). Legacy checkpoints without manifests that
+ * already attempted stage/verify fail closed (`upgrade_required`) — never
+ * re-planned, never replayed; a finished run restores read-only (zero
+ * dispatches, events, checkpoint writes or new assessments).
+ *
+ * Read-back pinning: a read-back is approved only against the exact returned
+ * identity + sourceRevision + role + quote + quoteHash (real SHA256) +
+ * applicable metadata revision and fresh authoritative case evidence/source
+ * binding (existing, owner/case/account bound, unrevoked). The cache records
+ * the immutable pin, not just the id, and every later use (verification
+ * planning, submission, final outcome) re-checks current validity: a cached
+ * id alone never proves verification. Staged dependencies without a
+ * currently valid verification finding stay `verify_readback_incomplete`.
+ *
+ * Stage progress and the verify phase are gated on ALL stage material being
+ * actually submitted. Failed/refused/unavailable read-backs stay honest
+ * partial: the run is never marked finished and no semantic facts or quality
+ * claims are created.
  */
 
 /* ------------------------------------------------------------------ */
@@ -50,7 +86,28 @@ export type FetchPipelineStopReason =
   | 'cancelled'
   /** The dispatch gateway refused the batch boundary. */
   | 'blocked'
-  | 'batch_failed';
+  | 'batch_failed'
+  /**
+   * The frozen stage manifest still misses planned references or coverage
+   * identities in the actual durable collected findings (refused, partially
+   * submitted or lost material). Explicitly incomplete: no verify phase, no
+   * success progress, never `finished`.
+   */
+  | 'stage_incomplete'
+  /**
+   * Verify read-back did not pin every staged dependency (failed, refused or
+   * unavailable read-backs, revoked or invalid evidence, or missing currently
+   * valid verification findings). Honest partial: the run is NOT marked
+   * finished and no semantic fact/quality claim is created.
+   */
+  | 'verify_readback_incomplete'
+  /**
+   * Legacy checkpoint without immutable phase manifests (or an incompatible
+   * planner pin) that already attempted stage/verify: fail closed with an
+   * explicit upgrade/new-run gap; historical material is never re-planned or
+   * retried.
+   */
+  | 'upgrade_required';
 
 /* ------------------------------------------------------------------ */
 /* Step identities (collision-free canonical serialization)           */
@@ -132,6 +189,41 @@ export function selectFetchBranches(candidates: readonly FetchBranchCandidate[])
 }
 
 /* ------------------------------------------------------------------ */
+/* Immutable phase manifests and read-back pins                       */
+/* ------------------------------------------------------------------ */
+
+/** One frozen planned call: the exact tool + input + step identity. */
+export interface FetchPipelinePhaseCall {
+  key: string;
+  tool: string;
+  input: Record<string, unknown>;
+}
+
+/**
+ * Durable IMMUTABLE call manifest for one phase (stage / read_evidence /
+ * verification-save), frozen before its first dispatch and never re-packed
+ * from successful subsets. `planner` pins the planner version explicitly.
+ */
+export interface FetchPipelinePhaseManifest {
+  planner: string;
+  calls: FetchPipelinePhaseCall[];
+}
+
+/**
+ * Immutable approval record for one successfully pinned read-back: the full
+ * identity/source binding (never just the evidence id) so every later use can
+ * re-check current validity against the authoritative case state.
+ */
+export interface FetchPipelineReadBackPin {
+  evidenceId: string;
+  accountId: string;
+  sourceId: string;
+  sourceRevision: number;
+  role: string;
+  quoteHash: string;
+}
+
+/* ------------------------------------------------------------------ */
 /* Durable checkpoint                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -162,6 +254,14 @@ export interface FetchPipelineCheckpoint {
   gaps: { code: string; detail: string }[];
   /** Evidence ids validated by successful read_evidence read-back (verify gate). */
   evidenceReadBack: string[];
+  /** Immutable pin records behind `evidenceReadBack` (never id-only). */
+  readBackPins?: FetchPipelineReadBackPin[];
+  /** Frozen stage `save_findings` call manifest (null = legacy/not yet frozen). */
+  stageManifest?: FetchPipelinePhaseManifest | null;
+  /** Frozen read-back `read_evidence` call manifest. */
+  readManifest?: FetchPipelinePhaseManifest | null;
+  /** Frozen verification `save_findings` call manifest. */
+  verificationSaveManifest?: FetchPipelinePhaseManifest | null;
   stagedFindings: string[];
   verificationFindings: string[];
   progressReports: number;
@@ -248,6 +348,13 @@ export interface FetchPipelineSummary {
   counts: FetchPipelineCounts;
   pendingFindings: FetchPipelinePendingFindingSummary[];
   assessment: FetchPipelineAssessmentSummary | null;
+  /**
+   * Current validity of the reported assessment. Finished-run restore reuses
+   * the stored assessment read-only and reports its honest current validity;
+   * a fresh in-run assessment is `valid`.
+   */
+  assessmentCurrentValidity?: 'valid' | 'review' | null;
+  assessmentStaleReasons?: string[];
   remainingGaps: string[];
   /** The synthetic pass verifies no provider profile; kept explicit. */
   providerProfilesVerified: 0;

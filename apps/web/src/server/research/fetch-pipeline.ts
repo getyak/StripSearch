@@ -31,7 +31,9 @@
 
 import type {
   FetchPipelineCheckpoint,
+  FetchPipelinePhaseManifest,
   FetchPipelinePlanStep,
+  FetchPipelineReadBackPin,
   FetchPipelineRunState,
   FetchPipelineStopReason,
   FetchPipelineSummary,
@@ -46,6 +48,14 @@ import {
   fetchPlanStepKey,
   selectFetchBranches
 } from '../../shared/research-fetch-pipeline.js';
+import {
+  FETCH_PLANNER_VERSION,
+  planEvidenceReadCalls,
+  planStageSaveFindingsCalls,
+  planVerificationSaveFindingsCalls,
+  remainingStageMaterial,
+  type StageIdentityUnit
+} from './fetch-pipeline-plan.js';
 import type { CompletionObservationDraft, ObligationRef } from '../../shared/research-completion.js';
 import type { RecordProvenance, ScopeVersion } from '../../shared/research-case.js';
 import { sha256Hex } from './completion-eval.js';
@@ -313,6 +323,55 @@ export async function runFetchPipeline(
     // Resume authority includes the adapter catalog and its exact source pins:
     // a changed catalog/pin set is refused, never silently rematerialized.
     throw new Error('fetch pipeline: adapter catalog / source pins changed since this run was opened');
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Finished runs restore strictly read-only                          */
+  /* ---------------------------------------------------------------- */
+
+  const restoredRun = runs.requireRun(runId);
+  if (restoredRun.state === 'finished') {
+    // Zero model/tool dispatches, zero events, zero checkpoint updates and
+    // zero new GET-60 assessments: the summary reports historical persisted
+    // facts/counts and reuses the stored assessment with honest
+    // current-validity handling. A new planner never silently continues an
+    // already-finished run.
+    return finishedSummary(options, runs, runId, checkpoint);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Legacy / incompatible checkpoints fail closed                    */
+  /* ---------------------------------------------------------------- */
+
+  const manifests = [checkpoint.stageManifest, checkpoint.readManifest, checkpoint.verificationSaveManifest].filter(
+    (manifest): manifest is FetchPipelinePhaseManifest => manifest !== null && manifest !== undefined
+  );
+  const incompatiblePlanner = manifests.some((manifest) => manifest.planner !== FETCH_PLANNER_VERSION);
+  const attemptedStageOrVerify =
+    runs.listIntents(runId).some((intent) => intent.tool === 'save_findings' || intent.tool === 'read_evidence') ||
+    runs.listFindings(runId).length > 0 ||
+    checkpoint.stagedFindings.length > 0 ||
+    checkpoint.verificationFindings.length > 0 ||
+    checkpoint.evidenceReadBack.length > 0 ||
+    (checkpoint.readBackPins?.length ?? 0) > 0;
+  if (incompatiblePlanner || (manifests.length === 0 && attemptedStageOrVerify)) {
+    // A legacy run that already attempted stage/verify has no immutable call
+    // manifest: never invent keys, never retry historical material, never
+    // silently normalize the checkpoint. Fail closed with an explicit
+    // upgrade/new-run gap.
+    return buildSummary(options, runs, runId, checkpoint, {
+      state: 'stopped',
+      stopReason: 'upgrade_required',
+      openSteps: 0,
+      assessment: null,
+      assessmentCurrentValidity: null,
+      assessmentStaleReasons: [],
+      remainingGaps: [
+        incompatiblePlanner
+          ? 'upgrade: checkpoint 的阶段调用 manifest 来自不兼容的 planner 版本（fail closed）；请显式开启新 run。'
+          : 'upgrade: 旧 checkpoint 已尝试 stage/verify 但没有不可变阶段调用 manifest；不重新规划、不重放历史材料，请显式开启新 run。'
+      ]
+    });
   }
 
   const ctx: RunContext = {
@@ -588,15 +647,20 @@ export async function runFetchPipeline(
         return;
       case 'save_findings': {
         finish(() => {
-          const submitted = (content.submitted as { pendingRef: string | null }[] | undefined) ?? [];
-          const refs = submitted
-            .map((entry) => entry.pendingRef)
-            .filter((ref): ref is string => typeof ref === 'string');
+          const submitted =
+            (content.submitted as { pendingRef: string | null; findingKind?: string }[] | undefined) ?? [];
           const findings = (input.findings as { kind?: string }[] | undefined) ?? [];
-          if (findings[0]?.kind === 'verification_check') {
-            checkpoint.verificationFindings = [...new Set([...checkpoint.verificationFindings, ...refs])].sort();
-          } else {
-            checkpoint.stagedFindings = [...new Set([...checkpoint.stagedFindings, ...refs])].sort();
+          // Chunked staging accumulates refs across calls; each submitted
+          // pending ref is classified by its own finding kind.
+          for (let index = 0; index < submitted.length; index += 1) {
+            const ref = submitted[index]?.pendingRef;
+            if (typeof ref !== 'string') continue;
+            const kind = submitted[index]?.findingKind ?? findings[index]?.kind;
+            if (kind === 'verification_check') {
+              checkpoint.verificationFindings = [...new Set([...checkpoint.verificationFindings, ref])].sort();
+            } else {
+              checkpoint.stagedFindings = [...new Set([...checkpoint.stagedFindings, ref])].sort();
+            }
           }
         });
         return;
@@ -997,6 +1061,78 @@ export async function runFetchPipeline(
     );
   };
 
+  /**
+   * Fresh authoritative validity of one evidence dependency: it must still
+   * exist, be owner/case bound and unrevoked with the expected pin revision
+   * and a valid pinned source dependency. Used at read-back folding,
+   * verification planning and the final outcome — a cached id alone never
+   * proves anything.
+   */
+  const evidenceCurrentlyValid = (evidenceId: string, sourceRevision?: number): boolean => {
+    const row = store.cases
+      .reportView(options.ownerId, options.caseId)
+      .evidence.find((entry) => entry.evidenceId === evidenceId);
+    if (!row || row.revokedAt !== null) return false;
+    if (sourceRevision !== undefined && row.sourceRevision !== sourceRevision) return false;
+    return store.cases
+      .listSourceRevisions(options.ownerId, options.caseId, row.accountId, row.sourceId)
+      .some((revision) => revision.sourceRevision === row.sourceRevision);
+  };
+
+  interface ReadBackItem {
+    evidenceId: unknown;
+    sourceId: unknown;
+    sourceRevision: unknown;
+    role: unknown;
+    quote: unknown;
+    quoteHash: unknown;
+    metadata: unknown;
+  }
+
+  /**
+   * Read-back pin validation: the returned item must match the approved
+   * request AND the fresh authoritative case evidence/source binding — exact
+   * evidenceId, sourceId, sourceRevision, role, quote and quoteHash (the
+   * actual SHA256 of the quote included), applicable metadata with the
+   * matching metadata revision, evidence existing and unrevoked, with a
+   * valid pinned source dependency. Only validated items are cached WITH
+   * their immutable pin; anything else stays an honest gap and never unlocks
+   * verification (a wrong returned sourceRevision is refused, never pinned).
+   */
+  const validateReadBackPin = (evidenceId: string, got: ReadBackItem): FetchPipelineReadBackPin | null => {
+    const current = store.cases
+      .reportView(options.ownerId, options.caseId)
+      .evidence.find((entry) => entry.evidenceId === evidenceId);
+    if (!current || current.revokedAt !== null) return null;
+    const metadata = got.metadata as { applicable?: boolean; sourceRevision?: number | null } | undefined;
+    if (metadata?.applicable !== true) return null;
+    if (
+      got.evidenceId !== current.evidenceId ||
+      got.sourceId !== current.sourceId ||
+      got.sourceRevision !== current.sourceRevision ||
+      got.role !== current.role ||
+      got.quote !== current.quote ||
+      got.quoteHash !== current.quoteHash
+    ) {
+      return null;
+    }
+    if (metadata.sourceRevision !== current.sourceRevision) return null;
+    // The recorded hash must be the ACTUAL SHA256 of the exact returned quote.
+    if (sha256Hex(current.quote) !== current.quoteHash) return null;
+    const sourceValid = store.cases
+      .listSourceRevisions(options.ownerId, options.caseId, current.accountId, current.sourceId)
+      .some((revision) => revision.sourceRevision === current.sourceRevision);
+    if (!sourceValid) return null;
+    return {
+      evidenceId: current.evidenceId,
+      accountId: current.accountId,
+      sourceId: current.sourceId,
+      sourceRevision: current.sourceRevision,
+      role: current.role,
+      quoteHash: current.quoteHash
+    };
+  };
+
   const foldReadEvidence = (
     input: Record<string, unknown>,
     content: Record<string, unknown>,
@@ -1005,71 +1141,213 @@ export async function runFetchPipeline(
   ): void => {
     if (!completeRead) return;
     const requested = (input.evidence as { evidenceId: string }[] | undefined) ?? [];
-    const items = (content.items as { evidenceId: string; metadata?: { applicable?: boolean } }[] | undefined) ?? [];
-    // Verify read-back is validated item by item: only successful, matching,
-    // applicable results unlock the verification staging step.
-    const validated: string[] = [];
+    const items = (content.items as ReadBackItem[] | undefined) ?? [];
+    // Item-by-item pin validation: only fully validated, currently valid
+    // results are cached WITH their immutable pin and unlock verification.
+    const pins: FetchPipelineReadBackPin[] = [];
+    const rejected: string[] = [];
     for (let index = 0; index < requested.length; index += 1) {
       const want = requested[index];
       const got = items[index];
-      if (!want || !got || got.evidenceId !== want.evidenceId || got.metadata?.applicable !== true) return;
-      validated.push(got.evidenceId);
+      const pin = want && got ? validateReadBackPin(want.evidenceId, got) : null;
+      if (pin) pins.push(pin);
+      else rejected.push(want ? want.evidenceId : `items[${String(index)}]`);
     }
-    checkpoint.evidenceReadBack = [...new Set([...checkpoint.evidenceReadBack, ...validated])].sort();
+    if (rejected.length > 0) {
+      ctx.gaps.push({
+        code: 'readback_pin_mismatch',
+        detail: `${String(rejected.length)} 条回读未通过 pin 校验（身份/sourceRevision/role/quote/quoteHash/元数据/撤回/来源绑定），未计入已核验：${rejected.slice(0, 5).join('、')}`
+      });
+    }
+    const known = new Map((checkpoint.readBackPins ?? []).map((pin) => [pin.evidenceId, pin]));
+    for (const pin of pins) known.set(pin.evidenceId, pin);
+    checkpoint.readBackPins = [...known.values()].sort((a, b) => (a.evidenceId < b.evidenceId ? -1 : 1));
+    checkpoint.evidenceReadBack = [...known.keys()].sort();
   };
 
   /* ---------------------------------------------------------------- */
   /* Planning (resumable; every step has a collision-free identity)    */
   /* ---------------------------------------------------------------- */
 
-  const evidenceOf = (accountId: string, sourceId: string, sourceRevision: number) => {
-    const commentCounterIds = new Set(store.fetchCoverage.listFetchReceipts(options.ownerId, options.caseId)
-      .filter(receipt => receipt.content.accountId === accountId && receipt.content.sourceId === sourceId &&
-        receipt.content.sourceRevision === sourceRevision && receipt.dimension.name === 'comments')
-      .flatMap(receipt => receipt.counterevidenceIds));
-    const rows = store.cases.reportView(options.ownerId, options.caseId).evidence.filter(entry =>
-      entry.accountId === accountId && entry.revokedAt === null &&
-      (entry.sourceId === sourceId && entry.sourceRevision === sourceRevision || commentCounterIds.has(entry.evidenceId)));
-    return {
-      supportIds: rows
-        .filter((entry) => entry.role === 'factual_support' || entry.role === 'identity_support')
-        .map((entry) => entry.evidenceId),
-      counterIds: rows
-        .filter((entry) => entry.role === 'factual_counterevidence' || entry.role === 'identity_counterevidence')
-        .map((entry) => entry.evidenceId)
-    };
+  /**
+   * Batched evidence gather for the enumerated identities: the support and
+   * comment counterevidence of each identity, then the NOT-YET-STAGED
+   * remainder (staged coverage identities and staged dependency refs are
+   * excluded so a close/reopen never re-stages staged material).
+   */
+  const buildStageMaterial = (identities: { accountId: string; sourceId: string; sourceRevision: number }[]) => {
+    const stagedCoverage: { accountId: string; sourceId: string; sourceRevision: number }[] = [];
+    const stagedDependencyIds: string[] = [];
+    for (const finding of runs.listFindings(runId)) {
+      stagedDependencyIds.push(...finding.supportEvidenceIds, ...finding.counterEvidenceIds);
+      if (finding.kind === 'collected_finding') {
+        for (const delta of finding.coverageDelta) {
+          stagedCoverage.push({
+            accountId: delta.locator.accountId,
+            sourceId: delta.locator.sourceId,
+            sourceRevision: delta.locator.sourceRevision
+          });
+        }
+      }
+    }
+    const evidenceRows = store.cases.reportView(options.ownerId, options.caseId).evidence;
+    const commentCounters = new Map<string, Set<string>>();
+    for (const entry of store.fetchCoverage.listFetchReceipts(options.ownerId, options.caseId)) {
+      if (entry.dimension.name !== 'comments') continue;
+      const anchor = itemKey(entry.content.accountId, entry.content.sourceId, entry.content.sourceRevision);
+      const ids = commentCounters.get(anchor) ?? new Set<string>();
+      for (const evidenceId of entry.counterevidenceIds) ids.add(evidenceId);
+      commentCounters.set(anchor, ids);
+    }
+    const accounts = new Map<string, { accountId: string; identities: StageIdentityUnit[] }>();
+    for (const identity of identities) {
+      const counterIds =
+        commentCounters.get(itemKey(identity.accountId, identity.sourceId, identity.sourceRevision)) ?? new Set<string>();
+      const rows = evidenceRows.filter(
+        (entry) =>
+          entry.accountId === identity.accountId &&
+          entry.revokedAt === null &&
+          ((entry.sourceId === identity.sourceId && entry.sourceRevision === identity.sourceRevision) ||
+            counterIds.has(entry.evidenceId))
+      );
+      const account = accounts.get(identity.accountId) ?? { accountId: identity.accountId, identities: [] };
+      account.identities.push({
+        accountId: identity.accountId,
+        sourceId: identity.sourceId,
+        sourceRevision: identity.sourceRevision,
+        supportIds: rows
+          .filter((entry) => entry.role === 'factual_support' || entry.role === 'identity_support')
+          .map((entry) => entry.evidenceId),
+        counterIds: rows
+          .filter((entry) => entry.role === 'factual_counterevidence' || entry.role === 'identity_counterevidence')
+          .map((entry) => entry.evidenceId)
+      });
+      accounts.set(identity.accountId, account);
+    }
+    return remainingStageMaterial([...accounts.values()], {
+      coverage: stagedCoverage,
+      dependencyIds: stagedDependencyIds
+    });
   };
 
-  const buildStageInput = (
-    identities: { accountId: string; sourceId: string; sourceRevision: number }[]
-  ): Record<string, unknown> | null => {
-    const byAccount = new Map<
-      string,
-      { supportIds: string[]; counterIds: string[]; identities: typeof identities }
-    >();
-    for (const identity of identities) {
-      const evidence = evidenceOf(identity.accountId, identity.sourceId, identity.sourceRevision);
-      const entry = byAccount.get(identity.accountId) ?? { supportIds: [], counterIds: [], identities: [] };
-      entry.supportIds = [...new Set([...entry.supportIds, ...evidence.supportIds])];
-      entry.counterIds = [...new Set([...entry.counterIds, ...evidence.counterIds])];
-      entry.identities.push(identity);
-      byAccount.set(identity.accountId, entry);
+  /* ---------------------------------------------------------------- */
+  /* Frozen manifests: expected material vs actual durable findings     */
+  /* ---------------------------------------------------------------- */
+
+  const manifestMaterial = (manifest: FetchPipelinePhaseManifest) => {
+    const supportIds = new Set<string>();
+    const counterIds = new Set<string>();
+    const coverage = new Set<string>();
+    for (const call of manifest.calls) {
+      const findings =
+        (call.input.findings as
+          | {
+              supportEvidenceIds?: string[];
+              counterEvidenceIds?: string[];
+              coverageDelta?: { locator: { accountId: string; sourceId: string; sourceRevision: number } }[];
+            }[]
+          | undefined) ?? [];
+      for (const finding of findings) {
+        for (const evidenceId of finding.supportEvidenceIds ?? []) supportIds.add(evidenceId);
+        for (const evidenceId of finding.counterEvidenceIds ?? []) counterIds.add(evidenceId);
+        for (const delta of finding.coverageDelta ?? []) {
+          coverage.add(
+            canonicalJson({
+              accountId: delta.locator.accountId,
+              sourceId: delta.locator.sourceId,
+              sourceRevision: delta.locator.sourceRevision
+            })
+          );
+        }
+      }
     }
-    const findings = [...byAccount.entries()]
-      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-      .map(([accountId, entry]) => ({
-        kind: 'collected_finding',
-        statement: `账号 ${accountId}：已处理 ${String(entry.identities.length)} 个枚举条目的正文与默认评论页；矛盾材料单列。`,
-        supportEvidenceIds: entry.supportIds.slice(0, 100),
-        counterEvidenceIds: entry.counterIds.slice(0, 100),
-        coverageDelta: entry.identities.map((identity) => ({
-          locator: { accountId: identity.accountId, sourceId: identity.sourceId, sourceRevision: identity.sourceRevision },
-          taskRef: { kind: 'question_matrix', slot: 'work' },
-          status: 'evidence_found' as const
-        })),
-        note: 'pending only: 本批只暂存 pending finding，不发布、不写报告'
-      }));
-    return findings.length > 0 ? { findings } : null;
+    return { supportIds, counterIds, coverage };
+  };
+
+  const stagedMaterial = () => {
+    const supportIds = new Set<string>();
+    const counterIds = new Set<string>();
+    const coverage = new Set<string>();
+    for (const finding of runs.listFindings(runId)) {
+      if (finding.kind !== 'collected_finding') continue;
+      for (const evidenceId of finding.supportEvidenceIds) supportIds.add(evidenceId);
+      for (const evidenceId of finding.counterEvidenceIds) counterIds.add(evidenceId);
+      for (const delta of finding.coverageDelta) {
+        coverage.add(
+          canonicalJson({
+            accountId: delta.locator.accountId,
+            sourceId: delta.locator.sourceId,
+            sourceRevision: delta.locator.sourceRevision
+          })
+        );
+      }
+    }
+    return { supportIds, counterIds, coverage };
+  };
+
+  /**
+   * Expected stage material of the FROZEN manifest against the ACTUAL durable
+   * collected findings: every planned unique polarity reference and every
+   * planned coverage identity must be actually staged. A refused key, a done
+   * call with partial submissions or an empty findings set never counts as
+   * material submission.
+   */
+  const stageSubmission = (): { complete: boolean; missingRefs: number; missingCoverage: number } => {
+    const manifest = checkpoint.stageManifest ?? null;
+    if (manifest === null) return { complete: false, missingRefs: 0, missingCoverage: 0 };
+    const expected = manifestMaterial(manifest);
+    const actual = stagedMaterial();
+    const missingRefs =
+      [...expected.supportIds].filter((evidenceId) => !actual.supportIds.has(evidenceId)).length +
+      [...expected.counterIds].filter((evidenceId) => !actual.counterIds.has(evidenceId)).length;
+    const missingCoverage = [...expected.coverage].filter((key) => !actual.coverage.has(key)).length;
+    return { complete: missingRefs === 0 && missingCoverage === 0, missingRefs, missingCoverage };
+  };
+
+  const stagedDependencies = (): { supportIds: string[]; counterIds: string[] } => {
+    const supportIds = new Set<string>();
+    const counterIds = new Set<string>();
+    for (const finding of runs.listFindings(runId)) {
+      if (finding.kind !== 'collected_finding') continue;
+      for (const evidenceId of finding.supportEvidenceIds) supportIds.add(evidenceId);
+      for (const evidenceId of finding.counterEvidenceIds) counterIds.add(evidenceId);
+    }
+    return { supportIds: [...supportIds].sort(), counterIds: [...counterIds].sort() };
+  };
+
+  /** Fresh revalidation of the pin cache at verification planning time. */
+  const freshValidatedPins = (): { supportIds: string[]; counterIds: string[] } => {
+    const supportIds = new Set<string>();
+    const counterIds = new Set<string>();
+    const rows = store.cases.reportView(options.ownerId, options.caseId).evidence;
+    for (const pin of checkpoint.readBackPins ?? []) {
+      if (!evidenceCurrentlyValid(pin.evidenceId, pin.sourceRevision)) continue;
+      const row = rows.find((entry) => entry.evidenceId === pin.evidenceId);
+      if (!row || row.sourceId !== pin.sourceId || row.role !== pin.role || row.quoteHash !== pin.quoteHash) continue;
+      if (pin.role === 'factual_support' || pin.role === 'identity_support') supportIds.add(pin.evidenceId);
+      else if (pin.role === 'factual_counterevidence' || pin.role === 'identity_counterevidence') counterIds.add(pin.evidenceId);
+    }
+    return { supportIds: [...supportIds].sort(), counterIds: [...counterIds].sort() };
+  };
+
+  /**
+   * Final verification coverage: every staged dependency must be referenced
+   * by a CURRENTLY VALID verification pending finding. A cached read-back id
+   * alone never proves verification and a later revocation invalidates it.
+   */
+  const verificationCoverage = (): { complete: boolean; missing: number } => {
+    const required = stagedDependencies();
+    const verified = new Set<string>();
+    for (const finding of runs.listFindings(runId)) {
+      if (finding.kind !== 'verification_check' || finding.state !== 'pending' || finding.dependencies.length === 0) continue;
+      const valid = finding.dependencies.every((dependency) =>
+        evidenceCurrentlyValid(dependency.evidenceId, dependency.sourceRevision)
+      );
+      if (!valid) continue;
+      for (const evidenceId of [...finding.supportEvidenceIds, ...finding.counterEvidenceIds]) verified.add(evidenceId);
+    }
+    const missing = [...required.supportIds, ...required.counterIds].filter((evidenceId) => !verified.has(evidenceId)).length;
+    return { complete: missing === 0, missing };
   };
 
   const openSteps = (phase: 'fetch' | 'verify', allowLocalWrites: boolean): FetchPipelinePlanStep[] => {
@@ -1192,23 +1470,46 @@ export async function runFetchPipeline(
       }
     }
 
-    // 3. Stage evidence-bound pending findings once every body/comment step is
-    //    folded (success or explicit refusal — never silently dropped).
+    // 3. Stage evidence-bound pending findings through the DURABLE IMMUTABLE
+    //    call manifest: frozen before its first dispatch and never re-packed
+    //    from successful subsets. Material becomes final only once enumeration
+    //    and every body/comment step have settled (success or explicit
+    //    refusal — never silently dropped).
     const allProcessed =
       identities.length > 0 &&
       [...bodySteps, ...commentsSteps].every((key) => done.has(key) || refused.has(key));
-    const stageInput = allProcessed ? buildStageInput(identities) : null;
-    const stageKey = stageInput ? fetchPlanStepKey('save_findings', stageInput, null) : null;
-    if (stageInput && stageKey && !settled(stageKey)) {
-      steps.push({ key: stageKey, tool: 'save_findings', input: stageInput });
+    const enumerationSettled = steps.every((step) => step.tool !== 'list_posts');
+    const stageCalls: FetchPipelinePlanStep[] = [];
+    if (checkpoint.stageManifest) {
+      stageCalls.push(...checkpoint.stageManifest.calls);
+    } else if (allProcessed && enumerationSettled) {
+      const planned = planStageSaveFindingsCalls(buildStageMaterial(identities)).map((input) => ({
+        key: fetchPlanStepKey('save_findings', input, null),
+        tool: 'save_findings',
+        input
+      }));
+      stageCalls.push(...planned);
+      if (allowLocalWrites && planned.length > 0) {
+        // Frozen durably BEFORE the first dispatch: exact inputs and step
+        // keys stay fixed across partial success, refusals and reopen, and
+        // rejected material is never re-packed into a fresh key.
+        checkpoint.stageManifest = { planner: FETCH_PLANNER_VERSION, calls: clone(planned) };
+        runs.updateCheckpoint(runId, checkpoint);
+      }
     }
+    for (const call of stageCalls) if (!settled(call.key)) steps.push(call);
+    // Success progress and the verify phase need ACTUAL submission of every
+    // planned reference and coverage identity — a refused key, a done call
+    // with partial submissions or an empty findings set never counts.
+    const stageSubmitted =
+      checkpoint.stageManifest !== null && checkpoint.stageManifest !== undefined && stageSubmission().complete;
 
     // 4. Progress receipts at deterministic phase boundaries (fetch phase).
     const progressPlan: { n: number; when: boolean }[] = [
       { n: 0, when: checkpoint.accounts.every((entry) => entry.enumeration !== 'open') },
       { n: 1, when: bodySteps.length > 0 && bodySteps.every((key) => done.has(key) || refused.has(key)) },
       { n: 2, when: commentsSteps.length > 0 && commentsSteps.every((key) => done.has(key) || refused.has(key)) },
-      { n: 3, when: stageKey !== null && settled(stageKey) }
+      { n: 3, when: stageSubmitted }
     ];
     for (const entry of progressPlan) {
       if (!entry.when || checkpoint.progressReports > entry.n) continue;
@@ -1217,53 +1518,59 @@ export async function runFetchPipeline(
       if (!settled(key)) steps.push({ key, tool: 'report_progress', input: progressInput });
     }
 
-    // 5. Isolated verify phase: read back staged dependencies and record
-    //    verification checks ONLY against successfully validated read-back.
+    // 5. Isolated verify phase over FROZEN manifests: the read manifest is
+    //    fixed once ALL stage material is actually staged; the
+    //    verification-save manifest once the read manifest has settled, built
+    //    from actually validated fresh pinned read-backs (partial subsets
+    //    allowed with honest gaps). Neither is ever re-packed from successful
+    //    subsets and failed chunks settle without auto-retry.
     const verifySteps: FetchPipelinePlanStep[] = [];
-    if (stageKey !== null && settled(stageKey) && checkpoint.verificationFindings.length === 0) {
-      const supportIds = [
-        ...new Set(
-          identities.flatMap((identity) =>
-            evidenceOf(identity.accountId, identity.sourceId, identity.sourceRevision).supportIds
+    if (stageSubmitted) {
+      const required = stagedDependencies();
+      const pinnedIds = new Set((checkpoint.readBackPins ?? []).map((pin) => pin.evidenceId));
+      let readCalls: FetchPipelinePlanStep[] = [];
+      if (checkpoint.readManifest) {
+        readCalls = checkpoint.readManifest.calls;
+      } else {
+        const planned = planEvidenceReadCalls(
+          [...required.supportIds, ...required.counterIds].filter(
+            (evidenceId) => evidenceCurrentlyValid(evidenceId) && !pinnedIds.has(evidenceId)
           )
-        )
-      ].sort();
-      const counterIds = [
-        ...new Set(
-          identities.flatMap((identity) =>
-            evidenceOf(identity.accountId, identity.sourceId, identity.sourceRevision).counterIds
-          )
-        )
-      ].sort();
-      const evidenceIds = [...supportIds, ...counterIds];
-      const readBack = new Set(checkpoint.evidenceReadBack);
-      if (evidenceIds.length > 0) {
-        const readInput: Record<string, unknown> = {
-          evidence: evidenceIds.slice(0, 20).map((evidenceId) => ({ evidenceId }))
-        };
-        const readKey = fetchPlanStepKey('read_evidence', readInput, null);
-        if (!settled(readKey)) verifySteps.push({ key: readKey, tool: 'read_evidence', input: readInput });
-        // The verification statement claims exactly what a successful,
-        // validated read-back actually proved — never more.
-        const verifiedSupport = supportIds.filter((evidenceId) => readBack.has(evidenceId));
-        const verifiedCounter = counterIds.filter((evidenceId) => readBack.has(evidenceId));
-        const requested = (readInput.evidence as { evidenceId: string }[]).map((entry) => entry.evidenceId);
-        const allReadBack = requested.every((evidenceId) => readBack.has(evidenceId));
-        if (allReadBack && requested.length > 0) {
-          const verifyInput: Record<string, unknown> = {
-            findings: [
-              {
-                kind: 'verification_check',
-                statement: `核验：${String(verifiedSupport.length)} 条支持与 ${String(verifiedCounter.length)} 条反证依赖已按 pin 成功回读；无新增来源、正文或覆盖。`,
-                supportEvidenceIds: verifiedSupport.slice(0, 10),
-                counterEvidenceIds: verifiedCounter.slice(0, 10),
-                note: 'isolated verify: read-back validated; no new sources, bodies or coverage'
-              }
-            ]
-          };
-          const verifyKey = fetchPlanStepKey('save_findings', verifyInput, null);
-          if (!settled(verifyKey)) verifySteps.push({ key: verifyKey, tool: 'save_findings', input: verifyInput });
+        ).map((input) => ({ key: fetchPlanStepKey('read_evidence', input, null), tool: 'read_evidence', input }));
+        readCalls = planned;
+        if (allowLocalWrites) {
+          checkpoint.readManifest = { planner: FETCH_PLANNER_VERSION, calls: clone(planned) };
+          runs.updateCheckpoint(runId, checkpoint);
         }
+      }
+      for (const call of readCalls) if (!settled(call.key)) verifySteps.push(call);
+      if (readCalls.every((call) => settled(call.key))) {
+        let verifySaveCalls: FetchPipelinePlanStep[] = [];
+        if (checkpoint.verificationSaveManifest) {
+          verifySaveCalls = checkpoint.verificationSaveManifest.calls;
+        } else {
+          const fresh = freshValidatedPins();
+          const requiredTotal = required.supportIds.length + required.counterIds.length;
+          const unverified = Math.max(0, requiredTotal - (fresh.supportIds.length + fresh.counterIds.length));
+          const planned =
+            fresh.supportIds.length + fresh.counterIds.length > 0
+              ? planVerificationSaveFindingsCalls({
+                  supportIds: fresh.supportIds,
+                  counterIds: fresh.counterIds,
+                  unverifiedDependencies: unverified
+                }).map((input) => ({
+                  key: fetchPlanStepKey('save_findings', input, null),
+                  tool: 'save_findings',
+                  input
+                }))
+              : [];
+          verifySaveCalls = planned;
+          if (allowLocalWrites) {
+            checkpoint.verificationSaveManifest = { planner: FETCH_PLANNER_VERSION, calls: clone(planned) };
+            runs.updateCheckpoint(runId, checkpoint);
+          }
+        }
+        for (const call of verifySaveCalls) if (!settled(call.key)) verifySteps.push(call);
       }
     }
 
@@ -1499,6 +1806,27 @@ export async function runFetchPipeline(
   if (view) remainingGaps.push(...view.limitations.slice(0, 10));
 
   const unresolvedAtEnd = runs.listUnresolvedIntents(runId).length;
+  // Honest completeness at the final outcome:
+  // 1. every planned stage reference and coverage identity of the FROZEN
+  //    manifest must be actually staged in the durable collected findings;
+  // 2. every staged dependency must be covered by a CURRENTLY VALID
+  //    verification pending finding — readback cache ids alone never prove
+  //    verification and later revocations invalidate it.
+  const submission = stageSubmission();
+  const stageIncomplete =
+    checkpoint.stageManifest !== null && checkpoint.stageManifest !== undefined && !submission.complete;
+  const coverage = verificationCoverage();
+  const verifyIncomplete = !coverage.complete;
+  if (stageIncomplete) {
+    remainingGaps.unshift(
+      `stage: manifest 计划的 ${String(submission.missingRefs)} 条依赖引用与 ${String(submission.missingCoverage)} 个覆盖身份未实际暂存（拒绝/部分提交/丢失），保持 stage_incomplete，不进入成功核验、不作完成声明`
+    );
+  }
+  if (verifyIncomplete) {
+    remainingGaps.unshift(
+      `verify: ${String(coverage.missing)} 条 staged 依赖缺少当前有效的 verification 回读覆盖（failed/refused/unavailable/revoked），核验保持 partial，不作完成声明`
+    );
+  }
   let state: FetchPipelineRunState;
   let stopReason: FetchPipelineStopReason;
   const openCount = openSteps('fetch', false).length + openSteps('verify', false).length;
@@ -1521,6 +1849,16 @@ export async function runFetchPipeline(
     // a bound never manufactures completion.
     state = 'running';
     stopReason = 'batch_quantum_exhausted';
+  } else if (stageIncomplete) {
+    // Refused/partially submitted stage material stays explicitly incomplete:
+    // never `finished`, and the missing counts stay visible.
+    state = 'stopped';
+    stopReason = 'stage_incomplete';
+  } else if (verifyIncomplete) {
+    // Failed/refused/unavailable read-backs remain honest partial: the run is
+    // NOT marked finished and the summary keeps the unverified gaps visible.
+    state = 'stopped';
+    stopReason = 'verify_readback_incomplete';
   } else {
     state = 'finished';
     stopReason = 'obligations_processed';
@@ -1532,6 +1870,8 @@ export async function runFetchPipeline(
     stopReason,
     openSteps: openCount,
     assessment,
+    assessmentCurrentValidity: assessment === null ? null : 'valid',
+    assessmentStaleReasons: [],
     remainingGaps
   });
 }
@@ -1546,15 +1886,28 @@ function normalizeCheckpoint(
   catalog: FetchSourceCatalog
 ): FetchPipelineCheckpoint {
   const base = loaded ?? createInitialCheckpoint(catalog, 0);
+  // Fail closed on incompatible checkpoints instead of silently normalizing
+  // away the catalog pin digest: a checkpoint without the pinned catalog
+  // identity cannot prove its source pins.
+  if (typeof base.catalogDigest !== 'string' || base.catalogDigest === '') {
+    throw new Error('fetch pipeline: checkpoint lacks the adapter catalog pin digest (incompatible checkpoint)');
+  }
   return {
     runId,
     scopeVersion: base.scopeVersion,
-    catalogDigest: base.catalogDigest ?? '',
+    catalogDigest: base.catalogDigest,
     accounts: (base.accounts ?? []).map((account) => ({ ...account, gaps: account.gaps ?? [] })),
     doneSteps: base.doneSteps ?? [],
     refusedSteps: base.refusedSteps ?? [],
     gaps: base.gaps ?? [],
     evidenceReadBack: base.evidenceReadBack ?? [],
+    // New fields pass through verbatim (null/[] = genuinely absent): a
+    // manifest is never invented and a pin cache is never synthesized from
+    // bare ids.
+    readBackPins: base.readBackPins ?? [],
+    stageManifest: base.stageManifest ?? null,
+    readManifest: base.readManifest ?? null,
+    verificationSaveManifest: base.verificationSaveManifest ?? null,
     stagedFindings: base.stagedFindings ?? [],
     verificationFindings: base.verificationFindings ?? [],
     progressReports: base.progressReports ?? 0
@@ -1594,6 +1947,8 @@ function buildSummary(
     stopReason: FetchPipelineStopReason;
     openSteps: number;
     assessment: FetchPipelineSummary['assessment'];
+    assessmentCurrentValidity?: 'valid' | 'review' | null;
+    assessmentStaleReasons?: string[];
     remainingGaps: string[];
   }
 ): FetchPipelineSummary {
@@ -1735,6 +2090,8 @@ function buildSummary(
     counts,
     pendingFindings,
     assessment: outcome.assessment,
+    assessmentCurrentValidity: outcome.assessmentCurrentValidity ?? null,
+    assessmentStaleReasons: outcome.assessmentStaleReasons ?? [],
     remainingGaps: outcome.remainingGaps.slice(0, 40),
     providerProfilesVerified: 0
   };
@@ -1754,6 +2111,59 @@ function blockedSummary(
     stopReason: 'unreconciled_action',
     openSteps: 0,
     assessment: null,
+    assessmentCurrentValidity: null,
+    assessmentStaleReasons: [],
     remainingGaps: gaps
+  });
+}
+
+/**
+ * Strictly read-only restore of an already-finished run: zero model/tool
+ * dispatches, zero events, zero checkpoint updates and zero new GET-60
+ * assessments. The summary reports historical persisted facts/counts; the
+ * stored assessment is reused with its honest current validity and is never
+ * recomputed.
+ */
+function finishedSummary(
+  options: FetchPipelineOptions,
+  runs: FetchPipelineStore,
+  runId: string,
+  checkpoint: FetchPipelineCheckpoint
+): FetchPipelineSummary {
+  const record = runs.requireRun(runId);
+  const stored =
+    options.store.completion
+      .listCompletionAssessments(options.ownerId, options.caseId, options.scopeSpecId)
+      .at(-1) ?? null;
+  const assessment: FetchPipelineSummary['assessment'] = stored
+    ? {
+        verdict: stored.evaluation.verdict,
+        dimensions: stored.evaluation.dimensions.map((dimension) => ({
+          dimension: dimension.dimension,
+          state: dimension.state,
+          total: dimension.total,
+          addressed: dimension.addressed,
+          unresolved: dimension.unresolved,
+          percent: dimension.percent
+        }))
+      }
+    : null;
+  const remainingGaps = [
+    ...checkpoint.gaps.map((gap) => `${gap.code}: ${gap.detail}`),
+    'finished run 只读恢复：不派发模型/工具、不写事件/checkpoint、不重新评估；仅返回历史持久化事实与计数。'
+  ];
+  if (stored === null) {
+    remainingGaps.push('该 run 无持久化 GET-60 评估可复用；不重新评估。');
+  } else if (stored.currentValidity !== 'valid') {
+    remainingGaps.push(`历史评估当前有效性=${stored.currentValidity}：${stored.staleReasons.join('；')}`);
+  }
+  return buildSummary(options, runs, runId, checkpoint, {
+    state: 'finished',
+    stopReason: record.stopReason,
+    openSteps: 0,
+    assessment,
+    assessmentCurrentValidity: stored ? stored.currentValidity : null,
+    assessmentStaleReasons: stored ? [...stored.staleReasons] : [],
+    remainingGaps
   });
 }

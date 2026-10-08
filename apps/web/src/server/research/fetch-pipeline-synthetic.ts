@@ -894,11 +894,13 @@ export function openSyntheticHarness(
     scenario?: SyntheticScenario;
     model?: RuntimeModelGateway;
     resumeRunId?: string;
+    /** Prepared-data seam: use an explicit catalog instead of the built-in corpus. */
+    catalog?: FetchSourceCatalog;
   } = {}
 ): SyntheticHarness {
   const store = new StoreImpl(db);
   const runs = new FetchPipelineStoreImpl(db, store);
-  const catalog = buildSyntheticCorpus(options.scenario ?? {});
+  const catalog = options.catalog ?? buildSyntheticCorpus(options.scenario ?? {});
   const setup = prepareSyntheticCase(store, catalog, options.scenario ?? {});
   const prior = options.resumeRunId
     ? runs.requireRun(options.resumeRunId)

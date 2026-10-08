@@ -58,3 +58,15 @@ Certificate renewal belongs to the host. Confirm the timer covers this hostname 
 - 公网 API：Secure 登录、注册关闭、外来 / 缺失 Origin 拒绝、账号隔离、SSE、来源修订和同一版本 Markdown / JSON 导出通过。
 - 真实 GitHub：2 次请求，9 条来源，completed。真实 Exa：2 次请求，5 条来源，partial；生成摘要未被采用，界面与报告保留限制。这是连通性与契约验收，不是研究质量评测。
 - 初始账号由运营者私下交付；未迁移本机历史研究或其他账号。临时 DNS、单主机运行、仅同机备份和未实现邮件找回仍是使用边界。
+
+
+## 2026-10-08 Fetch 恢复与站点发布验收
+
+按用户授权恢复上述临时 HTTPS 站点，合并前发布版本为 `adf347acd5c0e7b88943ac1ff50d615f82746065`。2026-10-05 下线后保留的数据库与备份继续作为私有存档；本次使用新的持久化目录与认证密钥，未恢复旧账号或研究档案。同机其他服务保持健康。后续发布版本以 `/release.json` 读回为准，合并后仍需部署并核对 `origin/main`。
+
+- 独立复审关闭 4 项 P1 与 3 项 P2；原封 8 个失败反例及 28 个分块/恢复测试通过。当前提交 CI 的 Web 测试为 787 通过、1 跳过，40 个冻结回放通过，类型/构建/设计检查通过。
+- CI 与实际服务器的生产镜像均在禁网、只读容器中运行编译后的 Fetch + 真实 SQLite：中断/关闭/重开后完成 82 个工具动作、28 次正文读取，成功动作重复数为 0；DSH 注入、真实 Chromium PDF 和临时目录清理通过。
+- 公网 HTTPS 的 10 组验收通过：HTML/资源与 exact SHA、开放注册、Secure/HttpOnly cookie、登录、缺失/外来 Origin 拒绝、跨账号隔离、SSE、同版本四格式导出、撤回/恢复与旧版本导出拒绝、仅本应用重启后的账号/会话/报告保留、退出后访问拒绝。报告由编译后的 Store 在命名合成账号下生成，未执行真实人物研究或外部 provider 请求。
+- 实际备份服务成功、SQLite 完整性与认证密钥一致性检查通过；每日备份 timer 已启用。证书有效至 2027-01-06，新增域名沿用服务器既有证书续期 timer 与 webroot，未创建竞争续期任务。
+
+本次未配置 Exa / DeepSeek / TikHub / Firecrawl 凭据，健康响应的 `exa` / `research` 为 false，人物研究请求明确返回 `provider_unavailable`。Fetch 新链仍是已验证的本地/容器合成原型，未接入 Web 自主研究与真实平台适配器；GET-99 的完整真实研究验收继续保持未完成。
