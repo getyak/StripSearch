@@ -57,6 +57,42 @@ test('read_evidence arrays with different contents never share a step identity',
   assert.notEqual(fetchPlanStepKey('read_evidence', e1, null), fetchPlanStepKey('read_evidence', both, null));
 });
 
+test('chunked stage/verify calls keep distinct, deterministic step identities', () => {
+  const collected = (ids: string[]) => ({
+    findings: [
+      {
+        kind: 'collected_finding',
+        statement: 's',
+        supportEvidenceIds: ids,
+        counterEvidenceIds: [],
+        coverageDelta: [],
+        note: null
+      }
+    ]
+  });
+  const chunk1 = fetchPlanStepKey('save_findings', collected(['e1']), null);
+  const chunk2 = fetchPlanStepKey('save_findings', collected(['e1', 'e2']), null);
+  assert.notEqual(chunk1, chunk2);
+  // Deterministic resume identity: the same chunk input never changes key.
+  assert.equal(chunk1, fetchPlanStepKey('save_findings', JSON.parse(JSON.stringify(collected(['e1']))), null));
+  // Distinct read_evidence batches are distinct, immutable plan steps.
+  const read1 = fetchPlanStepKey('read_evidence', { evidence: [{ evidenceId: 'E1' }] }, null);
+  const read2 = fetchPlanStepKey('read_evidence', { evidence: [{ evidenceId: 'E2' }] }, null);
+  assert.notEqual(read1, read2);
+  assert.equal(read1, fetchPlanStepKey('read_evidence', { evidence: [{ evidenceId: 'E1' }] }, null));
+  // A verification chunk never shares identity with a stage chunk.
+  const verification = fetchPlanStepKey(
+    'save_findings',
+    {
+      findings: [
+        { kind: 'verification_check', statement: 's', supportEvidenceIds: ['e1'], counterEvidenceIds: [], note: null }
+      ]
+    },
+    null
+  );
+  assert.notEqual(chunk1, verification);
+});
+
 test('colon-delimited native ids cannot collide across fields', () => {
   const a = fetchPlanStepKey('read_post', { accountId: 'a:b', itemId: 'c' }, { sourceId: 's', sourceRevision: 1 });
   const b = fetchPlanStepKey('read_post', { accountId: 'a', itemId: 'b:c' }, { sourceId: 's', sourceRevision: 1 });
