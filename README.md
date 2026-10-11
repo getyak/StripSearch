@@ -25,6 +25,8 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 
 ## 设计导航
 
+2026-10-11：[整合发布说明](docs/release-2026-10-11.md)汇总 Search Agent、账号选择、身份原文约束、标注驱动研究设计与现有 GitHub Fetch 的交付边界。[Search 细化](docs/search-agent-refinement.md)为现有第一阶段提供模型决策、机构人物页线索和组织类型隔离；真实人物辨识质量、全平台深读与完整核验/补查/综合仍需分别验收。[统一输入历史提案](design/proposals/research-input-v1/README.md)保留可复核代码，未接入当前运行时。
+
 2026-10-02 GET-132：新增[连续研究体验设计](docs/research-experience.md)，以当前 Figma 阅读工作区为基线，衔接账号发现、一次范围确认、分批深读、证据核查与修订。对应[合成工作区演示](design/explorations/research-workspace-2026-10-02/index.html)是独立设计验证，不替换 Web alpha，不代表 Search / Fetch 已接线或研究质量已验收。
 
 | 要了解什么 | 去哪里 |
@@ -48,7 +50,7 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 | 平台发现、身份校正与帖子追踪（holehe / maigret 接入） | [平台发现提案](docs/design/platform-discovery-2026-09-27/README.md) |
 | 分阶段交付与验收 | [开发 brief / 路线](docs/roadmap.md) |
 
-下一阶段（未实施提案）：[人物研究 Agent 设计稿](docs/superpowers/specs/2026-09-29-person-research-agent-design.md) · [交互与架构阅读页](design/explorations/agent-research-2026-09-29/README.md)。2026-09-30 已按用户批准的 Search / Fetch 长研究设计同步：Search / Fetch 两个 Agent 角色 + 持久程序控制器、首次发现冻结 PlatformRegistry 的目录级平台发现、分批深读与默认评论覆盖、总额 + 分批两级预算、范围撤回传播。X / Reddit / GitHub / 个人网站只是首批深读验证样本，不是发现上限。同日已落地[版本化平台目录](docs/platform-catalog.md)（GET-90，PR20 合并交付）与[公共账号规则](docs/public-account-rules.md)（GET-91，PR21 合并交付）：20 个 TikHub 平台、30 个替代平台与个人网站全部登记并带诚实缺口；Maigret / WhatsMyName 公共规则已按固定字节全量导入（逐行载入/排除回执、MIT / CC BY-SA 归属）并入目录，独立受限执行器离线可用但未接入运行时。同日新增[发现路线规划契约](docs/discovery-route-planning.md)（GET-92）：纯全目录路线规划、不透明请求键与保守账号键已实现（含独立审查后的 repair1 修复；待独立复审/CI/合并交付），不发请求、不接线、未 live 验证。以上能力均未上线、无任何 live 验证，当前代码仍是上文的预算受限 Web alpha。
+下一阶段（未实施提案）：[人物研究 Agent 设计稿](docs/superpowers/specs/2026-09-29-person-research-agent-design.md) · [交互与架构阅读页](design/explorations/agent-research-2026-09-29/README.md)。2026-09-30 已按用户批准的 Search / Fetch 长研究设计同步：Search / Fetch 两个 Agent 角色 + 持久程序控制器、首次发现冻结 PlatformRegistry 的目录级平台发现、分批深读与默认评论覆盖、总额 + 分批两级预算、范围撤回传播。X / Reddit / GitHub / 个人网站只是首批深读验证样本，不是发现上限。同日已落地[版本化平台目录](docs/platform-catalog.md)（GET-90，PR20 合并交付）与[公共账号规则](docs/public-account-rules.md)（GET-91，PR21 合并交付）：20 个 TikHub 平台、30 个替代平台与个人网站全部登记并带诚实缺口；Maigret / WhatsMyName 公共规则已按固定字节全量导入（逐行载入/排除回执、MIT / CC BY-SA 归属）并入目录，独立受限执行器离线可用但未接入运行时。同日新增[发现路线规划契约](docs/discovery-route-planning.md)（GET-92）：纯全目录路线规划、不透明请求键与保守账号键已实现（已合并的离线规划基础；未接入真实请求链），不发请求、不接线、未 live 验证。以上能力均未上线、无任何 live 验证，当前代码仍是上文的预算受限 Web alpha。
 
 先看一份[合成报告](examples/report.md)，再对照[同一份 JSON](examples/report.json)和[请求配置](examples/request.json)。样例域名 `example.org` 是占位标识，不应抓取。
 
