@@ -288,6 +288,22 @@ class Service:
         tmp.symlink_to(release)
         os.replace(tmp, self.state / 'current')
 
+    def install_ops(self, release):
+        source = Path(release) / 'ops'
+        if not all((source / name).is_file() for name in ('local_service.py', 'restore.py')):
+            raise RuntimeError('operator entry is incomplete; previous entry preserved')
+        target = self.state / 'ops'
+        tmp = self.state / 'ops.new'
+        tmp.unlink(missing_ok=True)
+        tmp.symlink_to(source)
+        if target.is_dir() and not target.is_symlink():
+            # Upgrade the original directory-based installation without deletion.
+            legacy = self.state / 'legacy-ops'
+            legacy.mkdir(mode=0o700, exist_ok=True)
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
+            target.rename(legacy / ('accepted-manager-' + stamp))
+        os.replace(tmp, target)
+
     def build(self, repo, revision):
         if not re.fullmatch(r'[0-9a-f]{40}', revision):
             raise ValueError('expected a full commit SHA')
@@ -362,7 +378,9 @@ class Service:
         release = self.build(repo, revision)
         previous = self.current()
         if previous == release and self.listeners():
-            return self.verify()
+            receipt = self.verify()
+            self.install_ops(release)
+            return receipt
         # Legacy service is a real rollback target, including its previous code.
         if not previous and self.config.get('legacy'):
             previous = Path(self.config['legacy']['releaseDir']).resolve()
@@ -407,12 +425,7 @@ class Service:
         write_json(self.state / 'accepted.json', {'current': revision, 'previous': previous.name if previous else None, 'backup': str(backup)})
         # The stable operator entry uses the last accepted manager even if the
         # application rolls back to a legacy release that had no manager.
-        operations = self.state / 'ops'
-        operations.mkdir(mode=0o700, exist_ok=True)
-        for name in ('local_service.py', 'restore.py'):
-            tmp = operations / (name + '.new')
-            shutil.copy2(release / 'ops' / name, tmp)
-            os.replace(tmp, operations / name)
+        self.install_ops(release)
         return receipt
 
     def tool_state(self, job):

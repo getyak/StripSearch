@@ -68,10 +68,26 @@ class LocalServiceTest(unittest.TestCase):
         self.assertEqual(service.authority, 'synthetic.synthetic.ts.net:443')
 
     def test_repeated_update_still_verifies_tailnet_without_restart(self):
-        with patch.object(self.service, 'build', return_value=self.release), patch.object(self.service, 'listeners', return_value=[4321]), patch.object(self.service, 'verify', return_value={'verified': True}) as verify, patch.object(self.service, 'stop') as stop:
+        with patch.object(self.service, 'build', return_value=self.release), patch.object(self.service, 'listeners', return_value=[4321]), patch.object(self.service, 'verify', return_value={'verified': True}) as verify, patch.object(self.service, 'stop') as stop, patch.object(self.service, 'install_ops') as install:
             self.assertEqual(self.service.update(self.root, self.release.name), {'verified': True})
             verify.assert_called_once()
             stop.assert_not_called()
+            install.assert_called_once_with(self.release)
+
+    def test_operator_entry_switches_complete_pair_atomically(self):
+        ops = self.release / 'ops'
+        ops.mkdir()
+        for name in ('local_service.py', 'restore.py'):
+            (ops / name).write_text('# synthetic operator module')
+        self.service.install_ops(self.release)
+        self.assertTrue((self.service.state / 'ops').is_symlink())
+        self.assertEqual((self.service.state / 'ops').resolve(), ops)
+        incomplete = self.service.state / 'releases' / ('b' * 40)
+        (incomplete / 'ops').mkdir(parents=True)
+        (incomplete / 'ops/local_service.py').write_text('# synthetic partial module')
+        with self.assertRaisesRegex(RuntimeError, 'operator entry is incomplete'):
+            self.service.install_ops(incomplete)
+        self.assertEqual((self.service.state / 'ops').resolve(), ops)
 
     def test_backup_failure_restarts_old_version_without_restoring_data(self):
         new = self.service.state / 'releases' / ('b' * 40)
