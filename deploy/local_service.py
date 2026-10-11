@@ -313,6 +313,8 @@ class Service:
         node_version = self.command([self.config['node'], '--version']).stdout.strip()
         if node_version != 'v22.23.2':
             raise RuntimeError('Node version does not match the pinned runtime')
+        if self.command([self.config['npm'], '--version']).stdout.strip() != '12.0.2':
+            raise RuntimeError('npm version does not match the pinned installer')
         deps = Path(self.config.get('buildDependencies', ''))
         if deps.is_dir() and self.config.get('buildLockHash') == lock_hash and matches_install(web / 'package-lock.json', deps):
             (web / 'node_modules').symlink_to(deps.resolve())
@@ -339,6 +341,10 @@ class Service:
         for name in ('package.json', 'package-lock.json'):
             shutil.copy2(web / name, target / name)
         (target / 'node_modules').symlink_to(cache / 'node_modules')
+        operations = release / 'ops'
+        operations.mkdir(mode=0o700)
+        for name in ('local_service.py', 'restore.py'):
+            shutil.copy2(build / 'deploy' / name, operations / name)
         write_json(release / 'manifest.json', {'revision': revision, 'dependencyKey': cache.name, 'lockHash': lock_hash, 'nodeVersion': node_version})
         (release / 'complete').touch(mode=0o600)
         shutil.rmtree(build)
@@ -399,6 +405,14 @@ class Service:
                 (self.state / 'recovery-required.json').unlink()
             raise
         write_json(self.state / 'accepted.json', {'current': revision, 'previous': previous.name if previous else None, 'backup': str(backup)})
+        # The stable operator entry uses the last accepted manager even if the
+        # application rolls back to a legacy release that had no manager.
+        operations = self.state / 'ops'
+        operations.mkdir(mode=0o700, exist_ok=True)
+        for name in ('local_service.py', 'restore.py'):
+            tmp = operations / (name + '.new')
+            shutil.copy2(release / 'ops' / name, tmp)
+            os.replace(tmp, operations / name)
         return receipt
 
     def tool_state(self, job):
