@@ -23,6 +23,8 @@
  * share one authority for shapes, bounds and state transitions.
  */
 
+import { asString as str } from './response-primitives.js';
+
 export const PLATFORM_DISCOVERY_VERSION = 'stripsearch/platform-discovery/v1';
 
 // ---------------------------------------------------------------------------
@@ -407,10 +409,6 @@ export interface ImportParseResult {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function str(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
 function bool(value: unknown): boolean | null {

@@ -16,6 +16,8 @@
  * - reduced motion suppresses the transient emphasis class.
  */
 
+import { escapeAttrValue as quote, prefersReducedMotion } from './dom.js';
+
 export type SourceEntryKind = 'citation' | 'list' | 'search' | 'button';
 
 export interface SourceEntry {
@@ -86,11 +88,6 @@ const NOOP: CitationReturnController = {
   emphasize: () => undefined
 };
 
-function quote(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-    .replace(/[\n\r\f]/g, (character) => `\\${character.charCodeAt(0).toString(16)} `);
-}
-
 export function createCitationReturn(options: CitationReturnOptions): CitationReturnController {
   const doc = options.doc ?? document;
   const win = options.win ?? (doc.defaultView as Window | null) ?? window;
@@ -103,11 +100,7 @@ export function createCitationReturn(options: CitationReturnOptions): CitationRe
   const emphasisTimers = new Map<HTMLElement, unknown>();
 
   function reducedMotion(): boolean {
-    try {
-      return Boolean(options.reducedMotion?.() ?? win.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    } catch {
-      return false;
-    }
+    return prefersReducedMotion(win, () => options.reducedMotion?.());
   }
 
   function enter(

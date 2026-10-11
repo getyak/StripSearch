@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { LIMITS } from '../../shared/limits.js';
-import { validateQuestion } from '../../shared/validation.js';
+import { stripControlCharacters, validateQuestion } from '../../shared/validation.js';
 import {
   REVIEW_SCHEMA_VERSION,
   isClaimLabel,
@@ -25,6 +25,7 @@ import type {
   ReviewSource
 } from '../../shared/review.js';
 import { HttpError } from '../http/errors.js';
+import { readBody } from '../http/request-input.js';
 import { requireUser } from '../http/middleware.js';
 import { PRACTICE_BADGE, PRACTICE_CASES } from '../review-seed.js';
 import {
@@ -52,15 +53,11 @@ const CLAIM_ID_MAX = 160;
 const EVIDENCE_ID_MAX = 40;
 const RUBRIC_LIST_MAX = 20;
 
-function readBody(req: Request): Record<string, unknown> {
-  const body = req.body;
-  return body !== null && typeof body === 'object' && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {};
-}
-
 function cleanText(value: string): string {
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+  // Shared control-character policy (`shared/validation.stripControlCharacters`);
+  // the reject-not-truncate behavior of requireText/optionalText below is
+  // review-route policy and stays local.
+  return stripControlCharacters(value);
 }
 
 /** Reject rather than silently truncate a human judgment. */

@@ -27,6 +27,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { hash12 } from '../util/hash.js';
 
 import { checkPublicAddress, normalizeSocketAddress } from './request-policy.js';
 import type {
@@ -298,17 +299,13 @@ const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 /** Mirrors `request-policy` HOSTNAME_RE (read-only reuse; that module is frozen). */
 const STRICT_HOSTNAME = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 
-/** Lowercase the scheme://host portion only; path/query/fragment verbatim. */
-export function normalizeSchemeHost(value: string): string {
-  const schemeEnd = value.indexOf('://');
-  if (schemeEnd < 0) return value;
-  const scheme = value.slice(0, schemeEnd).toLowerCase();
-  const rest = value.slice(schemeEnd + 3);
-  const boundary = rest.search(/[/?#]/);
-  const authority = boundary < 0 ? rest : rest.slice(0, boundary);
-  const tail = boundary < 0 ? '' : rest.slice(boundary);
-  return `${scheme}://${authority.toLowerCase()}${tail}`;
-}
+/**
+ * Lowercase the scheme://host portion only; path/query/fragment verbatim.
+ * ONE shared implementation (also used by first-step account keys);
+ * re-exported here so the GET-92 surface stays stable.
+ */
+export { normalizeSchemeHost } from '../../shared/url-policy.js';
+import { normalizeSchemeHost } from '../../shared/url-policy.js';
 
 /** Insert the root path an HTTP client would send when the URL has none. */
 function withRootPath(value: string): string {
@@ -716,10 +713,6 @@ function searchOperand(resolved: ResolvedInput, entry: CatalogEntry): OperandRes
 /* ------------------------------------------------------------------ */
 /* Plan                                                                */
 /* ------------------------------------------------------------------ */
-
-function hash12(input: string): string {
-  return createHash('sha256').update(input, 'utf8').digest('hex').slice(0, 12);
-}
 
 /**
  * Rule-backed routes contributed by public-rule groups mapped onto an

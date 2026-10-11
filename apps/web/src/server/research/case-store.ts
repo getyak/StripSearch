@@ -27,7 +27,8 @@
  * hangs off the existing Store lifetime (`Store.cases`).
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { newRecordId, nowIso, parseJson } from '../db/row-helpers.js';
 import type { DB } from '../db/index.js';
 import {
   CaseNotFoundError,
@@ -69,25 +70,10 @@ import type {
 } from '../../shared/research-case.js';
 import type { ClaimKind } from '../../shared/types.js';
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function newRecordId(prefix: string): string {
-  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-}
-
 function quoteHash(quote: string): string {
   return createHash('sha256').update(quote).digest('hex');
 }
 
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 /** Write context required by every mutating call. */
 export interface CaseWriteContext {

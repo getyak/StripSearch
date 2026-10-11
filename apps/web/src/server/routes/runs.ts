@@ -19,6 +19,7 @@ import {
 } from '../../shared/validation.js';
 import type { Auth } from '../auth.js';
 import { HttpError } from '../http/errors.js';
+import { optionalBoundedString as optionalString, readBody, readIdempotencyKey } from '../http/request-input.js';
 import { requireUser } from '../http/middleware.js';
 import type { Runner } from '../services/runner.js';
 import type { FirstStepStore } from '../research/first-step-store.js';
@@ -33,28 +34,6 @@ export interface RunRouteDeps {
   researchConfigured?: boolean;
   /** When present, fresh research runs default to the new first-step flow. */
   firstStep?: FirstStepStore | null;
-}
-
-function readBody(req: Request): Record<string, unknown> {
-  const body = req.body;
-  return body !== null && typeof body === 'object' && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {};
-}
-
-function readIdempotencyKey(req: Request): string | null {
-  const header = req.header('idempotency-key');
-  if (typeof header !== 'string') return null;
-  const trimmed = header.trim();
-  if (trimmed.length === 0) return null;
-  return trimmed.slice(0, 128);
-}
-
-function optionalString(value: unknown, max: number): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.length > max) return null;
-  return trimmed;
 }
 
 type IdempotencyLookup = { run: RunRecord } | { conflict: true } | null;

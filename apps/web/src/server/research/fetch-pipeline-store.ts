@@ -18,7 +18,7 @@
  * GET-79 stays unsupported and unclaimed.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newRecordId, nowIso, parseJson } from '../db/row-helpers.js';
 
 import type { DB } from '../db/index.js';
 import type { Store } from '../store.js';
@@ -41,23 +41,6 @@ import type {
   FetchPipelineRunState,
   FetchPipelineStopReason
 } from '../../shared/research-fetch-pipeline.js';
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function newRecordId(prefix: string): string {
-  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-}
-
-function parseJson<T>(raw: string | null, fallback: T): T {
-  if (raw === null) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 /* ------------------------------------------------------------------ */
 /* Records                                                            */

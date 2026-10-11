@@ -32,6 +32,7 @@ import {
 import { isPublicHttpsUrl, validateSeedUrl } from '../../shared/validation.js';
 import type { PlatformCatalogSnapshot } from '../../shared/platform-catalog.js';
 import { HttpError } from '../http/errors.js';
+import { optionalClippedText as optionalText, readBody, readIdempotencyKey } from '../http/request-input.js';
 import { requireUser } from '../http/middleware.js';
 import type { DiscoveryStore, DiscoveryTaskRecord } from '../discovery-store.js';
 import type { DiscoveryRunner } from '../services/discovery-runner.js';
@@ -45,27 +46,6 @@ export interface DiscoveryRouteDeps {
   registry: PlatformRegistry;
   /** Versioned catalog surface; omitted from the response when null/absent. */
   catalog?: PlatformCatalogSnapshot | null;
-}
-
-function readBody(req: Request): Record<string, unknown> {
-  const body = req.body;
-  return body !== null && typeof body === 'object' && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {};
-}
-
-function readIdempotencyKey(req: Request): string | null {
-  const header = req.header('idempotency-key');
-  if (typeof header !== 'string') return null;
-  const trimmed = header.trim();
-  return trimmed.length > 0 ? trimmed.slice(0, 128) : null;
-}
-
-function optionalText(value: unknown, max: number): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return null;
-  return trimmed.slice(0, max);
 }
 
 /* ------------------------------------------------------------------ */

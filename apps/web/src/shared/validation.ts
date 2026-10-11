@@ -217,10 +217,18 @@ export function screenQuestion(...parts: unknown[]): ScopeScreen {
   return { disallowed: false, reason: null };
 }
 
+/**
+ * The ONE control-character policy for user/task text: strips C0 controls and
+ * DEL but keeps `\t`, `\n` and `\r`. Used by `sanitizeText`, the review
+ * routes' `cleanText` and research-task parsing (`stripControls`).
+ */
+export function stripControlCharacters(value: string): string {
+  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+}
+
 export function sanitizeText(raw: unknown, maxLength: number): string {
   if (typeof raw !== 'string') return '';
-  return raw
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+  return stripControlCharacters(raw)
     .trim()
     .slice(0, maxLength);
 }

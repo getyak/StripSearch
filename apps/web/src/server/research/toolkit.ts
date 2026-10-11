@@ -2,6 +2,7 @@ import { pacedFirecrawl } from './provider-gate.js';
 import { isIP } from 'node:net';
 import { createHash } from 'node:crypto';
 import { extractGitHubHandle, isPrivateHost, sanitizeText } from '../../shared/validation.js';
+import { EGRESS_NON_PUBLIC_HOST_SUFFIXES, matchesNonPublicHostSuffix } from '../../shared/url-policy.js';
 import { classifyFirstStepUrl } from '../../shared/first-step-discovery.js';
 import { extractOriginalLinkContexts, nativeProfileLinkContext, nativeUsernameLinkContext } from './link-context.js';
 import { asArray, asNumber, asRecord, asString, safeFetchJson } from '../adapters/http.js';
@@ -24,7 +25,7 @@ function publicUrl(raw: unknown): string {
   try { url = new URL(raw); } catch { return fail('资料链接格式无效。'); }
   const host = url.hostname.toLowerCase().replace(/\.$/, '');
   const literal = host.replace(/^\[|\]$/g, '');
-  if (url.protocol !== 'https:' || url.username || url.password || url.port || !host.includes('.') || isIP(literal) || host.includes(':') || isPrivateHost(host) || /\.(?:invalid|test|localhost|local|internal)$/.test(host)) fail('只读取公开网站，不能读取本机或内部地址。');
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || !host.includes('.') || isIP(literal) || host.includes(':') || isPrivateHost(host) || matchesNonPublicHostSuffix(host, EGRESS_NON_PUBLIC_HOST_SUFFIXES)) fail('只读取公开网站，不能读取本机或内部地址。');
   url.hostname = host;
   url.hash = '';
   return url.href;

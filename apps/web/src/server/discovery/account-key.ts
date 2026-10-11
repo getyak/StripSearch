@@ -36,6 +36,7 @@ import type {
   DiscoveredAccountIdentity
 } from '../../shared/discovery-plan.js';
 import { ACCOUNT_KEY_PREFIX, canonicalJson } from '../../shared/discovery-plan.js';
+import { urlFallbackAccountKey } from '../../shared/discovery-plan.js';
 import { normalizeSchemeHost, staticHttpsUrlPreflight } from './route-planner.js';
 
 /** Verified per-platform canonicalization evidence. Empty by default. */
@@ -139,11 +140,14 @@ export function canonicalAccountKey(
     })}`;
   }
 
-  // 2) Conservative public-safe HTTPS URL fallback.
+  // 2) Conservative public-safe HTTPS URL fallback (ONE shared key shape with
+  //    the first-step key; the preflight + tracking whitelist above and the
+  //    native/handle ladders below are GET-92-only policy, see
+  //    docs/code-maintenance.md).
   if (identity.profileUrl !== null) {
     const url = canonicalProfileUrl(identity.profileUrl, identity.platformId, rules);
     if (url !== null) {
-      return `${ACCOUNT_KEY_PREFIX}:${canonicalJson({ ...base, mode: 'url', url })}`;
+      return urlFallbackAccountKey(base, url);
     }
   }
 

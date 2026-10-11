@@ -42,13 +42,7 @@ export function parseExaResult(raw: unknown): ExaResult | null {
   };
 }
 
-export function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-}
+import { hostnameOf } from '../../shared/url-policy.js';
 
 export function dedupeExaResults(results: ExaResult[]): ExaResult[] {
   const seen = new Set<string>();

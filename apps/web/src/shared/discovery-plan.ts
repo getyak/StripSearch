@@ -57,6 +57,22 @@ export const DISCOVERY_REQUEST_KEY_PREFIX = 'sdrk/1';
 /** Prefix of canonical account keys (`canonicalAccountKey`). */
 export const ACCOUNT_KEY_PREFIX = 'ssack/1';
 
+/**
+ * The ONE URL-fallback account key shape: `ACCOUNT_KEY_PREFIX` + `canonicalJson`
+ * over `{v, platformId, instance, accountKind, mode:'url', url}`. GET-92
+ * `canonicalAccountKey` and the first-step `firstStepAccountKey` both call this
+ * exact serializer so a URL key can never diverge in shape; their
+ * NORMALIZATION ladders stay deliberately different (preflight / tracking
+ * whitelist / native+handle ladders) and are documented in
+ * docs/code-maintenance.md.
+ */
+export function urlFallbackAccountKey(
+  base: { v: string; platformId: string; instance: string | null; accountKind: string },
+  url: string
+): string {
+  return `${ACCOUNT_KEY_PREFIX}:${canonicalJson({ ...base, mode: 'url', url })}`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Accepted public input classification                                */
 /* ------------------------------------------------------------------ */

@@ -25,6 +25,8 @@ import {verifyAliasProjection} from './alias-proof.js';
  */
 
 import { createHash } from 'node:crypto';
+import { hash12, jsonDigest24 as digest } from '../util/hash.js';
+import { meteredInvoke } from './metered.js';
 import type { Store } from '../store.js';
 import type { HttpTransport } from '../adapters/types.js';
 import { ProviderError } from '../adapters/types.js';
@@ -108,9 +110,6 @@ export interface FirstStepCheckedSearchOptions {
   modelName?: string;
 }
 
-function digest(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
-}
 
 /**
  * The one metered search surface for the first step. Only `search` and
@@ -174,33 +173,40 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
       const ceiling = kind === 'search' ? options.budget.maxSearchQueries : options.budget.maxProfileReads;
       if (count >= ceiling) throw new ResearchStop('budget_exhausted');
     }
-    const old = options.store.research.reserve(options.runId, requestKey, 'tool', action, { inputTokens: 0, outputTokens: 0 }, limits, true);
-    if (old) {
-      // Same-attempt recovery: the real prior receipt, original timestamp.
-      note(requestKey, kind, target, retrieval, old, old.state === 'completed' ? 'completed' : 'failed');
-      if (old.state === 'failed') throw new ProviderError('provider_bad_response', '本次请求已有已结算失败回执，保留缺口，不自动重复调用。');
-      return old.result as ResearchToolResult;
-    }
-    try {
-      const result = await options.tools.execute(action, signal);
-      options.store.research.settle(options.runId, requestKey, result, {
+    // The shared metered scaffold carries reserve/replay/settle; the attempt
+    // budget ceilings, per-URL reservations and receipt log stay above it.
+    return meteredInvoke<ResearchToolResult>({
+      ledger: options.store.research,
+      runId: options.runId,
+      key: requestKey,
+      kind: 'tool',
+      request: action,
+      reservation: { inputTokens: 0, outputTokens: 0 },
+      limits,
+      allowSettledFailure: true,
+      replayFailure: () => new ProviderError('provider_bad_response', '本次请求已有已结算失败回执，保留缺口，不自动重复调用。'),
+      execute: () => options.tools.execute(action, signal),
+      usageOf: (result) => ({
         estimatedUsd: result.estimatedUsd,
         credits: result.credits,
         bytes: result.bytes,
         unknownCost: result.estimatedUsd === null
-      });
-      signal.throwIfAborted();
-      options.store.research.assertActive(options.runId);
-      note(requestKey, kind, target, retrieval, options.store.research.receipt(options.runId, requestKey)!, 'completed');
-      return result;
-    } catch (error) {
-      try {
-        options.store.research.settle(options.runId, requestKey, null, { estimatedUsd: null, unknownCost: true }, 'failed');
-        const receipt = options.store.research.receipt(options.runId, requestKey);
+      }),
+      // Same-attempt recovery: the real prior receipt, original timestamp.
+      onReplay: (old) => {
+        note(requestKey, kind, target, retrieval, old, old.state === 'completed' ? 'completed' : 'failed');
+      },
+      onSettled: (receipt) => {
+        signal.throwIfAborted();
+        options.store.research.assertActive(options.runId);
+        note(requestKey, kind, target, retrieval, receipt!, 'completed');
+      },
+      failureUsage: () => ({ estimatedUsd: null, unknownCost: true }),
+      settleFailure: () => true,
+      onFailed: (receipt) => {
         if (receipt) note(requestKey, kind, target, retrieval, receipt, 'failed');
-      } catch { /* cancelled/deleted runs refuse late receipts; keep the error */ }
-      throw error;
-    }
+      }
+    });
   };
   return {
     async search(requestKey, query, numResults, signal, includeDomains, provider) {
@@ -260,29 +266,31 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
     receipts() {
       return [...log];
     },
-    async withModel(requestKey, call, reservation = { inputTokens: 0, outputTokens: 0 }) {
+    async withModel<T>(requestKey: string, call: () => Promise<T>, reservation: { inputTokens: number; outputTokens: number } = { inputTokens: 0, outputTokens: 0 }): Promise<T> {
       const prefix = namespace(requestKey);
       if (!options.store.research.receipt(options.runId, requestKey) && prefix !== null &&
         options.store.research.receipts(options.runId).filter(row => row.key.startsWith(prefix) && row.kind === 'model').length >= options.budget.maxModelCalls) throw new ResearchStop('budget_exhausted');
-      const old = options.store.research.reserve(options.runId, requestKey, 'model', { model: options.modelName ?? 'first-step-search-model' }, reservation, limits, true);
-      if (old) {
+      return meteredInvoke<T>({
+        ledger: options.store.research,
+        runId: options.runId,
+        key: requestKey,
+        kind: 'model',
+        request: { model: options.modelName ?? 'first-step-search-model' },
+        reservation,
+        limits,
+        allowSettledFailure: true,
         // Same-attempt recovery: replay the EXACT saved result with its
         // original receipt time. Unknown inflight attempts are never replayed
         // (reserve throws) and failed attempts never silently re-call.
-        if (old.state === 'failed') throw new ProviderError('provider_bad_response', '模型请求已有已结算失败回执，保留缺口，不自动重复调用。');
-        return old.result as never;
-      }
-      try {
-        const result = await call();
-        const usage = result && typeof result === 'object' && 'usage' in result ? (result as { usage?: ActionUsage }).usage : undefined;
-        options.store.research.settle(options.runId, requestKey, result, usage ?? { estimatedUsd: null, unknownCost: true });
-        return result;
-      } catch (error) {
-        try {
-          options.store.research.settle(options.runId, requestKey, null, { estimatedUsd: null, unknownCost: true }, 'failed');
-        } catch { /* keep the original error */ }
-        throw error;
-      }
+        replayFailure: () => new ProviderError('provider_bad_response', '模型请求已有已结算失败回执，保留缺口，不自动重复调用。'),
+        execute: () => call(),
+        usageOf: (result) => {
+          const usage = result !== null && typeof result === 'object' && 'usage' in result ? (result as { usage?: ActionUsage }).usage : undefined;
+          return usage ?? { estimatedUsd: null, unknownCost: true };
+        },
+        failureUsage: () => ({ estimatedUsd: null, unknownCost: true }),
+        settleFailure: () => true
+      });
     }
   };
 }
@@ -1938,7 +1946,7 @@ function buildClusters(input: {
     for (const lead of input.modelLeads ?? []) {
       if (lead.anchorKey !== anchor.accountKey) continue;
       leads.push({
-        atomId: `lead_model_${createHash('sha256').update(`${lead.sourceUrl}|${lead.quote}`).digest('hex').slice(0, 12)}`,
+        atomId: `lead_model_${hash12(`${lead.sourceUrl}|${lead.quote}`)}`,
         statement: lead.statement,
         quote: lead.quote,
         sourceUrl: lead.sourceUrl,

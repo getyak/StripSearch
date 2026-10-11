@@ -2,7 +2,10 @@ import {nativeOrganizationKeys} from './research/native-account-kind.js';
 import { genreReviewIssue } from './research/quote-genre.js';
 import { researchDepthCoverage, claimEvidenceIssue, presentedResearchUnknowns } from '../shared/research-depth.js';
 import { classifyFirstStepUrl, type FirstStepDiscoveryView } from '../shared/first-step-discovery.js';
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { newRecordId as newId, nowIso, parseJson } from './db/row-helpers.js';
+
+export { nowIso, newId };
 import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
 import {identitySemanticReviewAccounts} from './research/identity-semantic-validity.js';
@@ -37,14 +40,6 @@ import {
   validityFor
 } from '../shared/canonical.js';
 import type { DB } from './db/index.js';
-
-export function nowIso(): string {
-  return new Date().toISOString();
-}
-
-export function newId(prefix: string): string {
-  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-}
 
 interface RunRow {
   id: string;
@@ -161,13 +156,6 @@ const EMPTY_USAGE: CanonicalUsage = {
   measurement: 'not_run'
 };
 
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 function mapRun(row: RunRow): RunRecord {
   return {

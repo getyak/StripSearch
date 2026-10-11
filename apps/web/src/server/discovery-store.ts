@@ -38,7 +38,7 @@ import {
   emptyUsage
 } from '../shared/platform-discovery.js';
 import type { DB } from './db/index.js';
-import { newId, nowIso } from './store.js';
+import { newRecordId as newId, nowIso, parseJson } from './db/row-helpers.js';
 
 export interface DiscoveryTaskRecord {
   id: string;
@@ -232,13 +232,6 @@ interface PostRow {
   link_state: LinkState;
 }
 
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 function mapTask(row: TaskRow): DiscoveryTaskRecord {
   return {

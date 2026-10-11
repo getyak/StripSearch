@@ -34,7 +34,7 @@
  * isolation (owner mismatch reports "not found") and stale-context rejection.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newRecordId, nowIso, parseJson } from '../db/row-helpers.js';
 
 import type { DB } from '../db/index.js';
 import type { CaseStore } from './case-store.js';
@@ -75,22 +75,6 @@ import type {
   StopReason
 } from '../../shared/research-completion.js';
 import { buildAssessmentInput, evaluateCompletion, sha256Hex, stableStringify, staleReasonsAgainst } from './completion-eval.js';
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function newRecordId(prefix: string): string {
-  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-}
-
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 function deepCopy<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
