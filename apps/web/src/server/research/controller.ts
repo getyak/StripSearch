@@ -135,7 +135,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  const scheduleDeadline=()=>{const remaining=limits.elapsedMs-priorElapsed-(Date.now()-launched);timer=setTimeout(()=>{if(priorElapsed+Date.now()-launched>=limits.elapsedMs)deadline.abort(new ResearchStop('budget_exhausted'));else scheduleDeadline();},Math.min(2_147_483_647,Math.max(1,remaining)));};
  if(limits.elapsedMs>0)scheduleDeadline();
  const signal=AbortSignal.any([options.signal,deadline.signal]);
- const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);options.firstStepScope?.assertCurrent?.();if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
+ const active=()=>{signal.throwIfAborted();store.research.assertActive(run.id);options.firstStepScope?.assertCurrent?.();if(!store.isResearchScopeActive(run.id,run.ownerId))throw new FirstStepSelectionError('scope_changed','账号范围或祖先授权已撤回，冻结范围失效。');if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');};
  const save=()=>{active();checkpoint.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,checkpoint);};
  const progress=(phase:string)=>{checkpoint.phase=phase;save();store.addEvent(run.id,'stage',{index:checkpoint.steps,total:limits.toolCalls,key:phase,label:phase==='identity'?'确认公开主页':phase==='planning'?'整理资料与缺口':phase==='verifying'?'核验引文与陈述':'读取相关资料',status:'active'});};
  const stillActivePages=()=>stillActivePagesOf(store,run,checkpoint);

@@ -170,6 +170,27 @@ test('independent original keeps its own material when another anchor is withdra
   } finally { f.close(); }
 });
 
+test('legacy descendant stops before any model or provider dispatch after ancestor scope withdrawal', async () => {
+  const f = seedFirstStep({ accounts: [{ url: HOME }] });
+  try {
+    select(f, false); const cp = completed(f);
+    const child = f.store.insertRun({ ownerId: OWNER, question: 'Synthetic legacy follow-up', seedUrl: HOME, provider: 'research',
+      parentRunId: f.run.id, retryOf: null, followup: true, idempotencyKey: null, bodyFingerprint: 'legacy-dispatch' });
+    const { firstStep: _binding, ...legacy } = cp;
+    f.store.research.save(child.id, legacy); add(f, child.id, cp.pages[0]!);
+    f.store.cases.applyScopeChange({ ownerId: OWNER, caseId: f.caseId, expectedScopeVersion: f.store.cases.getCase(OWNER, f.caseId)!.scopeVersion,
+      reason: 'synthetic withdrawal', accounts: [{ accountId: f.accountIds[0]!, userSelection: { state: 'not_selected', note: null, recordedAt: new Date().toISOString() }, allowedScope: { state: 'none', note: 'withdrawn' } }] });
+    let calls = 0;
+    const result = await runResearch({ store: f.store, run: child, signal: new AbortController().signal,
+      tools: { async execute() { calls++; throw Error('must not dispatch'); } },
+      planner: { async decide() { calls++; throw Error('must not dispatch'); } }
+    });
+    assert.equal(result.stopReason, 'scope_changed'); assert.equal(result.state, 'partial');
+    assert.equal(calls, 0); assert.equal(f.store.research.receipts(child.id).length, 0);
+    assert.equal(f.store.getSource(child.id, 'S1')!.excerpt, QUOTE);
+  } finally { f.close(); }
+});
+
 test('person material still depends on its person anchor original', () => {
   const f = seedFirstStep({ accounts: [{ url: HOME }] });
   try {
