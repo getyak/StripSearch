@@ -175,9 +175,9 @@ class Service:
                 raise RuntimeError('listener changed during stop; refusing signal')
             os.kill(pid, signal.SIGTERM)
         deadline = time.monotonic() + 30
-        while self.listeners():
+        while self.listeners() or self.command(['launchctl', 'print', self.job], check=False).returncode == 0:
             if time.monotonic() > deadline:
-                raise RuntimeError('owned service did not stop; no database restore attempted')
+                raise RuntimeError('owned service/job did not stop; no database restore attempted')
             time.sleep(.2)
 
     def start(self, allow_recovery=False):

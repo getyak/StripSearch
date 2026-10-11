@@ -40,6 +40,16 @@ class LocalServiceTest(unittest.TestCase):
             command.assert_not_called()
             kill.assert_not_called()
 
+    def test_stop_waits_for_launchd_removal_after_listener_closes(self):
+        pending = [0, 0, 113]
+        def command(argv, check=True):
+            code = pending.pop(0) if argv[:2] == ['launchctl', 'print'] else 0
+            return subprocess.CompletedProcess(argv, code, '', '')
+        with patch.object(self.service, 'listeners', return_value=[]), patch.object(self.service, 'command', side_effect=command), patch('local_service.time.sleep') as sleep:
+            self.service.stop()
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(pending, [])
+
     def test_start_is_idempotent_for_owned_listener(self):
         with patch.object(self.service, 'listeners', return_value=[4321]), patch.object(self.service, 'owned_pid', return_value=True), patch.object(self.service, 'command') as command:
             self.service.start()
