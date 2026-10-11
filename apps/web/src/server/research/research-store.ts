@@ -45,6 +45,8 @@ export interface ClaimGenreReview {
  quoteOffset:number;contextOffset:number;contextLength:number;
 }
 export interface ResearchCheckpoint {
+ /** Highest historical source ordinal, retained when pages leave the corpus. */
+ sourceKeyHighWatermark?: number;
  /** Same-source genre context is exclusion-only, never extra fact support. */
  quoteGenrePolicy?:'genre_context/v1';
  /** Persisted only after a scoped quote-only verification starts; no historical relabeling. */

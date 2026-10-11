@@ -1173,7 +1173,7 @@ export class FirstStepScopeGuard {
       .prepare('SELECT scope_version FROM research_cases WHERE id = ? AND owner_id = ? AND deleted_at IS NULL')
       .get(binding.caseId, this.ownerId) as { scope_version: number } | undefined;
     if (!caseRow) throw new FirstStepSelectionError('scope_changed', '案例不可用，读取范围失效。');
-    if (caseRow.scope_version !== binding.scopeVersion) {
+    if (caseRow.scope_version !== binding.scopeVersion || !this.store.isResearchScopeActive(this.runId, this.ownerId)) {
       throw new FirstStepSelectionError('scope_changed', '研究范围已变更，冻结范围失效。');
     }
     if (!this.store.isFirstStepIdentityActive(this.ownerId, binding)) {

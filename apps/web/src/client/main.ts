@@ -1663,7 +1663,7 @@ function onHashChange(): void {
 async function boot(): Promise<void> {
   wire();
   renderUserNav(null);
-  const protectedEntry = /^#\/(?:app|review)(?:\/|$)/.test(window.location.hash);
+  const protectedEntry = /^#\/(?:app|review|fetch)(?:\/|$)/.test(window.location.hash);
   const opening = protectedEntry ? make('section', { className: 'app-opening', attrs: { role: 'status', 'aria-label': '恢复研究' }, children: [make('p', { text: '正在打开已保存研究…' })] }) : null;
   if (opening) {
     els.home.hidden = true;

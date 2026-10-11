@@ -1,5 +1,6 @@
 import { RESEARCH_FACETS, researchDepthCoverage, claimEvidenceIssue, quoteHasFirstPerson, presentedResearchUnknowns, type ResearchFacet } from '../../shared/research-depth.js';
 import { createHash } from 'node:crypto';
+import { allocateSourceKey } from './source-keys.js';
 import { NeedsInputError, type IdentityCandidate, type ProviderResult, type ResearchBudgetLimits, type SourceDraft } from '../../shared/types.js';
 import { extractGitHubHandle, normalizeResearchUrl, sanitizeText } from '../../shared/validation.js';
 import { ProviderError, type HttpTransport } from '../adapters/types.js';
@@ -164,7 +165,7 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    const url=researchUrl(page.url);if(!url)continue;
    const existing=checkpoint.pages.find(p=>p.url===url);
    const retrieval=action.type==='search'?'search':action.type==='github_profile'||action.type==='social_profile'?'profile':'read';
-   const clean:StoredPage={...page,retrieval,url,title:sanitizeText(page.title,200),text:retainText(page.text),links:[...new Set(page.links.map(researchUrl).filter((v):v is string=>!!v))],limitations:page.limitations.map(v=>sanitizeText(v,500)),sourceKey:existing?.sourceKey??`S${checkpoint.pages.length+1}`,...existing?.inheritedFrom?{inheritedFrom:existing.inheritedFrom}:{},...discoveredFrom.length?{discoveredFrom:[...discoveredFrom]}:{}};
+   const clean:StoredPage={...page,retrieval,url,title:sanitizeText(page.title,200),text:retainText(page.text),links:[...new Set(page.links.map(researchUrl).filter((v):v is string=>!!v))],limitations:page.limitations.map(v=>sanitizeText(v,500)),sourceKey:existing?.sourceKey??allocateSourceKey(checkpoint,store.listSources(run.id).map(source=>source.sourceKey)),...existing?.inheritedFrom?{inheritedFrom:existing.inheritedFrom}:{},...discoveredFrom.length?{discoveredFrom:[...discoveredFrom]}:{}};
    // Search can enrich discovery but cannot replace an already fetched original.
    if(existing&&(existing.retrieval==='read'||existing.retrieval==='profile')&&retrieval==='search'){
     clean.text=existing.text;clean.title=existing.title;clean.retrieval=existing.retrieval;clean.kind=existing.kind;clean.publishedAt=existing.publishedAt;clean.author=existing.author;clean.retrievedAt=existing.retrievedAt;clean.textTruncated=existing.textTruncated;clean.account=existing.account;clean.discoveredFrom=existing.discoveredFrom;

@@ -616,17 +616,58 @@ export class Store {
   }
 
   /** Follow-up provenance is transitive; cycles, deleted ancestors and owner mismatches fail closed. */
+  isFirstStepScopeActive(ownerId: string, binding: FirstStepBinding): boolean {
+    const currentCase = this.cases.getCase(ownerId, binding.caseId);
+    if (!currentCase || currentCase.scopeVersion !== binding.scopeVersion) return false;
+    const current = new Map(this.cases.listAccounts(ownerId, binding.caseId).map(account => [account.accountId, account]));
+    return binding.selectedAccountIds.length > 0 && binding.selectedAccountIds.every(id => {
+      const frozen = binding.accounts.find(account => account.accountId === id);
+      const account = current.get(id);
+      const ref = account?.profileUrl ? classifyFirstStepUrl(account.profileUrl) : null;
+      return Boolean(frozen && account && ref?.ok && ref.ref.accountKey === frozen.accountKey &&
+        binding.accountKeys[frozen.accountKey] === id &&
+        account.userSelection.state === (binding.independentAccountIds.includes(id) ? 'only_this_account' : 'selected') &&
+        account.allowedScope.state === frozen.allowedScope);
+    });
+  }
+
+  /** Frozen authorization is separate from person identity, including descendant reports. */
+  isResearchScopeActive(runId: string, ownerId: string, visited = new Set<string>(), accountIds = new Set<string>()): boolean {
+    if (visited.has(runId)) return false;
+    const run = this.getRunForOwner(runId, ownerId);
+    if (!run) return false;
+    const seen = new Set(visited); seen.add(runId);
+    const binding = this.research.checkpoint(runId)?.firstStep;
+    const dependencies = new Set(accountIds);
+    if (binding) {
+      if (!this.isFirstStepScopeActive(ownerId, binding)) return false;
+      for (const accountId of new Set([...binding.selectedAccountIds, ...(binding.identityDependencyAccountIds ?? [])])) {
+        dependencies.add(accountId);
+      }
+    }
+    for (const accountId of dependencies) {
+      if (this.db.prepare('SELECT id FROM first_step_exclusions WHERE run_id=? AND account_id=? AND revoked_at IS NULL').get(runId, accountId)) return false;
+    }
+    return [run.parentRunId, run.retryOf].every(parent => !parent || this.isResearchScopeActive(parent, ownerId, seen, dependencies));
+  }
+
+  private isIndependentResearchPage(runId: string, url: string): boolean {
+    const binding = this.research.checkpoint(runId)?.firstStep;
+    const ref = classifyFirstStepUrl(url);
+    return Boolean(binding && ref.ok && binding.independentAccountIds.includes(binding.accountKeys[ref.ref.accountKey] ?? ''));
+  }
+
   isResearchSourceActive(runId: string, sourceKey: string, ownerId: string, visited = new Set<string>()): boolean {
     const key = `${runId}:${sourceKey}`;
     if (visited.has(key)) return false;
     const seen = new Set(visited); seen.add(key);
     const run = this.getRunForOwner(runId, ownerId);
     const source = run ? this.getSource(runId, sourceKey) : null;
-    if (!run || !source || source.excluded) return false;
+    if (!run || !source || source.excluded || !this.isResearchScopeActive(runId, ownerId)) return false;
     const checkpoint = this.research.checkpoint(runId);
     const page = checkpoint?.pages.find(page => page.sourceKey === sourceKey);
     const anchor = checkpoint?.pages.find(page => page.url === checkpoint.anchorUrl);
-    if (anchor && anchor.sourceKey !== sourceKey && !this.isResearchSourceActive(runId, anchor.sourceKey, ownerId, seen)) return false;
+    if (anchor && anchor.sourceKey !== sourceKey && !this.isIndependentResearchPage(runId, source.url) && !this.isResearchSourceActive(runId, anchor.sourceKey, ownerId, seen)) return false;
     if (page?.discoveredFrom?.length && !page.discoveredFrom.some(parentKey => this.isResearchSourceActive(runId, parentKey, ownerId, seen))) return false;
     return !page?.inheritedFrom || this.isResearchSourceActive(page.inheritedFrom.runId, page.inheritedFrom.sourceKey, ownerId, seen);
   }
@@ -653,13 +694,15 @@ export class Store {
 
   buildCanonicalView(run: RunRecord): CanonicalView {
     const checkpoint = run.provider === 'research' ? this.research.checkpoint(run.id) : null;
+    const scopeChanged = Boolean(checkpoint && !this.isResearchScopeActive(run.id, run.ownerId));
+    const scopeReason = '已冻结的账号研究范围已变更或撤回；原资料保留，相关结论需要重新核对。';
     const identityChanged = Boolean(checkpoint?.firstStep && !this.isFirstStepIdentityActive(run.ownerId, checkpoint.firstStep));
     const identityReason = '人物关联的归属依据已失效；原资料保留，人物结论需要重新核对。';
     const sources = this.listSources(run.id).map(source => checkpoint && !this.isResearchSourceActive(run.id, source.sourceKey, run.ownerId)
       ? { ...source, excluded: true, fetchStatus: 'excluded' as const }
       : identityChanged ? { ...source, identityConfirmed: false, identityLabel: '人物归属待复核；账号自身原资料保留。' } : source);
     const excluded = excludedSourceKeys(sources);
-    const anchorRevoked = Boolean(checkpoint?.anchorUrl && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
+    const anchorRevoked = Boolean(checkpoint?.anchorUrl && !this.isIndependentResearchPage(run.id, checkpoint.anchorUrl) && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
     // Projection never rewrites checkpoint claims or supplier receipts. Policy
     // checks are shared with verification, including on terminal reopens/exports.
     const evidenceIssue=(claim:NonNullable<typeof checkpoint>['claims'][number]):string|null=>{
@@ -685,22 +728,22 @@ export class Store {
     const accountMaterials=(checkpoint?.independentMaterials??[]).filter(material=>{
       const page=checkpoint?.pages.find(page=>page.sourceKey===material.sourceKey),account=classifyFirstStepUrl(material.sourceUrl);
       const source=sources.find(source=>source.sourceKey===material.sourceKey&&!source.excluded);
-      return !anchorRevoked&&account.ok&&independentAccounts.has(account.ref.accountKey)&&page?.url===material.sourceUrl&&(page.retrieval==='read'||page.retrieval==='profile')&&source?.url===material.sourceUrl&&typeof source.excerpt==='string'&&Number.isSafeInteger(material.quoteOffset)&&material.quoteOffset>=0&&material.quote.length>=3&&page.text.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(page.text).digest('hex')===material.sourceContentHash&&source.excerpt.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(source.excerpt).digest('hex')===material.sourceContentHash;
+      return account.ok&&independentAccounts.has(account.ref.accountKey)&&page?.url===material.sourceUrl&&(page.retrieval==='read'||page.retrieval==='profile')&&source?.url===material.sourceUrl&&typeof source.excerpt==='string'&&Number.isSafeInteger(material.quoteOffset)&&material.quoteOffset>=0&&material.quote.length>=3&&page.text.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(page.text).digest('hex')===material.sourceContentHash&&source.excerpt.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(source.excerpt).digest('hex')===material.sourceContentHash;
     });
     const observations = this.listObservations(run.id).filter(observation=>!isPolicyRejected(observation.statement,observation.sourceKeys)).map(observation=>({...observation,sourceKeys:projectedKeys(observation.statement,observation.sourceKeys)})).map(observation => ({ ...observation,
-      validity: identityChanged ? 'review' as const : validityFor(observation.sourceKeys, excluded),
-      reviewReason: identityChanged ? identityReason : reviewReason(observation.sourceKeys, excluded)
+      validity: scopeChanged || identityChanged ? 'review' as const : validityFor(observation.sourceKeys, excluded),
+      reviewReason: scopeChanged ? scopeReason : identityChanged ? identityReason : reviewReason(observation.sourceKeys, excluded)
     }));
     const answer: CanonicalAnswerSection[] = run.answer.map((section) => ({
       id: section.id,
       heading: section.heading,
-      body: policyRejected.some(claim=>section.body.includes(claim.statement)&&!hasActiveSupport(claim.statement))?'':section.body,
+      body: scopeChanged || policyRejected.some(claim=>section.body.includes(claim.statement)&&!hasActiveSupport(claim.statement))?'':section.body,
       bullets: section.bullets.filter(bullet=>!isPolicyRejected(bullet.text,bullet.sourceKeys)).map(bullet=>({...bullet,sourceKeys:projectedKeys(bullet.text,bullet.sourceKeys)})).map((bullet) => ({
         text: bullet.text,
         sourceKeys: bullet.sourceKeys,
         kind: bullet.kind,
-        validity: identityChanged ? 'review' as const : validityFor(bullet.sourceKeys, excluded),
-        reviewReason: identityChanged ? identityReason : reviewReason(bullet.sourceKeys, excluded)
+        validity: scopeChanged || identityChanged ? 'review' as const : validityFor(bullet.sourceKeys, excluded),
+        reviewReason: scopeChanged ? scopeReason : identityChanged ? identityReason : reviewReason(bullet.sourceKeys, excluded)
       }))
     })).filter(section=>!policyRejected.length||section.body||section.bullets.length);
     const identity: CanonicalIdentity = {
@@ -713,10 +756,11 @@ export class Store {
     };
     if (anchorRevoked) { identity.status = 'ambiguous'; identity.note = '人物主页证据已撤回，需要重新确认身份。'; }
     if (identityChanged) { identity.status = 'ambiguous'; identity.note = identityReason; }
+    if (scopeChanged) { identity.status = 'ambiguous'; identity.note = scopeReason; }
     return {
       schemaVersion: SCHEMA_VERSION,
       runId: run.id,
-      state: policyStop?'partial':run.state,
+      state: scopeChanged || policyStop ? 'partial' : run.state,
       revision: run.revision,
       question: run.question,
       seedUrl: run.seedUrl,
@@ -727,16 +771,16 @@ export class Store {
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
       interrupted: run.interrupted,
-      stopReason: policyStop?'claim_scope_unverified':run.stopReason,
+      stopReason: scopeChanged ? 'scope_changed' : policyStop?'claim_scope_unverified':run.stopReason,
       identity,
       sources,
       observations,
       answer,
-      limitations: [...new Set([...run.limitations,...policyLimits])],
+      limitations: [...new Set([...run.limitations,...policyLimits,...scopeChanged?[scopeReason]:[]])],
       usage: run.usage,
       reviewCount: countReviewItems(observations, answer),
       ...(checkpoint ? {
-        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: presentedResearchUnknowns(checkpoint), ...(checkpoint.independentMaterials?{accountMaterials}:{}), coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
+        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: scopeChanged ? 'scope_changed' : policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: presentedResearchUnknowns(checkpoint), ...(checkpoint.independentMaterials?{accountMaterials}:{}), coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
         ...(checkpoint.anchorUrl && identity.status === 'resolved' ? {
           personObject: {
             schemaVersion: 'stripsearch/person/v1' as const,
@@ -761,7 +805,7 @@ export class Store {
     return {
       runId: run.id,
       question: run.question,
-      state: run.state,
+      state: view.state,
       provider: run.provider,
       revision: run.revision,
       createdAt: run.createdAt,

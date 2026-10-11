@@ -1,4 +1,5 @@
 import {createSearchAgent} from '../research/search-agent.js';
+import { allocateSourceKey, rememberSourceKeys } from '../research/source-keys.js';
 import { buildResearchReport, failedUsage, runResearch, scopeRefusalRecord, tagScopeRefusal, type ScopedResearchTools } from '../research/controller.js';
 import { createDshPlanner, type ResearchPlanner } from '../research/planner.js';
 import type { ResearchTools } from '../research/tool-contracts.js';
@@ -430,6 +431,7 @@ export class Runner {
     const checkpoint = this.deps.store.research.checkpoint(runId);
     let scopeStopped = false;
     if (checkpoint) {
+      rememberSourceKeys(checkpoint, this.deps.store.listSources(runId).map(source => source.sourceKey));
       // Never reintroduce legacy/unsolicited pages into the new model corpus:
       // only material attributable to a frozen selected account stays.
       const kept = checkpoint.pages.filter((page) => {
@@ -539,7 +541,7 @@ export class Runner {
         for (const page of result.pages) {
             const url = page.url;
             if (checkpoint.pages.some((existing) => existing.url === url)) continue;
-            const sourceKey = `S${String(checkpoint.pages.length + 1)}`;
+            const sourceKey = allocateSourceKey(checkpoint, this.deps.store.listSources(runId).map(source => source.sourceKey));
             checkpoint.pages.push({
               sourceKey,
               url,
