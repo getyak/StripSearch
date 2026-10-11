@@ -518,6 +518,19 @@ export class CaseStore {
     if (support.state === 'supported' && support.evidenceIds.length === 0) {
       throw new ForeignReferenceError('identitySupport state supported requires identity_support evidence');
     }
+    const owner=support.ownerAnchor;
+    if(owner){
+      if(owner.policyVersion!=='named-owner/v1'||!owner.personLabel.trim()||!['unbound','self_declared','independently_supported','disputed','contradicted'].includes(owner.state))throw new ForeignReferenceError('invalid named owner anchor');
+      for(const claim of owner.claims){
+        if(!['owner_self_declaration','publisher_named_biography'].includes(claim.kind)||!claim.sourceReceiptKey||!Number.isInteger(claim.quoteOffset)||claim.quoteOffset<0||!/^([a-f0-9]{64})$/.test(claim.sourceContentHash))throw new ForeignReferenceError('invalid named owner provenance');
+        const evidence=this.requireEvidence(caseId,accountId,claim.evidenceId,claim.kind==='publisher_named_biography'?'owner_support':'owner_declaration');
+        const revision=this.db.prepare('SELECT content_hash FROM research_case_source_revisions WHERE source_id=? AND revision=?').get(evidence.source_id,evidence.source_revision) as {content_hash:string}|undefined;
+        if(revision?.content_hash!==claim.sourceContentHash)throw new ForeignReferenceError('owner claim source hash mismatch');
+      }
+      for(const id of owner.counterevidenceIds)this.requireEvidence(caseId,accountId,id,'owner_counterevidence');
+      const self=owner.claims.some(claim=>claim.kind==='owner_self_declaration'),independent=owner.claims.some(claim=>claim.kind==='publisher_named_biography'),counter=owner.counterevidenceIds.length>0;
+      if(owner.state==='unbound'&&(owner.claims.length||counter)||owner.state==='self_declared'&&(!self||independent||counter)||owner.state==='independently_supported'&&(!independent||counter)||owner.state==='disputed'&&(!owner.claims.length||!counter)||owner.state==='contradicted'&&(!counter||owner.claims.length))throw new ForeignReferenceError('owner state does not match role-correct evidence');
+    }
   }
 
   private bumpPersonRevision(caseId: string): PersonRevision {

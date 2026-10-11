@@ -14,6 +14,7 @@ import { Runner } from './services/runner.js';
 import { DiscoveryRunner } from './services/discovery-runner.js';
 import { ReviewStore } from './review-store.js';
 import { DiscoveryStore } from './discovery-store.js';
+import { FirstStepStore } from './research/first-step-store.js';
 import { BUILTIN_PLATFORM_REGISTRY } from './platforms/registry.js';
 import {
   defaultCatalogDataDir,
@@ -51,6 +52,7 @@ export interface BootstrappedApp {
   store: Store;
   reviewStore: ReviewStore;
   discoveryStore: DiscoveryStore;
+  firstStep: FirstStepStore;
   discoveryRunner: DiscoveryRunner;
   runner: Runner;
   fetchRunner: FetchGithubRunner;
@@ -71,17 +73,24 @@ export async function bootstrap(
   const store = new Store(db);
   const reviewStore = new ReviewStore(db);
   const discoveryStore = new DiscoveryStore(db);
+  const firstStep = new FirstStepStore(db, store);
   const interrupted = store.recoverInterruptedRuns();
   const interruptedDiscovery = discoveryStore.recoverInterruptedTasks();
   const providerFactory: ProviderFactory =
     overrides.providerFactory ??
     ((name) => (name === 'exa' ? createExaProvider(config.exaApiKey) : githubProvider));
   const transport = overrides.transport ?? defaultTransport;
+  const discoveryCatalog =
+    overrides.discoveryCatalog === null
+      ? null
+      : (overrides.discoveryCatalog ?? loadPlatformCatalog(defaultCatalogDataDir()));
   const runner = new Runner({
     store,
     config,
     providerFactory,
     transport,
+    firstStep,
+    discoveryCatalog,
     researchTools: overrides.researchTools ?? createResearchTools({
       transport, exaApiKey: config.exaApiKey,
       firecrawlApiKey: config.firecrawlApiKey ?? null, tikhubApiKey: config.tikhubApiKey ?? null,
@@ -89,10 +98,6 @@ export async function bootstrap(
     }),
     researchPlanner: overrides.researchPlanner
   });
-  const discoveryCatalog =
-    overrides.discoveryCatalog === null
-      ? null
-      : (overrides.discoveryCatalog ?? loadPlatformCatalog(defaultCatalogDataDir()));
   // One catalog snapshot produces the legacy probe registry projection; the
   // frozen builtin rules stay the fallback for catalog-less callers. Tests
   // assert the projection keeps every old rule's probe/posts/verification
@@ -126,11 +131,12 @@ export async function bootstrap(
     auth,
     runner,
     fetchRunner,
+    firstStep,
     clientDir
   });
   void runner.pump();
   return {
-    config, db, store, reviewStore, discoveryStore, discoveryRunner, runner, fetchRunner, app,
+    config, db, store, reviewStore, discoveryStore, firstStep, discoveryRunner, runner, fetchRunner, app,
     interrupted, interruptedDiscovery, interruptedFetch
   };
 }

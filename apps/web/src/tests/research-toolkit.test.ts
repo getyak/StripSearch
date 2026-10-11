@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createResearchTools } from '../server/research/toolkit.js';
+import { createHash } from 'node:crypto';
+import { createResearchTools, verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext } from '../server/research/toolkit.js';
 import type { ResearchToolAction, ResearchToolsOptions } from '../server/research/tool-contracts.js';
 import type { HttpRequestInit } from '../server/adapters/types.js';
 
 function harness(body: unknown, status = 200, overrides: Partial<ResearchToolsOptions> = {}) {
   const calls: { url: string; init?: HttpRequestInit }[] = [];
-  const tools = createResearchTools({ exaApiKey: 'synthetic', tikhubApiKey: 'synthetic', firecrawlApiKey: 'synthetic', githubToken: null, timeoutMs: 100, maxBytes: 100_000,
+  const tools = createResearchTools({ exaApiKey: 'synthetic', tikhubApiKey: 'synthetic', firecrawlApiKey: 'synthetic', githubToken: null, timeoutMs: 100, maxBytes: 100_000, firecrawlIntervalMs: 0,
     transport: { async fetch(url, init) { calls.push({ url, init }); return new Response(JSON.stringify(body), { status }); } }, ...overrides });
   return { calls, tools, execute: (action: ResearchToolAction) => tools.execute(action, new AbortController().signal) };
 }
@@ -76,7 +77,7 @@ test('Firecrawl disables AI/TLS bypass and validates both source and final URLs'
   const body = { success: true, data: { markdown: 'Original synthetic markdown.', metadata: { sourceURL: url, url, statusCode: 200, creditsUsed: 1 } } };
   const h = harness(body); const r = await h.execute({ type: 'firecrawl', url });
   assert.equal(r.credits, 1); assert.equal(r.estimatedUsd, null);
-  const sent = JSON.parse(h.calls[0]!.init!.body!); assert.deepEqual(sent.formats, ['markdown']); assert.equal(sent.skipTlsVerification, false); assert.deepEqual(sent.parsers, []);
+  const sent = JSON.parse(h.calls[0]!.init!.body!); assert.deepEqual(sent.formats, ['markdown', 'html']); assert.equal(sent.onlyMainContent, false); assert.equal(sent.skipTlsVerification, false); assert.deepEqual(sent.parsers, []);
   for (const patch of [{ sourceURL: 'https://other-synthetic.dev/' }, { url: 'https://other-synthetic.dev/' }, { url: 'https://[::ffff:127.0.0.1]/' }, { statusCode: 403 }]) {
     const b = harness({ ...body, data: { ...body.data, metadata: { ...body.data.metadata, ...patch } } });
     await assert.rejects(b.execute({ type: 'firecrawl', url })); assert.equal(b.calls.length, 1);
@@ -157,11 +158,230 @@ test('search preserves discovery provenance and cannot imply full original readi
 test('original reading retains more than 100 supplied links and full source text',async()=>{
  const url='https://synthetic-author.dev/archive';const links=Array.from({length:180},(_,i)=>`https://synthetic-author.dev/post/${i}`);const raw='x'.repeat(50000)+' '+links.join(' ');
  const h=harness({results:[{id:url,url,text:raw,extras:{links}}],statuses:[{id:url,status:'success'}]});
- const r=await h.execute({type:'read',url});assert.equal(r.pages[0]?.text,raw);assert.equal(r.pages[0]?.links.length,180);assert.equal(JSON.parse(h.calls[0]!.init!.body!).text,true);
+ const r=await h.execute({type:'read',url});assert.equal(r.pages[0]?.text,raw);assert.equal(r.pages[0]?.links.length,180);assert.deepEqual(JSON.parse(h.calls[0]!.init!.body!).text,{includeHtmlTags:true});
 });
 
 test('dense original link catalogs retain all unique links and stable order',async()=>{
  const url='https://synthetic-author.dev/archive';const links=Array.from({length:5000},(_,i)=>`https://synthetic-author.dev/post/${i}`);const raw=JSON.stringify({entries:[...links,...links]});
  const h=harness({results:[{id:url,url,text:raw,extras:{links}}],statuses:[{id:url,status:'success'}]},200,{maxBytes:2000000});
  const page=(await h.execute({type:'read',url})).pages[0]!;assert.deepEqual(page.links,links);assert.equal(page.text,raw);
+});
+
+
+test('Firecrawl preserves actual HTML links and exact spans instead of rebuilding hrefs from markdown or extras', async () => {
+  const url = 'https://synthetic-author.dev/';
+  const html = '<p>My GitHub: <a href="https://github.com/synthetic-author">my projects</a>.</p>';
+  const h = harness({success: true, data: {html, markdown: 'My GitHub: my projects.', metadata: {sourceURL: url, url, statusCode: 200, creditsUsed: 1}}});
+  const read = await h.execute({type: 'firecrawl', url});
+  assert.equal(h.calls.length, 1);
+  assert.equal(read.pages[0]!.text, html);
+  assert.equal(read.pages[0]!.linkContexts![0]!.quote, html);
+  assert.equal(read.pages[0]!.linkContexts![0]!.url, 'https://github.com/synthetic-author');
+});
+
+
+test('one ineligible search address never discards other safe results; URL-only index entries remain honest leads', async () => {
+  const safe = 'https://x.com/fixture_author';
+  const h = harness({results:[{url:'http://synthetic-author.dev/',text:'unencrypted'},{url:'https://127.0.0.1/',text:'private'},{url:safe,title:'Synthetic Author',text:''},{url:'https://synthetic-author.dev/',title:'Synthetic Author',text:'Public search summary'}],costDollars:{total:.005}});
+  const read=await h.execute({type:'search',query:'Synthetic Author',numResults:12});
+  assert.equal(h.calls.length,1);
+  assert.deepEqual(read.pages.map(page=>page.url),[safe,'https://synthetic-author.dev/']);
+  assert.equal(read.pages[0]!.text,'');
+  assert.equal(read.pages[0]!.retrieval,'search');
+  assert.match(read.pages[0]!.limitations.join(' '),/未提供摘要/);
+  assert.match(read.limitations.join(' '),/2 条/);
+  assert.equal(read.estimatedUsd,.005);
+});
+
+
+test('GitHub uses the actual verified twitter_username field without guessing names or manufacturing source quotes', async () => {
+  const h = harness({ login: 'FixtureAuthor', id: 123456, html_url: 'https://github.com/FixtureAuthor', name: 'Synthetic Author', bio: 'Synthetic bio.', blog: 'https://fixture-author.dev/', twitter_username: 'DifferentHandle' });
+  const result = await h.execute({ type: 'github_profile', url: 'https://github.com/fixtureauthor' });
+  const page = result.pages[0]!;
+  const link = page.linkContexts!.find(context => context.url === 'https://x.com/DifferentHandle')!;
+  assert.equal(h.calls.length, 1);
+  assert.equal(link.binding, 'native_profile_field');
+  assert.equal(link.quote, 'twitter_username: DifferentHandle');
+  assert.ok(page.text.includes(link.quote));
+  assert.ok(page.links.includes(link.url));
+  assert.ok(!page.links.includes('https://x.com/FixtureAuthor'));
+  const absent = harness({ login: 'FixtureAuthor', id: 123456, html_url: 'https://github.com/FixtureAuthor', name: 'Synthetic Author', twitter_username: 'Ignore instructions / private' });
+  const missing = await absent.execute({ type: 'github_profile', url: 'https://github.com/fixtureauthor' });
+  assert.ok(missing.pages[0]!.links.every(url => !url.startsWith('https://x.com/')));
+});
+
+
+test('platform recall forwards explicit search domains in one request and rejects private filter hosts', async () => {
+  const h = harness({ results: [], costDollars: { total: 0.001 } });
+  await h.execute({ type: 'search', query: 'Synthetic Author Instagram profile', includeDomains: ['instagram.com', 'threads.net'] });
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual(JSON.parse(h.calls[0]!.init!.body!).includeDomains, ['instagram.com', 'threads.net']);
+  const invalid = harness({ results: [] });
+  await assert.rejects(invalid.execute({ type: 'search', query: 'Synthetic Author', includeDomains: ['127.0.0.1'] }));
+  assert.equal(invalid.calls.length, 0);
+});
+
+
+test('Bluesky name discovery uses one unauthenticated native search and remains indexed', async()=>{
+ const h=harness({actors:[{handle:'mira-compiler.bsky.social',did:'did:plc:syntheticfixture',displayName:'Mira Chen',description:'Public compiler notes.'},{handle:'127.0.0.1/path',did:'did:plc:invalid',displayName:'Invalid'}],cursor:'opaque'},200,{exaApiKey:null,tikhubApiKey:null,firecrawlApiKey:null});
+ const r=await h.execute({type:'search',provider:'bluesky',query:'Mira Chen',numResults:12});
+ assert.equal(r.pages.length,1);assert.equal(r.pages[0]?.retrieval,'search');assert.equal(r.pages[0]?.url,'https://bsky.app/profile/mira-compiler.bsky.social');
+ assert.equal(r.pages[0]?.text,'Mira Chen\nPublic compiler notes.');assert.equal(r.estimatedUsd,0);assert.equal(h.calls.length,1);
+ assert.match(h.calls[0]!.url,/^https:\/\/public\.api\.bsky\.app\/xrpc\/app\.bsky\.actor\.searchActors\?q=Mira%20Chen&limit=12$/);
+ assert.equal(h.calls[0]!.init?.headers?.authorization,undefined);assert.equal(r.nextCursor,'opaque');
+});
+
+
+test('native profile adapters attest real case aliases with stable IDs and both URLs', async () => {
+  // GitHub: the verified response's canonical login is the returned URL; the
+  // proof carries the exact original requested URL and the stable native ID.
+  const gh = harness({ login: 'FixtureAuthor', id: 123456, html_url: 'https://github.com/FixtureAuthor', name: 'Synthetic Author', bio: 'Original synthetic bio.' });
+  const r = await gh.execute({ type: 'github_profile', url: 'https://github.com/fixtureauthor' });
+  const page = r.pages[0]!;
+  assert.equal(page.url, 'https://github.com/FixtureAuthor', 'the observed returned URL is the page URL');
+  assert.equal(page.text, 'Synthetic Author\nOriginal synthetic bio.', 'exact original content is preserved');
+  assert.deepEqual(page.aliasProof, { kind: 'native_profile', platform: 'github', nativeId: '123456', requestedUrl: 'https://github.com/fixtureauthor', returnedUrl: 'https://github.com/FixtureAuthor' });
+  // X: same-platform handle case alias from the verified native response.
+  const xh = harness({ code: 200, data: { ...profile, profile: 'Fixture_Author' } });
+  const xr = await xh.execute({ type: 'social_profile', url: 'https://x.com/fixture_author' });
+  assert.equal(xr.pages[0]!.url, 'https://x.com/Fixture_Author');
+  assert.deepEqual(xr.pages[0]!.aliasProof, { kind: 'native_profile', platform: 'x', nativeId: profile.rest_id, requestedUrl: 'https://x.com/fixture_author', returnedUrl: 'https://x.com/Fixture_Author' });
+});
+
+test('no alias proof exists without a real stable native ID', async () => {
+  for (const body of [{ login: 'FixtureAuthor', html_url: 'https://github.com/FixtureAuthor' }, { code: 200, data: { ...profile, rest_id: undefined, id: undefined } }]) {
+    const h = harness(body);
+    await assert.rejects(h.execute('code' in body ? { type: 'social_profile', url: 'https://x.com/fixture_author' } : { type: 'github_profile', url: 'https://github.com/fixtureauthor' }));
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test('Firecrawl attests only strict same-document www/apex redirects and never invents a final URL', async () => {
+  const html = '<p>Original synthetic content.</p>';
+  const body = (source: string, final: string) => ({ success: true, data: { html, markdown: '', metadata: { sourceURL: source, url: final, statusCode: 200, creditsUsed: 1 } } });
+  const requested = 'https://www.synthetic-author.dev/';
+  const finalUrl = 'https://synthetic-author.dev/';
+  const h = harness(body(requested, finalUrl));
+  const read = await h.execute({ type: 'firecrawl', url: requested });
+  const page = read.pages[0]!;
+  assert.equal(page.url, finalUrl, 'the observed actual final URL is the page URL');
+  assert.equal(page.text, html, 'the exact original content is preserved');
+  assert.deepEqual(page.aliasProof, { kind: 'same_document_redirect', requestedUrl: requested, returnedUrl: finalUrl });
+  // Different paths, different queries and non-profile pages stay unproven:
+  // the read succeeds but carries no alias proof; content belongs to the final URL.
+  for (const [source, final] of [
+    ['https://www.synthetic-author.dev/about', 'https://synthetic-author.dev/'],
+    ['https://www.synthetic-author.dev/?ref=a', 'https://synthetic-author.dev/?ref=b'],
+    ['https://www.synthetic-author.dev/works/x', 'https://synthetic-author.dev/works/x']
+  ] as const) {
+    const b = harness(body(source, final));
+    const r = await b.execute({ type: 'firecrawl', url: source });
+    assert.equal(r.pages[0]!.aliasProof, undefined, `${source} -> ${final}`);
+    assert.equal(r.pages[0]!.url, final);
+    assert.deepEqual(r.pages[0]!.documentBinding, {requestedUrl:source,returnedUrl:final});
+    assert.equal(r.pages[0]!.text, html);
+  }
+  // Subdomain jumps stay refused outright, and a missing final URL is never
+  // invented as a fallback.
+  const sub = harness(body(requested, 'https://blog.synthetic-author.dev/'));
+  await assert.rejects(sub.execute({ type: 'firecrawl', url: requested }));
+  assert.equal(sub.calls.length, 1);
+  const noFinal = harness({ success: true, data: { html, markdown: '', metadata: { sourceURL: requested, statusCode: 200, creditsUsed: 1 } } });
+  await assert.rejects(noFinal.execute({ type: 'firecrawl', url: requested }));
+});
+
+test('Firecrawl binds relative hrefs and document kind to the actual same-host returned document', async () => {
+  const requested='https://synthetic-author.dev/about/me';
+  const returned='https://synthetic-author.dev/';
+  const html='<nav><a href="Contact">Contact</a></nav>';
+  const h=harness({success:true,data:{html,metadata:{sourceURL:requested,url:returned,statusCode:200,creditsUsed:1}}});
+  const r=await h.execute({type:'firecrawl',url:requested});
+  assert.equal(r.pages[0]!.url,returned);
+  assert.deepEqual(r.pages[0]!.documentBinding,{requestedUrl:requested,returnedUrl:returned});
+  assert.equal(r.pages[0]!.linkContexts![0]!.url,returned+'Contact');
+  assert.ok(r.pages[0]!.links.includes(returned+'Contact'));
+  assert.equal(r.pages[0]!.links.includes('https://synthetic-author.dev/about/Contact'),false);
+});
+
+
+for(const platform of ['github','x'] as const) test(`${platform} preserves raw website protocols and the assembled actual field offset without transport upgrades`, async()=>{
+  const cases=[['https://synthetic-author.dev/','https'],['http://synthetic-author.dev/path','http'],['synthetic-author.dev/path','protocol_less'],['//synthetic-author.dev/path','protocol_less'],['https://127.0.0.1/','invalid'],['http://private.local/','invalid'],['synthetic-author.dev:8443/','invalid'],['https://user:pass@synthetic-author.dev/','invalid'],['javascript:alert(1)','invalid']] as const;
+  for(const [value,protocol] of cases){
+    const raw=` ${value} `;
+    const action=platform==='github'?{type:'github_profile' as const,url:'https://github.com/fixtureauthor'}:profileAction;
+    const bio=`I once mentioned ${value} in my biography.`;
+    const body=platform==='github'?{login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',name:'Synthetic Author',bio,blog:raw}:{code:200,data:{...profile,desc:bio,website:raw}};
+    const h=harness(body);
+    const result=await h.execute(action),page=result.pages[0]!,declaration=page.nativeWebsiteDeclaration!;
+    assert.equal(declaration.rawLiteral,raw,'raw provider bytes are retained rather than trimmed into a new declaration');
+    assert.equal(declaration.protocol,protocol,value);
+    assert.equal(declaration.payloadField,platform==='github'?'blog':'website');
+    assert.equal(declaration.nativeId,page.account!.id);
+    assert.equal(declaration.requestedUrl,action.url);
+    assert.equal(declaration.returnedProfileUrl,page.url);
+    assert.equal(declaration.sourceContentHash,createHash('sha256').update(page.text).digest('hex'));
+    assert.deepEqual(verifiedNativeWebsiteDeclaration(page,action),declaration);
+    assert.ok(page.linkContexts!.every(context=>verifiedNativeFieldContext(page,context,declaration)));
+    assert.equal(page.text.slice(declaration.fieldOffset,declaration.fieldOffset+raw.length),raw);
+    assert.ok(declaration.fieldOffset>page.text.indexOf(value),'a repeated biography URL is not the website field');
+    const native=page.linkContexts!.filter(context=>context.binding==='native_profile_field');
+    if(protocol==='https'){
+      assert.equal(declaration.publicHttpsUrl,value);
+      assert.equal(native.length,1);
+      assert.equal(native[0]!.quote,raw);
+      assert.match(native[0]!.locator,new RegExp(`第 ${declaration.fieldOffset+1}–`));
+    }else{
+      assert.equal(declaration.publicHttpsUrl,null);
+      assert.equal(native.length,0,'HTTP/protocol-less/invalid raw fields never become HTTPS original self-links');
+      if(protocol==='http'||protocol==='protocol_less')assert.equal(page.links.includes('https://synthetic-author.dev/path'),false);
+    }
+    assert.equal(h.calls.length,1,'reading the profile never follows or upgrades its raw website declaration');
+  }
+});
+
+test('GitHub twitter_username locator binds the appended actual field, not a matching biography substring', async()=>{
+  const field='twitter_username: DifferentHandle';
+  const h=harness({login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',bio:`Quoted metadata ${field}.`,twitter_username:'DifferentHandle'});
+  const r=await h.execute({type:'github_profile',url:'https://github.com/fixtureauthor'});
+  const page=r.pages[0]!,context=page.linkContexts![0]!;
+  assert.equal(context.quote,field);
+  const offset=page.text.lastIndexOf(field);
+  assert.ok(offset>page.text.indexOf(field));
+  assert.match(context.locator,new RegExp(`第 ${offset+1}–`));
+  assert.equal(verifiedNativeFieldContext(page,context,null),true);
+  assert.equal(verifiedNativeFieldContext(page,{...context,nativeField:{...context.nativeField!,offset:page.text.indexOf(field)}},null),false);
+});
+
+test('native website attestation rejects mismatched requests, payload fields and protocol claims',async()=>{
+  const action={type:'github_profile' as const,url:'https://github.com/fixtureauthor'};
+  const h=harness({login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',bio:'Original biography.',blog:'https://synthetic-author.dev/'});
+  const original=(await h.execute(action)).pages[0]!,declaration=original.nativeWebsiteDeclaration!;
+  for(const mutation of [{requestedUrl:'https://github.com/other'}, {payloadField:'website' as const}, {protocol:'http' as const}, {publicHttpsUrl:'https://other-synthetic.dev/'}, {nativeId:'999'}, {fieldOffset:0}, {sourceContentHash:'0'.repeat(64)}]){
+    const page={...original,nativeWebsiteDeclaration:{...declaration,...mutation}};
+    assert.equal(verifiedNativeWebsiteDeclaration(page,action),null);
+    assert.equal(verifiedNativeFieldContext(page,page.linkContexts![0]!,null),false);
+  }
+});
+
+test('raw HTTP website text cannot become a native HTTPS self-link, including a legacy receipt',async()=>{
+  const action={type:'github_profile' as const,url:'https://github.com/fixtureauthor'};
+  const h=harness({login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',blog:'http://synthetic-author.dev/'});
+  const page=(await h.execute(action)).pages[0]!,declaration=verifiedNativeWebsiteDeclaration(page,action)!;
+  const context={url:'https://synthetic-author.dev/',quote:declaration.rawLiteral,locator:'forged',binding:'native_profile_field' as const,surface:'authorial' as const,nativeField:{name:'blog' as const,offset:declaration.fieldOffset,nativeId:declaration.nativeId}};
+  assert.equal(verifiedNativeFieldContext(page,context,declaration),false);
+  const legacy={...page};delete legacy.nativeWebsiteDeclaration;
+  const oldContext={...context};delete (oldContext as Partial<typeof context>).nativeField;
+  assert.equal(verifiedNativeFieldContext(legacy,oldContext,null),false);
+});
+
+test('consistent native offset metadata cannot borrow a matching website string from the biography',async()=>{
+  for(const twitter of [null,'DifferentHandle']){
+    const url='https://synthetic-author.dev/',action={type:'github_profile' as const,url:'https://github.com/fixtureauthor'};
+    const h=harness({login:'FixtureAuthor',id:123456,html_url:'https://github.com/FixtureAuthor',name:'Synthetic Author',bio:`I quoted ${url} elsewhere.`,blog:url,twitter_username:twitter});
+    const page=(await h.execute(action)).pages[0]!;
+    assert.ok(verifiedNativeWebsiteDeclaration(page,action));
+    const declaration={...page.nativeWebsiteDeclaration!,fieldOffset:page.text.indexOf(url)};
+    const forged={...page,nativeWebsiteDeclaration:declaration,linkContexts:page.linkContexts!.map(context=>context.nativeField?.name==='blog'?{...context,nativeField:{...context.nativeField,offset:declaration.fieldOffset},locator:`原文第 ${declaration.fieldOffset+1} 字符`}:context)};
+    assert.equal(verifiedNativeWebsiteDeclaration(forged,action),null);
+  }
 });

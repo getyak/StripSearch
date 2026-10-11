@@ -56,6 +56,8 @@
 
 不预设截止日期和负责人。优先完成第一个能失败、能核查、能修正的小闭环。
 
+2026-10-05：第一步体验（[设计](superpowers/specs/2026-10-05-search-first-step-design.md) / [计划](superpowers/plans/2026-10-05-search-first-step.md)）已在 `apps/web` 落地：姓名/URL → 多平台 Search 发现（目录义务 IO 前冻结）→ 证据化人物簇与账号卡 → 一次原子范围确认 → 受范围约束的现有 Fetch。新研究默认第一步；旧 paused 作业显式 expand 生成新发现修订。真实浏览器/真机与真实 Agent 评测仍属 Task 5 验收，未完成前不宣告里程碑。
+
 2026-09-30：[研究案例领域契约（GET-58）](research-case-domain.md) 已落地：`ResearchCase / AccountSelection / ScopeVersion / SourceRevision / EvidenceRef / ItemCoverage` 共享契约、原子范围快照与增量 SQLite 案例持久化。它是后续任务的地基，未启用 Search / Fetch 运行时。
 
 2026-09-30：[研究范围与完成契约（GET-60）](research-completion-domain.md) 已落地：研究前冻结范围/完成规则（问题适用性、全目录发现、时间窗、正文/媒体/默认评论页/选定分支深度）、最小观测回执协议与追加式确定性评估；分母未知不显示假百分比。它仍是持久化政策地基，不是 GET94/95/99 自治运行时。
@@ -87,3 +89,5 @@
 2026-10-07：[本地 Fetch 批次链（GET-99 本地原型）](fetch-pipeline.md) 已落地：本地 Fetch 控制器 + 确定性合成 harness + 可运行 CLI（`npm --prefix apps/web run fetch:offline`），组合 GET-58/60/95 存储、GET-59 `dispatch` 校验网关与 research-runtime 模型网关，暴露恰好 Fetch 10 / verify 3 工具；核心步骤（枚举授权页、全量正文、默认评论页、显式分支选择与祖先缺口保留、媒体显式未知/未读、证据绑定 pending finding、隔离 verify、确定性 GET-60 assessment、义务未尽继续）全链落地；持久 runs/checkpoints/append events 支持同库关闭重开后从精确账号游标/条目步骤续跑且不重放已知成功动作，dispatch intent + 原子折叠 + 显式调和保证崩溃后不重放付费调用。**这是离线合成链：全程禁网、无真实端点/付费 provider/付费模型、无部署、合成通过不验证任何 provider 档案、不主张 GET-79 租约与完整计费子系统**；真实 provider 摄取、Search 发现链与研究质量评测仍未交付。 GET-99 的核验、补查与综合循环尚未完整交付，任务保持进行中。
 
 2026-10-08：[Web Fetch 真实 GitHub 接入（GET-99 第一切片）](fetch-integration.md) 已落地：认证同源 `/api/fetch` + 应用内 Web Fetch 入口、显式确认后才发请求、两阶段持久链路（真实 GitHub 公开采集 → 冻结快照经既有 `runFetchPipeline` 处理 + 隔离核验）。严格公开目标与续页校验（含实测数值仓库 id 形式与 `after` 游标）、精确正文 hash、逐评论真实归属、`sourceAccountId` 权限边界与实际作者分离、未知结果显式 unreconciled + 显式 retry/skip、HTTP 落定与语义捕获分离（畸形 200 评论页绝不计成功读取）。**离线验证通过（零外网/付费调用）；真实线上验收、部署与合并由父级持有；不声明 GET-99 全部完成**；Exa/X/网站切片未启用。
+
+2026-10-11：[优化整合发布](release-2026-10-11.md)将第一阶段与 [Search Agent 细化](search-agent-refinement.md)、原文身份约束、标注/harness 分析和现有公开 GitHub Fetch 合入同一发布路径；既有里程碑验收标准保持有效。[统一输入 v1 历史提案](../design/proposals/research-input-v1/README.md)保留原型补丁，尚未接入新版入口。

@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1900,7 +1900,7 @@ test(
 
     const result = JSON.parse(stdout.trim()) as { dataDir: string; entries: number; contentHash: string; registryVersion: string };
     assert.ok(
-      result.dataDir.startsWith(copyRoot),
+      realpathSync(result.dataDir).startsWith(realpathSync(copyRoot)),
       `production must read bundled data inside the copied build, got ${result.dataDir}`
     );
     const source = loadSourceCatalog();

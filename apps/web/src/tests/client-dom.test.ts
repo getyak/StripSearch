@@ -158,6 +158,14 @@ test('open-ended terminal research shows process records without claiming active
  assert.equal(text.textContent,'1 条过程记录');assert.equal(stateEl.textContent,'部分完成');assert.equal(indicator.hidden,true);assert.equal(bar.hidden,true);assert.match(list.textContent!,/过程记录/);assert.doesNotMatch(list.textContent!,/正在查看/);
 });
 
+test('open-ended progress identifies one current activity without declaring earlier attempts successful',()=>{
+ const list=domContainer(),fill=domContainer(),bar=domContainer(),text=domContainer(),stateEl=domContainer(),indicator=domContainer();
+ const stages=[{index:0,total:0,key:'read',label:'读取资料',status:'active' as const,detail:null},{index:1,total:0,key:'verify',label:'核验引文',status:'active' as const,detail:null}];
+ renderActivity(list,fill,bar,text,stateEl,indicator,stages,'researching',true);
+ assert.equal(list.querySelectorAll('.stage-tag')[0]!.textContent,'过程记录');assert.equal(list.querySelectorAll('.stage-tag')[1]!.textContent,'正在查看');assert.doesNotMatch(list.textContent!,/已完成/);assert.equal(stateEl.textContent,'核验引文');assert.equal(bar.hidden,true);assert.equal(list.querySelectorAll('[data-status="active"]').length,1);
+ const chronological=stagesFromEvents([{seq:1,type:'stage',payload:{index:8,key:'read',label:'读取资料',status:'active'},createdAt:''},{seq:2,type:'stage',payload:{key:'repair',label:'修正陈述',status:'active'},createdAt:''}]);renderActivity(list,fill,bar,text,stateEl,indicator,chronological,'researching',true);assert.equal(stateEl.textContent,'修正陈述');assert.equal(list.querySelectorAll('[data-status="active"]').length,1);assert.equal(list.querySelector('[data-status="active"] .stage-label')!.textContent,'修正陈述');
+});
+
 // Long lists stay complete while keyboard users enter them once.
 test('3200 sources remain reachable through one roving keyboard entry', () => {
   const container = domContainer();
@@ -205,4 +213,31 @@ test('return refuses a replaced sentence or a different source at the same repor
     assert.equal(controller.returnToCitation(), false);
     report.remove(); scroller.remove();
   }
+});
+
+
+test('a terminal empty report explains the gap and opens retained actual sources without creating conclusions', () => {
+  const container = domContainer();
+  const calls: string[] = [];
+  const view = viewWith({ state: 'partial', answer: [], observations: [], limitations: ['公开材料未完成核对。'] });
+  const original = JSON.stringify(view);
+  renderReport(container, view, { onCitation: key => calls.push(key) });
+  assert.match(container.textContent ?? '', /还没有可核对的结论/);
+  assert.match(container.textContent ?? '', /已保留 1 个来源/);
+  assert.match(container.textContent ?? '', /公开材料未完成核对/);
+  container.querySelector<HTMLButtonElement>('.report-incomplete .citation')!.click();
+  assert.deepEqual(calls, ['S1']);
+  assert.equal(JSON.stringify(view), original);
+  assert.equal(container.querySelectorAll('.report-copy').length, 0);
+  renderReport(container, viewWith({ state: 'researching', answer: [] }), { onCitation: () => undefined });
+  assert.equal(container.querySelector('.report-incomplete'), null);
+});
+
+test('source inspector presents readable inert HTML and retains the immutable original',()=>{
+ const container=domContainer();const raw='<style>body{color:red}</style><script>window.bad=1</script><nav>Unrelated navigation</nav><p>Actual author: R&amp;D &#39;work&#39;.</p><img src="https://fixture-reader.org/pixel" onerror="window.bad=1">';
+ const source={...viewWith({}).sources[0]!,excerpt:raw,identityConfirmed:false,identityLabel:'已选人物账号范围；归属依据见第一步'};const original=JSON.stringify(source);
+ renderSourceDetail(container,viewWith({sources:[source]}),source.sourceKey,{onSelect:()=>undefined,onExclude:()=>undefined,onRestore:()=>undefined,onUndo:()=>undefined});
+ assert.equal(container.querySelector('.source-quote p')?.textContent,"Actual author: R&D 'work'.");
+ assert.equal(container.querySelector('.source-original pre')?.textContent,raw);assert.equal(container.querySelectorAll('script,img,style').length,0);
+ assert.match(container.textContent??'',/已选人物账号范围/);assert.equal(JSON.stringify(source),original);
 });

@@ -1,5 +1,7 @@
 # Hosted Web alpha
 
+**当前状态（2026-10-11）：临时 HTTPS 站点在线。** 10 月 5 日的下线是历史事件，10 月 8 日已重新部署。实际发布以 `/release.json` 与远端 `main` 的完整 SHA 一致为准；健康接口的 `0.1.0` 是固定包版本，不是发布版本。
+
 The public homepage and authenticated workspace are one Express application. Deploy one Node process behind Nginx HTTPS on a Linux host, with persistent SQLite. Vercel is optional for a future separate marketing site; do not put the current SQLite database or in-process jobs in a stateless function.
 
 This deployment does not complete the research-controller, CLI, MCP or benchmark milestones. Exa availability is distinct from research quality. The existing homepage is the released website; unmerged design prototypes are not a production application.
@@ -32,7 +34,7 @@ This deployment does not complete the research-controller, CLI, MCP or benchmark
 3. Transfer only `git archive <full-commit-sha>` into `/opt/stripsearch/releases/<full-commit-sha>`, then run `bash deploy/release.sh <full-commit-sha>` there as root. It builds the image, snapshots existing data, deploys it, checks container health and the served revision, and enables the backup timer. For an intentionally restricted deployment, set `allowlist` and bootstrap an owner privately before enabling the public HTTPS virtual host.
 4. Verify the public HTTPS homepage and assets, `/api/health`, `/release.json`, authentication, Origin rejection, research/SSE, source revision/export and logout. Restart this project's container and prove a saved account/report survives. Repeat release verification after merging so the deployed SHA equals `origin/main`.
 
-The release script rolls back the image if startup or served-revision verification fails. It does not reverse schema changes. Review future migrations for rollback compatibility before deployment. Keep the previous source/image and pre-upgrade backup until acceptance passes.
+The release script builds before stopping this app, then snapshots the stopped database and file-based auth secret. If startup or served-revision verification fails, it stops the new writers, preserves their entire data directory under private `failed-releases`, restores the verified pre-upgrade database/secret without leftover WAL files, and only then recreates the prior image. If preservation or restoration fails, the service stays stopped; it must never start an old image on new first-step scope data. Runtime environment secrets remain unchanged. Keep the previous source/image and pre-upgrade backup until acceptance passes; records created during a failed release remain in its preserved scene and need explicit reconciliation.
 
 ## Backup and recovery
 
@@ -49,7 +51,17 @@ Certificate renewal belongs to the host. Confirm the timer covers this hostname 
 - [Docker host networking](https://docs.docker.com/engine/network/drivers/host/): Linux loopback topology.
 - [SQLite online backup](https://www.sqlite.org/backup.html): consistent backup while the application runs.
 
-## 线上验收记录
+## 2026-10-05 旧部署下线记录
+
+
+2026-10-05：按运营者要求移除过时的临时官网与工作台。
+
+- 删除该部署的容器、全部 `stripsearch` 镜像标签、服务器发布文件与运行环境配置；停用并删除专属备份 timer / service，删除旧域名证书及其续期配置。
+- 移除应用反向代理，仅保留域名拒绝规则，避免旧请求落入同机其他站点。公网 HTTP 返回 `410 Gone`，HTTPS 在 TLS 握手阶段拒绝；应用 loopback 端口已关闭。
+- 同机 IMStage 容器与 Nginx 配置保持原样，公网健康检查返回 `200`；Nginx 配置校验通过。
+- 研究数据库与已有备份保留为私有存档，不提供在线访问；本次下线不包含研究数据销毁。
+
+## 2026-09-22 历史线上验收记录
 
 2026-09-22：官网与工作台已部署到临时 HTTPS 地址 <https://stripsearch.103.195.188.236.sslip.io>。版本读取 `/release.json`，代码交付见 [PR #3](https://github.com/cubxxw/StripSearch/pull/3)。
 
@@ -69,4 +81,10 @@ Certificate renewal belongs to the host. Confirm the timer covers this hostname 
 - 公网 HTTPS 的 10 组验收通过：HTML/资源与 exact SHA、开放注册、Secure/HttpOnly cookie、登录、缺失/外来 Origin 拒绝、跨账号隔离、SSE、同版本四格式导出、撤回/恢复与旧版本导出拒绝、仅本应用重启后的账号/会话/报告保留、退出后访问拒绝。报告由编译后的 Store 在命名合成账号下生成，未执行真实人物研究或外部 provider 请求。
 - 实际备份服务成功、SQLite 完整性与认证密钥一致性检查通过；每日备份 timer 已启用。证书有效至 2027-01-06，新增域名沿用服务器既有证书续期 timer 与 webroot，未创建竞争续期任务。
 
-本次未配置 Exa / DeepSeek / TikHub / Firecrawl 凭据，健康响应的 `exa` / `research` 为 false，人物研究请求明确返回 `provider_unavailable`。Fetch 新链仍是已验证的本地/容器合成原型，未接入 Web 自主研究与真实平台适配器；GET-99 的完整真实研究验收继续保持未完成。
+在该次 10 月 8 日验收时未配置 Exa / DeepSeek / TikHub / Firecrawl 凭据，当时健康响应的 `exa` / `research` 为 false，人物研究请求明确返回 `provider_unavailable`。Fetch 新链仍是已验证的本地/容器合成原型，未接入 Web 自主研究与真实平台适配器；GET-99 的完整真实研究验收继续保持未完成。
+
+## 2026-10-11 版本核对与整合边界
+
+整合前公网 `/release.json`、服务器部署回执和运行镜像 label 均为 `60f40141049bfa6e72c7669b4d3ee962fdd28a49`，与远端 `main` 一致；HTML、JS、CSS 的公网字节 hash 与容器文件一致。`/api/health` 返回 healthy 能力响应，`fetchGithub`、`exa`、`research` 标记为 true。能力标记仅反映实现/配置，不能代替真实 provider 连通性与人物研究质量验收。
+
+此次 [整合说明](release-2026-10-11.md) 纳入此前未合并的 Search / 第一阶段优化与设计记录。只有当前 PR head 的 CI、独立 review、合并后镜像与公网验收全部通过，才记录线上新版本交付。保留同一持久化目录、认证密钥和运行配置；禁止用旧的下线步骤处理当前服务。

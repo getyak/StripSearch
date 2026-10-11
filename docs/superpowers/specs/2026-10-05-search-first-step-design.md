@@ -1,0 +1,287 @@
+# 姓名输入后的多平台发现与一次确认
+
+日期：2026-10-05。状态：**用户已确认设计并授权完整实现与全链路验证；实施中，尚未完成运行时验收**。本次只处理第一步：从姓名或公开账号链接，到可辨识的人物候选、多个公开账号与用户确认的研究范围。它细化已批准的 Search / Fetch 设计，不宣布后续深读已完成。
+
+交互样稿：[原创合成演示](../../../design/explorations/search-first-step-2026-10-05/index.html)。样稿没有模型、真实检索、用户数据持久化或网络调用；人物、证据与状态都是明确标识的原创合成材料。
+
+2026-10-07 增量：[Search Agent 工具选择与归属细化](../../search-agent-refinement.md)。沿现有契约提供原文定位和受控补查；组织关系、人物辨识与本人资料分别核对。最新 Figma 读取不可用，不能据此声称对齐最新画稿。
+
+## 目标与现状证据
+
+用户希望只输入名字，系统先主动查出这个人相关的平台与公开材料；用户能看清是否找对人、哪些账号值得研究，再以少量操作选择。第一屏需要综合的身份线索与平台推荐，不能只有 LinkedIn 链接和让用户自行补资料的表单。
+
+本机源代码与当前运行的 dist 均存在以下行为；当前页面也显示同一人物只有一个 LinkedIn 候选。这是代码及界面观察，尚未读出本次供应商完整返回，不能断言本次检索究竟遗漏了哪些结果。
+
+| 已观察问题 | 位置 | 后果 |
+| --- | --- | --- |
+| 无锚点只搜索一次 `question + public profile biography`，随后立即 `NeedsInputError` | `apps/web/src/server/research/controller.ts` 身份阶段 | 没有先扩展主页自链或分平台召回 |
+| 搜索只请求并保留最多 5 条结果 | `apps/web/src/server/research/toolkit.ts` Exa 搜索分支 | 单一查询排名支配首次确认 |
+| profile 分类只识别 GitHub、X、LinkedIn 和 about/bio/profile 路径 | 同文件 `profileKind` | 个人站首页、视频/通讯/学术账号等无法直接进入候选列表 |
+| 候选只有 label/detail/profileUrl；detail 又填 URL | `shared/types.ts`、`client/main.ts` 的 `renderNeedsPanel` | 重复网址，缺少身份依据、角色、研究价值和访问限制 |
+| 恢复只接受一个 candidateId/seedUrl | `server/routes/runs.ts` resume 分支 | 没有多账号范围确认；已有候选时还会拒绝列表外手工补链，与文案不符 |
+| CaseStore、平台目录、工具网关等已有独立地基，尚未接入这条旧研究入口 | 既有领域契约与路线文档 | 重启服务不会自动让新 Harness 接管 Web 工作流 |
+
+## 方案选择
+
+| 方案 | 收益与限制 | 决策 |
+| --- | --- | --- |
+| 只增加搜索结果数量、放宽 profile 正则 | 小改动能增加链接；仍没有归属、范围、多平台回执或恢复 | 不作为完整修复 |
+| **复用领域地基，接入可持久化 Search 阶段与一次账号选择** | 延续认证、账本与撤回；按平台记录召回、证据和访问限制；需要接线与独立验收 | **推荐** |
+| 重建通用全自主多 Agent 系统 | 原型灵活；重做隔离、费用、恢复与选定范围，风险和范围过大 | 不采用 |
+
+保持 Search 和 Fetch 两种角色。Search 负责主动召回、最小身份资料读取、归属提议与候选展示；Fetch 在用户提交范围后处理历史正文、作品、观点和评论。Search 的一句职业/作品摘要只用于辨识，不冒充综合人物研究。
+
+## 用户路径与屏幕
+
+### 默认：姓名 → 人物辨识与账号选择，留在同一页
+
+1. 提交姓名后立即展示原输入和可取消的真实阶段：查找主页 → 扩展关联账号 → 核对归属。真实结果逐批出现；不使用计时器制造发现，不用固定百分比制造完整性。
+2. 顶部展示建议人物：名字、一个有出处的职业/作品线索、公开锚点，以及冲突/限制。每句话能展开其来源。没有支撑时省略，不用模型常识补介绍。
+3. 下方按研究用途列出账号：身份与作品、文章与通讯、公开表达、视频与音频、学术/机构资料。默认首屏展示 4–6 张价值较高的卡片，这是呈现窗口而不是检索/候选上限；其余可展开。
+4. 有完整证据、无冲突、政策允许的账号可以形成默认勾选建议；用户明确提交前，持久 `userSelection` 仍为 `unanswered`。可能相关的账号默认不勾选。访问受限不等于错人，归属充分也不保证内容可读。
+5. 底部仅一个主要操作：**“确认目标，研究已选 N 个账号”**。一次原子提交人物选择与账号范围。零选择时解释原因并禁用；“都不是 / 更换线索 / 仅研究这个公开账号”作为次要操作。
+
+姓名场景默认展示这次范围确认，不在用户看见平台之前自动开始跨平台深读。明确账号 URL 可直接建立该账号的临时辨识锚点，但新增账号同样等用户提交范围。已知目标的后续扩展不重复询问名字，只确认新增范围。
+
+### 每张账号卡只回答四件事
+
+| 显示 | 示例结构（非真实人物断言） | 行为 |
+| --- | --- | --- |
+| 这是哪个账号 | 平台、公开显示名、handle、简短可区分 URL | 原网址按需展开；不要重复两遍 |
+| 为什么推荐 | “个人站的 Accounts 区明确链接此账号”，附证据入口 | 展示实际出处、指向、时间与限制 |
+| 能了解什么 | “原创项目与维护讨论”“长文与通讯”“公开视频” | 是待研究价值，不伪称已读完 |
+| 当前边界 | 有归属依据 / 可能相关 / 存在冲突；原文可读 / 仅索引 / 受限 | 身份、访问和研究选择分别显示 |
+
+默认交互是 checkbox，点击卡片空白区域也可切换；链接、证据和排除按钮不触发 checkbox。取消勾选只表示暂不研究；明确 **“不是此人”** 才记录用户排除声明。排除可撤销，不把撤销变成证据支持。冲突账号不能混入人物结论；必要时允许独立账号范围，明确“尚未证明与其他账号同人”。不要求普通用户逐条打 confirmed/likely 等评测标签。
+
+“为什么推荐”展开就近证据面板，保留上下文。支持、反证、访问失败分别显示；不展示 LLM 自报准确率，也不把勾选转换成“身份已验证”。键盘可操作、焦点可见，证据面板 Esc 关闭并回到触发点；移动端单列，底部操作区不遮挡最后一张卡或输入框。
+
+### 同名与发现受阻
+
+- 有根本歧义时展示最多 2–3 个可辨识人物簇（其余展开），每个以作品、职业或机构线索区分。用户先选人物，账号列表在原位更新；不同簇的账号不会因名字/头像相似合并。
+- 暂时只有一个 LinkedIn 候选时仍保留其它真实路线的状态与可继续发现动作；不能把“第一条结果”当成已找对人。
+- 若所有可用路线结束仍无可辨识对象，才请求一个可区分线索：公开主页、机构或作品。手工补链进入新的发现修订及读取核对，不能因输入 URL 就立即升级身份。
+- 失败清楚区分未找到、登录/限流/超时、未支持、尚未检查；“无法读取 Instagram”不能显示成“没有 Instagram”。暂停和刷新保留真实选择与回执。
+
+## 推荐哪些平台
+
+以下是**路线与展示策略**，不是新适配器已支持的声明。按冻结 PlatformRegistry 枚举适用义务，按线索和人物资料排次序；不能从姓名拼用户名去扫描账号，也不让用户先勾平台再发现。
+
+| 材料用途 | 可推荐的公开平台/资料 | 优先信号与限制 |
+| --- | --- | --- |
+| 身份锚点 | 个人站、About、公开机构人物页、LinkedIn、Linktree | 本人/机构明确标识与实际外链；链接目录需识别本人/团队/引用角色 |
+| 技术作品 | GitHub、GitLab、Hugging Face、Stack Overflow、DEV、公开包作者页 | 从主页或已观察账号线索扩展；项目组织、仓库、star 不能自动成为本人账号/贡献 |
+| 文章通讯 | 独立博客、Bear Blog、Substack、Medium、RSS | 账号/出版物/文章分开；同一平台多个账号都可保留 |
+| 公开表达 | X、Bluesky、Mastodon、Threads、Instagram、Facebook | 实例与稳定 ID 保留；仅同 handle/头像只产生候选；受限照实显示 |
+| 视频音频 | YouTube、Bilibili、TikTok/抖音、Spotify、SoundCloud、小宇宙 | 区分本人频道、访谈嘉宾、转载与粉丝频道；嘉宾节目进入相关材料而非本人账号 |
+| 学术记录 | 机构页、Google Scholar、ORCID、DBLP、论文作者记录 | 需要平台专属规则；不在目录的条目先显式登记能力，不凭 UI 名称宣称支持；论文页面不是社交账号 |
+| 中文表达 | 知乎、微博、微信公众号、视频号、小红书、即刻、豆瓣 | 优先真实中文别名/锚点；不可读和缺端点保留缺口，不恢复非公开内容 |
+| 社区讨论 | Reddit、Hacker News、Quora、公开 Stack Exchange | 仅公开身份自链等合理依据才关联；不猜测匿名账号现实身份 |
+
+新闻、Wikipedia、采访、他人文章可帮助消歧，但放在“相关资料”中，与可选的本人账号分离。企业、实验室、粉丝号明确标为组织/第三方，不通过名字相同获得勾选建议。Discord/Telegram/WhatsApp/LINE 等只有明确公开页面/频道和获准适配器时才作为线索，不进入私人群聊。
+
+平台推荐按实际归属依据、辨识价值、原创材料、读取能力排序；不因平台热门、粉丝多或 LinkedIn 排名高就优先。不同材料类型有价值时要能进入呈现窗口；没有足够依据就保留限制，不能为凑平台多样性伪造账号。
+
+## Search 阶段的真实工作
+
+目标绑定的自述可以紧接实际链接之后，例如合成句 `This [blog] is my oldest one`。仅在同一句、同一目标链接、明确个人账号/网站/博客/频道谓词时作为归属依据；不能借后一句“find me”、另一个链接的 `my`、书籍作者关系或第三方上下文升级账号。原文、偏移与语义否定继续保留。
+
+旧缓存的当前语义投影同样绑定实际 completed 请求地址、返回原文与全文 hash；地址不同须有经核验的实际同文档/原生别名回执。HTML 属性文字不能作为可见自述；literal URL 也须绑定实际可见文字节点，script、隐藏节点、引用/活动流不能授予人物范围。旧原文、旧判断与失败证据保持可读，不回写为新规则已通过。后置谓语须为完整声明；问句、条件句、书籍名称或书签用途不能升级归属。
+
+Markdown 使用 `mdast-util-from-markdown@2.0.2` 的原始位置语法树识别代码块、行内代码和引用范围；这些范围里的 HTML 链接、Markdown 链接和 literal URL 共用受限规则，不能成为人物归属。完整 HTML 文档按 HTML 语义解释，排版缩进不是 Markdown 代码；Markdown 链接须对应真实 AST link 节点，不能从 HTML 或代码节点正则制造。解析不改原文，不生成替代引文；普通自链与列表保留。依赖与语法依据见[官方库](https://github.com/syntax-tree/mdast-util-from-markdown)和[CommonMark](https://spec.commonmark.org/0.31.2/)。
+
+1. **输入与冻结。** 复用分类与路线契约，冻结 inputRevision、registryVersion/hash、policyVersion 和允许外发范围。自然姓名是 name_query，不是 username。完整问题与单独姓名线索分开，用户问题不直接拿来拼 profile URL。
+2. **宽召回。** 姓名/实际观察别名的普通网页检索、个人站/机构资料、适用平台路线。初始波至少覆盖已具备能力的锚点、作品、表达/内容路线；只有供应商不支持、预算/授权不足等真实回执才可跳过。不要以首个 LinkedIn 命中提前停下。初始波范围在请求前冻结，不按结果好坏删义务。
+3. **锚点扩展。** 读取公开身份所需的最小原文与实际外链（包括 About、账号简介、公开链接目录）；链接角色、方向、来源独立组都留档。目录/摘要只提供线索，正文读取单独记账。循环去重、域名限流、批次预算、取消与作用域更新沿既有控制器门禁；不是对 4421 条规则盲目发请求。
+   出链上下文采用 `ResearchPage.linkContexts`：HTML/Markdown 的实际链接、原文精确片段与定位，或已核对原生账号的 website 字段。保留提供者原文；不能把出链索引的标签拼进原文作为证据。动态流、推荐、评论和引用作者的第一人称不能成为主页拥有者的归属证明。Exa 原文请求保留 HTML 标签（[官方 SDK 的 text 选项](https://github.com/exa-labs/exa-js/blob/master/src/index.ts)）；供应商未返回上下文时维持缺口。
+4. **归属与聚类。** 复用 canonicalAccountKey 与保守平台专属规则。稳定 ID、实例、账号/出版物类型保留；同名与同 handle 不能跨平台拼成一个人。Search 模型可提议，但服务器检验来源存在、引用真实读取/索引状态、边的目标与实际观测，以及硬冲突。
+   `first-step/v9` 的 HTML 自链上下文不把整页 main/body/html 中无关文章的人称借作局部链接反证；局部同事归属、否认、引用和活动流仍拒绝。明确 social-media-icons 中的 rel=me 不因外层 rss-feed 订阅容器单独变成第三方；其它 feed/活动流标记继续有效。裸 Twitter 导航或 HTTP 反向网址仍不能凭此获得归属支持；旧回执和政策不改写。
+5. **可供选择。** 当前可展示结果与目录完整性是两个状态。初始波结束可提交 ready_for_choice（可带明确缺口），但仍 deferred/unsupported 的目录义务不变成完成。用户随时可用已出现账号形成限定范围；后台新候选不会自动加入已提交范围。
+
+生产继续使用既有获授权 provider 与凭据。MiMo Token Plan 仅供当前编码/评测会话，不能放进产品后端。初始批次、请求数、并发、时间与费用按部署策略冻结并明示，未知费用保持 unknown；首屏时延是待测指标，不承诺供应商 SLA。缓存、重启、取消、费用不明和重试复用既有回执规则，不无声重放付费请求。
+
+供应商参数依据：Exa [Search](https://exa.ai/docs/reference/search) 支持搜索与结果内容提取，[Contents](https://exa.ai/docs/reference/get-contents) 提供页面内容、链接及逐 URL 状态。字段可用不等于结果属于本人或正文完整；路线不依赖单一 people 类别，分类/过滤限制在端点验收时冻结。当前项目没有在这一次搜索上设置 people 类别，不能把 LinkedIn 独占问题归因于该参数。
+
+## 共享契约与接线
+
+不再建立第二套人物事实库。`ResearchCase / AccountSelection / ScopeVersion / EvidenceRef / SourceRevision` 是权威；平台计划与工具派发复用现有契约。旧 `IdentityCandidate` 只做历史兼容投影，不能承担多账号范围。
+
+呈现投影包含：发现修订、输入/目录/策略版本、阶段与停止理由、人物提议簇、逐账号归属依据与反证、研究价值、访问状态、平台路线回执、只读默认建议与当前用户草稿。人物摘要的每条原子线索指向证据，不把职业或经历当作模型自由文本。
+
+身份投影的 `validity/reviewReason` 来自当前 CaseReport 的依赖判断，与历史存储的 identity state 分开。撤回依据后，旧修订与原始 facet 保留，但默认推荐失效；不能凭旧 supported 状态提交人物合并。已提交人物范围在下一次 dispatch 和 ingest 都复核依据有效性，撤回后暂停；明确选择的独立账号范围仍只提供该账号自身材料。
+
+共享网站的个人目录（如 `/~name/`、`/people/name/`、`/users/name/`）与托管站点目录具有独立账号键；选择其中一人只授权该目录及可归属的内容，不扩展到整个学校或共享域名。
+
+拟接线接口（名字可在实施计划中适配已有 router）：
+
+- `GET /api/runs/:id/discovery`：按 owner 返回当前不可变发现投影、版本与真实增量；SSE 发版本/阶段变化，重新读取权威投影。
+- `POST /api/runs/:id/selection`：提交 expectedRunRevision、expectedScopeVersion、discoveryRevision、人物选择及逐 accountId 的研究选择/排除。所有账号必须属于该 owner/case/发现修订，整体原子验证和落库；失败不推进，不部分选择成功。
+- 手工补线索创建新的 input/discovery 修订，保留先前输入与回执；任何新候选保持 unanswered。新增或改变归属支持不能悄悄覆写正在编辑的草稿，用户明确回读最新修订后提交。
+- 选择后 Fetch 只接收已冻结 ScopeVersion 与获准账号；候选列表不是 Fetch 权限。身份不充分的独立账号范围不与其他账号合成人物事实。
+- 更换人物立即失效旧租约/作用域，迟到结果不能写入新人物。撤回与来源变化沿现有依赖规则传播。已提交范围被新增候选覆盖或静默扩大，均是验收失败。
+
+旧 needs_input 作业可读原候选/回执，并显式提供“继续查找其它平台”生成新发现尝试；不能把缺回执的旧候选伪装成新搜索结果。旧 resume/导出仍可读，新的范围投影保持所有格式一致。既有认证、开放注册策略、租户隔离和研究资料保留不变。
+
+## Harness 与交付验收
+
+先验收第一步的发现/归属/选择，再验收所选范围的 Fetch 深读；不要求第一屏完成全部人物报告，但也不能用漂亮确认页代替真实召回。
+
+| 检查 | 必须通过的行为 |
+| --- | --- |
+| 多平台召回 | 仅姓名输入不能因为个人站根路径、YouTube、文章通讯或学术主页不匹配旧正则就丢弃；原始 query 独立运行，不输入人工答案清单 |
+| 真实依据 | 每个默认建议有有效归属支撑与实际来源回执；linked/indexed/read 分开；同源重发不增加独立依据；模型声明不能造 fetched |
+| 找对人 | 同名职业/作品冲突不合并；粉丝/团队/组织不默认作为本人；匹配 handle、头像与文字相似不升级支持 |
+| 范围与权限 | 勾选不升级身份；排除后 0 深读；取消勾选不等于否认身份；独立账号范围不混人人物结论 |
+| 选择体验 | 一次批量确认；移动端/键盘可用；证据入口不误触勾选；未提交草稿与默认建议分开；账号数量可展开不被首屏裁掉 |
+| 恢复与修订 | owner 隔离；旧版本拒绝；双击幂等；重启/刷新可回读；更换人物后迟到结果被拒；新增候选不自动扩范围 |
+| 失败与费用 | 超时/登录墙/429/无适配器不算无账号；已开始但结局未知保留 unknown；没有真实请求就不能造检查完成 |
+| 运行真实性 | 合成 UI、离线检查、真实端点与模型发现分别报告；本次 24 组真实结果的失败历史保留；不通过改标签/删义务变绿 |
+
+已有私有标注涵盖 12 人、63 条候选和 16 种显示平台；它可检查原有决策、必备召回、来源与错误排除，但属于已见 discovery 参考，不能称新盲测。保留原始预测、人工修订、4 条排除和所有失败；只使用 frozen query 作为 Search 输入。Karpathy 回归必须在服务端真实执行这条新 Search 路径，并检查多个有依据的平台候选与用户一次选择，不硬编码人物平台清单。
+
+真实验收额外记录：首次可辨识线索时延、可选择多平台结果时延、每查询请求/模型调用、已知与未知费用、必备召回、严重错人、默认建议错误、用户实际操作数。初始检索波和质量要求在运行前冻结；结果不佳时先修实现再产生新尝试，不覆盖旧结果。新的能力启用前进行受影响测试、独立审查及真实服务验证；无端点验收的平台照实受限。
+
+## 2026-10-05 修复批：候选资格、精确归属与 v2 读取策略
+
+真机姓名检索暴露的通用缺陷按以下契约修复（同批共享契约先于渲染器更新）：
+
+| 领域 | 契约 |
+| --- | --- |
+| 账号候选资格 | 账号投影只偏好真实账号/主页入口：可归属内容归并到已记录的账号主页（内容链接先到也优先展示 profile 入口），平台导航/登录/搜索/设置/播放列表/播放页从来不是账号；未知站点根/About/Home/博客根仍是个人/出版物候选，未知第三方新闻子页不按域名推定为本人账号；同事 profile 线索保留为未确认的二级相关线索（默认不勾选、不入簇）；支持未来公共平台、自定义 Medium/博客子域/Bearblog 与已观察自述站点栏目，不硬编码人名/域名答案表。 |
+| 精确语义归属 | 只消费实际 `linkContexts`（保留原文中的精确定位片段）：摘录必须精确存在于保留正文，目标 URL/绑定（含 HTML 相对/编码 href 的提取器记录）与真实已完成回执一致，不合成摘录、不追加假 URL；third_party/unknown 提取面不授予归属；已验证原生账号的 `native_profile_field` 是明确自有网站；自述个人主页段落可绑定实际链接；同事引用/雇主/推荐区/他人第一人称时间线即使说 “my” 也不归属主页所有者（受限信息流/平台面一律收紧）；受限模型提议必须通过同一 source/target/surface/语义归属守卫；索引/补充链接标签永远是 link_only；反证需要实际明确否认；注入文本不作人物描述或动作。 |
+| v2 读取策略 | 尝试前冻结每尝试预算/策略：通用默认 ≤8 次检索、每查询 12 结果、16 次身份读取、2 次模型调用，操作员限制始终优先；六个初始 home/work/writing/social/academic/video 查询族保留，剩余名额只用于实际观察到的别名/覆盖扩展；优先读取个人主页/About/链接目录与原生 GitHub/X 锚点，读取余额内动态读取实际自链的 profile；账号读取去重，失败/缺失读取不作锚点证据；同源不算独立依据；逐平台与全局 failed/no_clue/limited/budget 状态如实显示（skipped_budget 不算完成）。 |
+| 一个人物 | 锚点只按有效原始链接并簇（含反向 profile-field website 链接），同名/handle 永不并簇；相连锚点全部属于同一簇；簇锚点携带可检视的归属依据（摘录+真实来源）而非全局提议；同名无关联锚点保持独立未确认簇；人物描述是简洁有据文本，附其实际可检视来源/摘录，不展示裸 URL，也不因来源 URL 同行存在而丢弃全部模型概括。 |
+| 选择页 | 首屏：有据目标人物、紧凑分类的相关账号、显式不确定性与实际证据、一次主要范围确认；选中人物簇后其账号为主选择区，未确认/无关线索在清晰标注的默认收起二级区（同名候选选择仍清晰）；无 90 卡导航/新闻墙、无自动扩范围、不隐藏限制；保留键盘焦点、SSE/刷新/错误草稿、来源检查状态、载荷绑定幂等、独立账号范围与显式排除/撤销；来源摘录 HTML 一律转义为可检视纯文本，永不执行。 |
+
+以上为实现与离线回归约束；真实召回质量、独立验收与发布仍属 Task 5，未完成前不宣告效果。
+
+## 本次产物与待审阅决定
+
+本次完成根因分析、平台策略、交互样稿与共享契约设计；没有改生产代码、重跑付费人物研究或修改用户标注。待审阅决定是：**采用主动多平台 Search + 同页辨识 + 一次账号范围确认，并按这份契约进入实施计划。** 后续实施先把整条第一步接到真实 Web 入口与 Harness，再验收所选范围交给 Fetch 的边界；不再只交付一个与生产分离的发现演示。
+
+独立复核补充：平台多作者页面的 website/my 词本身不证明作者，只有已观察 profile 字段或原生字段能赋予归属；作品链接不证明其宿主账号属于作者。人物描述只显示经过原文匹配的字面摘录，模型的另行概括不成为辨识事实。选中的独立个人网站包含该站自己的博客/文章分区；材料用途不会拆分该站账号键。共享主机上的作者命名空间仍独立，跨站链接仍须另行选择。路线只绑定实际有关的读取/搜索回执。旧发现快照缺少 relatedLeads 字段时按空列表读取。
+
+真实供应商修订：Exa 返回 HTML 标签但可能不保留 href，不能把独立链接列表重建为证据。部署已配置 Firecrawl 时，Search 的个人站/公开目录身份读取直接使用其 [Scrape HTML 与 Markdown 格式](https://docs.firecrawl.dev/api-reference/endpoint/scrape)，同一次请求保留实际 HTML 周边链接，页眉页脚保持可检视；仍受已冻结身份读取和操作员总预算约束。没有配置时保留 Exa 的诚实缺口，不静默调用新服务。
+
+
+2026-10-05 真实覆盖修正（v3）：在读取之前冻结通用上限 ≤10 次检索 / 每次12结果 / 16次身份读取 / 2次模型调用，操作员总上限优先。初始检索明确覆盖网站、作品、写作、X、Instagram/Threads、Bluesky/Mastodon、学术与视频；社交域名过滤使用 Exa `includeDomains`，不拼猜用户名。用户输入明确给出的姓名/别名可分别检索，读取中的别名扩展限于与输入匹配的实际来源，避免追踪无关网页作者。GitHub `twitter_username` 只从已核对账号的真实原生字段生成其文档定义的主页入口；摘录仍为实际字段值。共用网页读取通道默认按最小 Firecrawl 计划节奏串行，可取消，不自动重试、不扩大调用预算，等待计入整个研究的时限。机构目录的独立人物路径保留独立账号键；博客列表入口可用于识别，文章不能证明整个宿主账号归属。
+
+来源：[Exa Search domain filters](https://exa.ai/docs/reference/search)、[Firecrawl rate limits](https://docs.firecrawl.dev/rate-limits)、[GitHub user fields](https://docs.github.com/en/rest/users/users)、[Stanford Profiles directory](https://profiles.stanford.edu/)。以上接口验证不代替真实召回、语义归属、界面或下游报告验收。
+
+运行补充：Medium 官方明确 `username.medium.com` 与 `medium.com/@username` 是同一用户名的个人主页 URL 方案（https://help.medium.com/hc/en-us/articles/115004746707-Your-profile-page-URL）。仅此平台的已记录方案共享账号键；任意自定义域名不按名字猜测归并。混合文字输入中的完整 Latin 姓名可作为用户已提供的查询变体；保留原始输入，不生成用户名。
+
+Harness 补充：第一步 Fetch 的模型方案若结构或引用校验失败，整批不执行并记录明确反馈，消耗已发生的模型调用，在原预算内继续规划；撤回/失效仍立即停止。合法范围不会因反馈扩大。搜索结果实际返回的外链可作为 indexed 候选入口，不能升为原文证据或默认选择。
+
+检索 v4：保留八类 Web 查询，并增加一条按用户提供姓名调用 Bluesky 公共 AppView `app.bsky.actor.searchActors` 的候选检索（https://endpoints.bsky.app/）。默认最多 11 个检索、12 条/次、16 次身份读取、2 次受限模型，仍服从操作员上限；两个余量用于实际别名。原生搜索结果仍是 indexed，只能发现，不能证明同人或产生默认勾选。TikHub People 检索实测返回 tweet，未作为已验证的用户搜索能力上线。
+
+Fetch 规划补充：所选账号的已发现原文足以开始形成结论后，规划优先整理原文；每次建议最多四条简洁结论并预留独立核验调用。账号确认之后的广域 search 由运行时在请求前拒绝（零调用、零收费），扩展平台回到显式 Search 修订；继续读取只限实际已观察到的所选账号内容路径。finish 中每条引用独立校验，合法条目继续独立语义核验，不合法条目带索引记录缺口，不让一条坏引用抹掉其它有效材料；无合法条目时仅按原预算重新规划。模型未通过语义核验的综合陈述从不按已核实结论发布。
+
+非法方案最多进行三次有记录的纠正，即使操作员总模型额度设置为不限也停止并保留部分结果；有效但独立账号的原文仍只记录账号自身，不触发错误引用纠正、不并入人物结论。
+
+出处检查器优先显示可读原文（去除样式/脚本等展示标记、解码实体），原始字面内容保留在独立可展开区域；展示转换不修改任何 SourceRevision/quote/hash。账号归属显示持久化身份标签与冻结已选范围，仍与内容真伪分离；不能把已选同人账号内容统一标成无关同名材料。
+
+结构化自述：实际 HTML `<a rel="me">` 作为单向、作者公开声明的同人链接依据（[XFN rel-me](https://microformats.org/wiki/rel-me)），不是独立事实核实或双方验证。提取器记录确切 anchor 字节、href 与祖先上下文；只有个人主页/公开目录的作者区域可以授予 self_account_section，第三方祖先/活动流/社会平台非已识别资料字段/内容目标仍拒绝。同名与相同 handle 从不自动赋予此依据，模型不得伪造 rel 或实际标记。
+
+默认 Fetch 模型上下文保留每个已选账号的一份实际原文，再填充最近取得的材料（合计仍至多12预览）；避免一页社交时间线挤掉主页、作品、文章和视频的已读线索。显式 catalog 窗口仍按原始目录连续分页，所有原文保持完整且可 inspect；所展示 sourceKeys 与模式显式记录，不谎称连续窗口。
+
+检索 v4 契约补充（输入契约与冻结预算，2026-10-06）：合法 URL 输入（≤2048 字符）按原样读取、分类与展示；只有其发现检索词是显式有界的「主机名 + 实际有界路径」构造（≤600 字符检索契约），绝不改写来源读取 URL、不猜测 handle、不生成别名；姓名查询保留实际输入文本。冻结模型预算耗尽与工具预算耗尽同等待遇：保留全部已发现结果，追加 ready_for_choice 投影与诚实的 skipped_budget 路线状态/缺口，不额外派发或预留模型调用、不伪造成功；只有 run_inactive 与真实 abort（取消/时限）才是 liveness 停止，输入决策错误与预算耗尽一律如实记为失败/缺口，不落成 internal_error。
+
+Candidate presentation prioritizes literal input-name/URL matches without upgrading identity: if matching candidates exist, unrelated read-page titles stay in a collapsed “other person or homepage leads” disclosure. Explicitly chosen alternatives remain visible. This visual order grants no default selection, identity support, merge or Fetch permission.
+2026-10-06 重复候选投影（source-backed duplicate candidate projection）：只有适配器从**实际已核验响应**生成的类型化证明（`ResearchAliasProof`，随真实 result/回执保存，携带原始请求 URL、实际返回 URL 与稳定原生 ID）可以合并重复候选，且仅限两类：(1) GitHub/X 原生 profile 响应（稳定非空原生 ID、请求/返回 handle 已核验、同一平台同一账号的纯大小写别名）；(2) Firecrawl 成功读取中实际 `metadata.sourceURL` 匹配请求、实际最终 `metadata.url` 仅差 www/apex 且 pathname+query 完全一致、两侧都是 classifier profile 入口的同一文档跳转。不同路径/子域/域名/不同 handle 或原生 ID 永不合并；不虚构最终 URL。协调器以**实际返回的 canonical ref**为代表，只把已观测别名的账号键映射到代表键（内存候选与既有精确观测的 from/target 键），逐字保留 source URL/targetURL/摘录/哈希与原回执，后续出链经同一观测映射注册；原生大小写处理只由稳定原生响应证明。仅**无任何持久账号/选择历史的新发现尝试**可合并；已有 case 的用户选择、历史、否定与排除一律不动，改发一条简洁缺口。别名证明本身不构成身份依据、不产生默认勾选、不扩大 Fetch 权限：选中的 canonical URL 才是显式范围，未选变体不进入允许命名空间。分类与账号键、v4 冻结上限不变。另修检索出链读取优先级：直接结果页标题可计姓名相关性，未回读的出链不得继承来源页标题的相关性，只保留候选与 unknown_role。配套永久离线正/负回归见 `apps/web/src/tests/first-step-alias-projection.test.ts` 与 `apps/web/src/tests/research-toolkit.test.ts`。
+
+同名公开主页呈现：用户选择目标后，其它实际标题也匹配原始姓名且没有反证的未确认主页单独展示；默认不选，选择只授予独立账号范围，不并入人物身份。无姓名匹配依据的线索仍折叠保留。
+
+别名冲突与模型摘录守卫：同一平台、大小写变体的已观察原生 ID 不一致时，撤销本次内存别名投影、恢复分离候选和原始观察键，保留两次实际回执、显式提示冲突；冲突账号不默认推荐、不参与支持边形成的同人簇，仅允许独立范围。模型可引用原文子摘录，但归属语义必须按完整的实际绑定上下文判断，不能截掉祖先否认或第三方说明。
+
+平台显示：`/@handle` 是多个平台共用的路径格式，未知站点只标为公开网页候选，不能凭路径宣称 Mastodon。已核对的实例保留平台标签（[Mastodon 官方实例说明](https://blog.joinmastodon.org/2026/03/a-new-share-button/)）；这不新增抓取适配器或身份支持。同一平台/handle 的不同主页在可访问名称中包含各自地址，以便区分。
+# 候选入口与普通外链
+
+未知网站的根目录、About 或博客入口只有在直接检索标题匹配输入姓名、用户明确输入，或已读原文的有效归属上下文中出现时，才进入账号候选。搜索结果附带的普通外链和已读页面的公司、新闻、推荐链接保留为相关资料及原始回执，不继承来源页面的姓名或归属。后续真实来源可以提升入口资格，但不能因此提升身份状态或授权范围。
+
+同站 www/apex 变体、原生 GitHub/X 大小写变体优先回读核验；相似性只影响读取顺序，实际去重仍须已有严格别名证明。搜索标题若明确显示与 URL 大小写不同的 `@handle`，该冲突入口保留为待核对资料，不把搜索标题当作别名证明。
+
+v5 保持 11 次检索、16 次身份读取的上限：初轮最多保留 2 次读取给后续真实观察的变体；受限域名检索返回空结果时，剩余检索槽优先执行同一个姓名查询的无域名限制版本，再扩展实际观察别名。搜索索引普通出站 profile 链接先作为相关资料，可归属内容仍对应已记录账号入口；实际读到的已知平台主页可保留未确认候选，但不因此支持身份。不同用户已持久化的选择历史不因此改写。
+
+v6 数值上限与回执、选择契约保持不变：已经实际观察到的 GitHub/X 大小写入口对优先接受原生读取；单个姓名标题匹配的原生 profile 优先于大量同名网站标题，以取得稳定账号 ID 和真实自链。相似性和检索标题只安排请求顺序，不能合并账号、支持身份、默认推荐或授权 Fetch；合并仍必须通过真实适配器证明，冲突仍保持分离。
+
+v7 仅对一侧实际标题匹配输入姓名的原生变体对提高初次读取优先级，防止无关变体耗尽读取额度；已读账号的实际 ID/跳转变体仍优先核验。搜索索引出站列表中的内容页也作为相关资料保留，不能因其中出现可识别发帖者就把转帖涉及的第三方账号推荐为此人；直接检索结果与实际回读的链接角色另行处理。数字上限、原始回执和选择权限保持不变。
+
+共享账号投影的可选 `profileLinkSources` 逐字保留实际已读 profile 页面到 profile 入口的来源账号、sourceUrl、targetUrl，排除索引、内容页和否认。界面将所选人物主页的未确认入口单独显示为「该主页发现的账号 · 归属待核对」，默认不选、勾选只授予独立账号范围。出链可见性不支持身份、不改变 cluster、不扩大默认选择；明确冲突和否认仍不进入该提示区。
+
+v8 保留不加区分的索引出链为资料；实际索引标题明确列出的 `@handle` 与实际出链账号 handle 一致，或实际 URL handle / 个人站首个主机标签与用户完整姓名规范化后完全一致时，可以提出未确认候选并优先执行原生读取。只使用已输入姓名和已返回 URL，不构造账号地址；大小写/标点比较不去重、不支持归属、不默认选择、不扩大 Fetch。第三方转帖作者若不满足上述观察约束仍只留资料，真正合并仍须稳定原生 ID 的已核验回执。
+
+引文角色合同 `preserve_actor/v1`：新派发核验逐条保留主语、动作、对象、偏好主体与输入/输出方向。人类偏好的 AI 输入或来自 AI 的输出不能改成 AI 自身的偏好；机器是介词宾语不表示它作出了判断。词面命中和作者 ID 都不证明语义。合同绑定新的核验缓存键，旧陈述与旧回执不改写。非法引用提案记录实际步骤、提案索引与来源键，不能作为当前报告的无来源序号缺口；失败工具尝试另存历史，只有尚未取得相应原文的目标进入当前读取缺口。已读原文不抹掉失败请求或费用。开放式过程列表只把最近活动显示为正在查看，早期活动是过程记录，不凭顺序声称成功。
+
+v10 身份导航合同：账号去重与文档读取去重分开。已读个人主页中实际 HTML/Markdown 的 About、Bio、Contact 导航可形成身份读取意图；意图携带实际目标 URL、原账号键、用途、来源 URL／内容哈希、完整回执键及原始链接片段。服务端必须从本尝试已完成回执的原文重新提取并核对链接，不接受搜索索引或供应商额外链接列表作为原文。只允许同 HTTPS origin、同作者目录下有限身份路径，不能跨作者、跨域或读取文章／帖子。用途只允许身份读取，不证明作者归属；原有否认、引用、活动流等限制仍有效。
+
+新尝试使用按实际请求内容绑定的回执键，同一个实际文档不因用途、来源或供应商变化自动重试；失败及未知在途请求保留费用和缺口。身份读取仍最多 16 次，包括失败／在途预留，About 不另送额度。旧顺序键尝试维持旧策略，不加入新读取或改写旧回执。抓取结果以实际返回 URL 绑定正文与相对链接，另存请求／返回地址；About 跳到主页或其他作者不能算 About 已读，也不能凭跳转自动支持身份。候选账号及用户选择的键保持不变。
+
+原生 website 声明合同：GitHub `blog` 和 X `website` 保留供应商实际字段字面值、平台／稳定账号 ID、请求与返回账号、原文哈希，以及组装原文时记录的字段偏移；不以全文第一次同字符串出现的位置冒充 website 字段。HTTPS、HTTP、无协议和无效声明分别记录。HTTP／无协议声明不能改写为 HTTPS 引文、别名证明或自动身份支持，也不派发 HTTP 请求；独立观察的安全 HTTPS 入口可以另行读取，协议对应关系仍待核实。界面可以展示原始声明与限制，但不因此改变账号选择或授权范围。旧回执没有该字段时保持未评估。
+用户直接提交的安全公开起始文档可以按其字面网址读取一次；不因此获得同目录其他页面的读取许可，也不将长路径或文章自动升级为人物主页。请求仍受同一账本、恢复与 16 次读取上限约束。
+
+## Named owner anchors
+
+Account linkage and a named person's ownership are separate assertions. A native
+profile's actual `name` field may establish `self_declared` ownership when its
+literal name matches the name query; it never establishes independent support.
+An original first-person named introduction may supply the same limited claim.
+Inspect original HTML document roots and enclosing/inline nodes for hidden or
+quoted surfaces; complete documents and fragments retain exact source offsets.
+Titles, handles, matching domains, user choices and reciprocal account links do
+not establish named ownership. Native website fields remain website declarations.
+
+Persist owner declarations as `owner_declaration` evidence with the real source
+revision, content hash, receipt key and exact quote offset. Keep them out of
+identity-link and factual-support reference slots. Owner anchors are optional on
+legacy accounts; absent means unassessed. New anchors use `unbound`,
+`self_declared`, `independently_supported`, `disputed` or `contradicted` states.
+Independent support requires a separate named publisher biography and an
+explicitly verified publisher; a `.edu` host alone is insufficient. This release
+does not automatically grant independent support.
+
+Withdrawal or replacement of a referenced source forces current owner review
+and removes its recommendation, while preserving the stored declaration and
+selection history. Display the limitation beside the actual owner quote. A
+supported cross-platform link must not be labelled independent person validation.
+
+## Independent account materials and source citations
+
+Accounts supported in another person cluster remain visible as separate,
+unchecked account scopes. Choosing them cannot merge the clusters. Changing
+the target removes person-bound selections outside the new cluster and reports
+the removal; explicitly independent scopes remain selected.
+The chosen cluster's own anchor follows the shared server selection validator:
+an explicit checkbox may grant person research intent to a proposed anchor,
+without upgrading identity evidence. Conflicted or withdrawn anchors stay
+independent, and other clusters' accounts never use this anchor exception.
+
+Fresh research checkpoints retain proposed exact excerpts from independently
+selected accounts in `independentMaterials`, with source key, original URL,
+content hash and literal offset. These excerpts are materials, not verified
+claims, coverage or Person Object evidence. Canonical JSON, Markdown, HTML and
+the Web report display them separately with the same caveat and source access.
+Current scope, source withdrawal/replacement and original quote bindings are
+checked before display. Legacy checkpoints without this field keep their old
+records. Raw excerpts no longer become limitations on new runs.
+
+A leading `S<n>` or `[S<n>]` citation to the claim's actual source may label a
+statement without appearing in the quote. Other source IDs, inline IDs and
+new English names remain subject to literal-term checks. Approximate time
+statements retain their approximation; lexical eligibility is not semantic
+support. Do not replay a historical failed run to manufacture new acceptance.
+
+Fresh scoped research retains model-proposed gap questions with their actual
+step in `modelGapHistory`. Show them as unverified historical questions, never
+current tool status; retain raw questions and completed read receipts. Legacy
+checkpoints without this optional field retain their prior presentation.
+Source qualification guards preserve sometimes versus often and past blog
+transitions versus simultaneous current operation. Identity research is a
+starting point; use actually observed articles or works within the selected
+scope for further research when budget allows. A linked book's authorship
+cannot borrow unrelated find-me text to establish ownership of its host.
+Sentence excerpt locators bind the trimmed literal UTF-16 span (1-based display,
+inclusive end), without changing source bytes or historical receipts.
+
+Current identity dependencies are rechecked in the read-only projection, atomic selection and Fetch guard. Completed original tool results bind source URL and full content hash; target-specific extraction and unchanged quotes are judged under the current semantic guard. A historical supported facet cannot bypass that guard. Failed dependencies show review and require independent account scope; historical evidence, selections and reports stay intact. Current conflicts suppress default suggestions and reject both new and previously frozen person scopes; explicit independent scopes remain available. Original target contexts override narrow historical excerpts, including ancestor denial/third-party attribution. Native fields reuse request, original literal protocol, ID and offset validation; malformed receipt pages cannot create permissions. Source linkage and named ownership remain separate.
+
+Generated historical identity evidence without a matching completed original remains archived but becomes current review-only. Alias matching reuses the server alias-proof contract and requires actual same-case request/response metadata; case or www/apex similarity alone never grants a match. HTML attribute punctuation and formatting whitespace do not split an authorial list; actual prose boundaries and relationship vetoes still apply.

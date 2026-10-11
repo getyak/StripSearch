@@ -1,7 +1,11 @@
-import { researchDepthCoverage } from '../shared/research-depth.js';
+import {nativeOrganizationKeys} from './research/native-account-kind.js';
+import { genreReviewIssue } from './research/quote-genre.js';
+import { researchDepthCoverage, claimEvidenceIssue, presentedResearchUnknowns } from '../shared/research-depth.js';
+import { classifyFirstStepUrl, type FirstStepDiscoveryView } from '../shared/first-step-discovery.js';
 import { randomUUID, createHash } from 'node:crypto';
-import { ResearchStore } from './research/research-store.js';
+import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
+import {identitySemanticReviewAccounts} from './research/identity-semantic-validity.js';
 import { CompletionStore } from './research/completion-store.js';
 import { FetchCoverageStore } from './research/fetch-coverage-store.js';
 import type {
@@ -612,50 +616,136 @@ export class Store {
   }
 
   /** Follow-up provenance is transitive; cycles, deleted ancestors and owner mismatches fail closed. */
+  isFirstStepScopeActive(ownerId: string, binding: FirstStepBinding): boolean {
+    const currentCase = this.cases.getCase(ownerId, binding.caseId);
+    if (!currentCase || currentCase.scopeVersion !== binding.scopeVersion) return false;
+    const current = new Map(this.cases.listAccounts(ownerId, binding.caseId).map(account => [account.accountId, account]));
+    return binding.selectedAccountIds.length > 0 && binding.selectedAccountIds.every(id => {
+      const frozen = binding.accounts.find(account => account.accountId === id);
+      const account = current.get(id);
+      const ref = account?.profileUrl ? classifyFirstStepUrl(account.profileUrl) : null;
+      return Boolean(frozen && account && ref?.ok && ref.ref.accountKey === frozen.accountKey &&
+        binding.accountKeys[frozen.accountKey] === id &&
+        account.userSelection.state === (binding.independentAccountIds.includes(id) ? 'only_this_account' : 'selected') &&
+        account.allowedScope.state === frozen.allowedScope);
+    });
+  }
+
+  /** Frozen authorization is separate from person identity, including descendant reports. */
+  isResearchScopeActive(runId: string, ownerId: string, visited = new Set<string>(), accountIds = new Set<string>()): boolean {
+    if (visited.has(runId)) return false;
+    const run = this.getRunForOwner(runId, ownerId);
+    if (!run) return false;
+    const seen = new Set(visited); seen.add(runId);
+    const binding = this.research.checkpoint(runId)?.firstStep;
+    const dependencies = new Set(accountIds);
+    if (binding) {
+      if (!this.isFirstStepScopeActive(ownerId, binding)) return false;
+      for (const accountId of new Set([...binding.selectedAccountIds, ...(binding.identityDependencyAccountIds ?? [])])) {
+        dependencies.add(accountId);
+      }
+    }
+    for (const accountId of dependencies) {
+      if (this.db.prepare('SELECT id FROM first_step_exclusions WHERE run_id=? AND account_id=? AND revoked_at IS NULL').get(runId, accountId)) return false;
+    }
+    return [run.parentRunId, run.retryOf].every(parent => !parent || this.isResearchScopeActive(parent, ownerId, seen, dependencies));
+  }
+
+  private isIndependentResearchPage(runId: string, url: string): boolean {
+    const binding = this.research.checkpoint(runId)?.firstStep;
+    const ref = classifyFirstStepUrl(url);
+    return Boolean(binding && ref.ok && binding.independentAccountIds.includes(binding.accountKeys[ref.ref.accountKey] ?? ''));
+  }
+
   isResearchSourceActive(runId: string, sourceKey: string, ownerId: string, visited = new Set<string>()): boolean {
     const key = `${runId}:${sourceKey}`;
     if (visited.has(key)) return false;
     const seen = new Set(visited); seen.add(key);
     const run = this.getRunForOwner(runId, ownerId);
     const source = run ? this.getSource(runId, sourceKey) : null;
-    if (!run || !source || source.excluded) return false;
+    if (!run || !source || source.excluded || !this.isResearchScopeActive(runId, ownerId)) return false;
     const checkpoint = this.research.checkpoint(runId);
     const page = checkpoint?.pages.find(page => page.sourceKey === sourceKey);
     const anchor = checkpoint?.pages.find(page => page.url === checkpoint.anchorUrl);
-    if (anchor && anchor.sourceKey !== sourceKey && !this.isResearchSourceActive(runId, anchor.sourceKey, ownerId, seen)) return false;
+    if (anchor && anchor.sourceKey !== sourceKey && !this.isIndependentResearchPage(runId, source.url) && !this.isResearchSourceActive(runId, anchor.sourceKey, ownerId, seen)) return false;
     if (page?.discoveredFrom?.length && !page.discoveredFrom.some(parentKey => this.isResearchSourceActive(runId, parentKey, ownerId, seen))) return false;
     return !page?.inheritedFrom || this.isResearchSourceActive(page.inheritedFrom.runId, page.inheritedFrom.sourceKey, ownerId, seen);
   }
 
+  /** Person attribution can depend on an unselected intermediate identity anchor. */
+  isFirstStepIdentityActive(ownerId: string, binding: FirstStepBinding): boolean {
+    const merged = new Set(binding.selectedAccountIds.filter(id => !binding.independentAccountIds.includes(id)));
+    if (merged.size === 0) return true;
+    if (!this.cases.getCase(ownerId, binding.caseId)) return false;
+    const report=this.cases.reportView(ownerId,binding.caseId);
+    const semanticReview=identitySemanticReviewAccounts(this.db,report);
+    const organizationKeys=nativeOrganizationKeys(this.db,ownerId,binding.caseId);
+    const conflicted=new Set<string>();
+    const rows=this.db.prepare(`SELECT d.view_json FROM first_step_discoveries d JOIN first_step_links l ON l.run_id=d.run_id WHERE l.case_id=? AND d.discovery_revision=(SELECT MAX(latest.discovery_revision) FROM first_step_discoveries latest WHERE latest.run_id=d.run_id)`).all(binding.caseId) as Array<{view_json:string}>;
+    for(const row of rows){
+      try{const view=JSON.parse(row.view_json) as FirstStepDiscoveryView;for(const account of view.accounts??[]){if(account.identity.conflicts.length||account.identity.nativeIdConflict||(account.accountKind==='organization'||organizationKeys.has(account.accountKey)))conflicted.add(account.accountId);}}catch{return false;}
+    }
+    const current = new Map(report.accounts.map(account => [account.accountId, account]));
+    return [...new Set(binding.identityDependencyAccountIds ?? merged)].every(id => {
+      const account = current.get(id);
+      return account && !semanticReview.has(id) && !conflicted.has(id) && account.identitySupport.counterevidenceIds.length===0 && account.identityValidity === 'valid' && !['disputed', 'rejected', 'revoked'].includes(account.identitySupport.state);
+    });
+  }
+
   buildCanonicalView(run: RunRecord): CanonicalView {
     const checkpoint = run.provider === 'research' ? this.research.checkpoint(run.id) : null;
+    const scopeChanged = Boolean(checkpoint && !this.isResearchScopeActive(run.id, run.ownerId));
+    const scopeReason = '已冻结的账号研究范围已变更或撤回；原资料保留，相关结论需要重新核对。';
+    const identityChanged = Boolean(checkpoint?.firstStep && !this.isFirstStepIdentityActive(run.ownerId, checkpoint.firstStep));
+    const identityReason = '人物关联的归属依据已失效；原资料保留，人物结论需要重新核对。';
     const sources = this.listSources(run.id).map(source => checkpoint && !this.isResearchSourceActive(run.id, source.sourceKey, run.ownerId)
       ? { ...source, excluded: true, fetchStatus: 'excluded' as const }
-      : source);
+      : identityChanged ? { ...source, identityConfirmed: false, identityLabel: '人物归属待复核；账号自身原资料保留。' } : source);
     const excluded = excludedSourceKeys(sources);
-    const anchorRevoked = Boolean(checkpoint?.anchorUrl && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
+    const anchorRevoked = Boolean(checkpoint?.anchorUrl && !this.isIndependentResearchPage(run.id, checkpoint.anchorUrl) && sources.some(source => source.url === checkpoint.anchorUrl && source.excluded));
+    // Projection never rewrites checkpoint claims or supplier receipts. Policy
+    // checks are shared with verification, including on terminal reopens/exports.
+    const evidenceIssue=(claim:NonNullable<typeof checkpoint>['claims'][number]):string|null=>{
+      const page=checkpoint?.pages.find(p=>p.sourceKey===claim.sourceKey),source=sources.find(s=>s.sourceKey===claim.sourceKey&&!s.excluded);
+      return claimEvidenceIssue(claim,checkpoint?.quoteSupportPolicy)??genreReviewIssue(claim,page,checkpoint?.quoteGenrePolicy)??genreReviewIssue(claim,source&&typeof source.excerpt==='string'?{url:source.url,text:source.excerpt}:undefined,checkpoint?.quoteGenrePolicy);
+    };
+    const policyRejected = (checkpoint?.claims ?? []).filter(claim => evidenceIssue(claim)!==null);
+    const hasActiveSupport=(statement:string,sourceKey?:string):boolean=>(checkpoint?.claims??[]).some(claim=>claim.statement===statement&&(!sourceKey||claim.sourceKey===sourceKey)&&!policyRejected.includes(claim)&&sources.some(source=>source.sourceKey===claim.sourceKey&&!source.excluded&&source.excerpt?.includes(claim.quote))&&checkpoint?.pages.some(page=>page.sourceKey===claim.sourceKey&&page.text.includes(claim.quote)));
+    const projectedKeys=(statement:string,sourceKeys:readonly string[]):string[]=>policyRejected.some(claim=>claim.statement===statement&&sourceKeys.includes(claim.sourceKey))?sourceKeys.filter(key=>hasActiveSupport(statement,key)):[...sourceKeys];
+    const isPolicyRejected=(statement:string,sourceKeys:readonly string[]):boolean=>sourceKeys.length>0&&projectedKeys(statement,sourceKeys).length===0;
+    const policyLimits=policyRejected.map(claim=>`${claim.sourceKey}：${evidenceIssue(claim)} 该引文绑定不作为已支持依据展示；原记录保留。`);
+    const policyStop=policyRejected.length>0&&run.state==='completed'&& !['scope_changed','source_revoked'].includes(run.stopReason??'');
     // Legacy Person Object IDs are checkpoint ordinals. Assign them before
     // filtering so withdrawing one source cannot rename unrelated references.
     const personClaims = (checkpoint?.claims ?? [])
       .map((claim, index) => ({ claim, ordinal: index + 1 }))
-      .filter(({ claim }) => sources.some(source =>
+      .filter(({ claim }) => !policyRejected.includes(claim)&&sources.some(source =>
         source.sourceKey === claim.sourceKey && !source.excluded && source.excerpt?.includes(claim.quote)));
     if (anchorRevoked) sources.forEach(source => excluded.add(source.sourceKey));
-    const observations = this.listObservations(run.id).map(observation => ({ ...observation,
-      validity: validityFor(observation.sourceKeys, excluded), reviewReason: reviewReason(observation.sourceKeys, excluded)
+    const binding=checkpoint?.firstStep;
+    const currentCase=binding?this.cases.getCase(run.ownerId,binding.caseId):null;
+    const independentAccounts=binding&&currentCase?.scopeVersion===binding.scopeVersion?new Set(this.cases.listAccounts(run.ownerId,binding.caseId).filter(account=>binding.independentAccountIds.includes(account.accountId)&&account.userSelection.state==='only_this_account'&&account.allowedScope.state!=='none').flatMap(account=>{const ref=classifyFirstStepUrl(account.profileUrl);return ref.ok?[ref.ref.accountKey]:[];})):new Set<string>();
+    const accountMaterials=(checkpoint?.independentMaterials??[]).filter(material=>{
+      const page=checkpoint?.pages.find(page=>page.sourceKey===material.sourceKey),account=classifyFirstStepUrl(material.sourceUrl);
+      const source=sources.find(source=>source.sourceKey===material.sourceKey&&!source.excluded);
+      return account.ok&&independentAccounts.has(account.ref.accountKey)&&page?.url===material.sourceUrl&&(page.retrieval==='read'||page.retrieval==='profile')&&source?.url===material.sourceUrl&&typeof source.excerpt==='string'&&Number.isSafeInteger(material.quoteOffset)&&material.quoteOffset>=0&&material.quote.length>=3&&page.text.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(page.text).digest('hex')===material.sourceContentHash&&source.excerpt.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(source.excerpt).digest('hex')===material.sourceContentHash;
+    });
+    const observations = this.listObservations(run.id).filter(observation=>!isPolicyRejected(observation.statement,observation.sourceKeys)).map(observation=>({...observation,sourceKeys:projectedKeys(observation.statement,observation.sourceKeys)})).map(observation => ({ ...observation,
+      validity: scopeChanged || identityChanged ? 'review' as const : validityFor(observation.sourceKeys, excluded),
+      reviewReason: scopeChanged ? scopeReason : identityChanged ? identityReason : reviewReason(observation.sourceKeys, excluded)
     }));
     const answer: CanonicalAnswerSection[] = run.answer.map((section) => ({
       id: section.id,
       heading: section.heading,
-      body: section.body,
-      bullets: section.bullets.map((bullet) => ({
+      body: scopeChanged || policyRejected.some(claim=>section.body.includes(claim.statement)&&!hasActiveSupport(claim.statement))?'':section.body,
+      bullets: section.bullets.filter(bullet=>!isPolicyRejected(bullet.text,bullet.sourceKeys)).map(bullet=>({...bullet,sourceKeys:projectedKeys(bullet.text,bullet.sourceKeys)})).map((bullet) => ({
         text: bullet.text,
         sourceKeys: bullet.sourceKeys,
         kind: bullet.kind,
-        validity: validityFor(bullet.sourceKeys, excluded),
-        reviewReason: reviewReason(bullet.sourceKeys, excluded)
+        validity: scopeChanged || identityChanged ? 'review' as const : validityFor(bullet.sourceKeys, excluded),
+        reviewReason: scopeChanged ? scopeReason : identityChanged ? identityReason : reviewReason(bullet.sourceKeys, excluded)
       }))
-    }));
+    })).filter(section=>!policyRejected.length||section.body||section.bullets.length);
     const identity: CanonicalIdentity = {
       displayName: run.identity.displayName,
       handle: run.identity.handle,
@@ -665,10 +755,12 @@ export class Store {
       candidates: run.identity.candidates
     };
     if (anchorRevoked) { identity.status = 'ambiguous'; identity.note = '人物主页证据已撤回，需要重新确认身份。'; }
+    if (identityChanged) { identity.status = 'ambiguous'; identity.note = identityReason; }
+    if (scopeChanged) { identity.status = 'ambiguous'; identity.note = scopeReason; }
     return {
       schemaVersion: SCHEMA_VERSION,
       runId: run.id,
-      state: run.state,
+      state: scopeChanged || policyStop ? 'partial' : run.state,
       revision: run.revision,
       question: run.question,
       seedUrl: run.seedUrl,
@@ -679,16 +771,16 @@ export class Store {
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
       interrupted: run.interrupted,
-      stopReason: run.stopReason,
+      stopReason: scopeChanged ? 'scope_changed' : policyStop?'claim_scope_unverified':run.stopReason,
       identity,
       sources,
       observations,
       answer,
-      limitations: run.limitations,
+      limitations: [...new Set([...run.limitations,...policyLimits,...scopeChanged?[scopeReason]:[]])],
       usage: run.usage,
       reviewCount: countReviewItems(observations, answer),
       ...(checkpoint ? {
-        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: run.stopReason ?? checkpoint.stopReason, unresolved: checkpoint.unknowns, coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
+        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: scopeChanged ? 'scope_changed' : policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: presentedResearchUnknowns(checkpoint), ...(checkpoint.independentMaterials?{accountMaterials}:{}), coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
         ...(checkpoint.anchorUrl && identity.status === 'resolved' ? {
           personObject: {
             schemaVersion: 'stripsearch/person/v1' as const,
@@ -700,7 +792,7 @@ export class Store {
             evidence: personClaims.map(({ claim, ordinal }) => ({
               id: `E${ordinal}`, sourceKey: claim.sourceKey, quote: claim.quote
             })),
-            unknowns: checkpoint.unknowns,
+            unknowns: [...new Set([...presentedResearchUnknowns(checkpoint),...policyLimits])],
             report: { runId: run.id, revision: run.revision, asOf: run.updatedAt }
           }
         } : {})
@@ -713,7 +805,7 @@ export class Store {
     return {
       runId: run.id,
       question: run.question,
-      state: run.state,
+      state: view.state,
       provider: run.provider,
       revision: run.revision,
       createdAt: run.createdAt,
@@ -773,7 +865,9 @@ export class Store {
     for (const row of rows) {
       const run = this.getRun(row.id);
       if (run?.provider === 'research') {
-        const unknown = this.research.receipts(row.id).some(receipt => receipt.state !== 'completed');
+        const hasFirstStepTable = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='first_step_links'").get();
+        const firstStep = hasFirstStepTable && this.db.prepare('SELECT 1 FROM first_step_links WHERE run_id=?').get(row.id);
+        const unknown = this.research.receipts(row.id).some(receipt => firstStep ? receipt.state === 'inflight' : receipt.state !== 'completed');
         if (!unknown) { this.updateRun(row.id, {state:'queued', interrupted:1}); continue; }
       }
       if (this.markInterrupted(row.id)) {

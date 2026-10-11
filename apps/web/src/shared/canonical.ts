@@ -1,4 +1,5 @@
 import { isPublicHttpsUrl } from './validation.js';
+import { readableSourceText } from './source-text.js';
 import type {
   CanonicalAnswerSection,
   CanonicalObservation,
@@ -147,6 +148,10 @@ export function renderMarkdown(view: CanonicalView): string {
     lines.push('');
   }
 
+  if (view.research?.accountMaterials?.length) {
+    lines.push('## 独立账号的原文片段', '', '以下是所选账号的原文材料，未独立核实内容，也未并入人物结论。', '');
+    for (const material of view.research.accountMaterials) lines.push(`> ${escapeInline(readableSourceText(material.quote))}${cite([material.sourceKey])}`, '');
+  }
   if (view.observations.length > 0) {
     lines.push('## 观察项');
     lines.push('');
@@ -208,7 +213,10 @@ const EVIDENCE_ROLE_LABELS: Record<EvidenceRole, string> = {
   identity_support: '身份归属支持',
   identity_counterevidence: '身份归属反证',
   factual_support: '事实支持',
-  factual_counterevidence: '事实反证'
+  factual_counterevidence: '事实反证',
+  owner_declaration: '姓名归属自述',
+  owner_support: '姓名归属独立支持',
+  owner_counterevidence: '姓名归属反证'
 };
 
 const CONSENT_LABELS: Record<ConsentProvenance, string> = {
@@ -316,6 +324,12 @@ export function renderCaseMarkdown(view: CaseReportView): string {
         ? ` **[需重新评估 · ${escapeInline(account.identityReviewReason ?? '')}]**`
         : '';
     lines.push(`- 身份证据支持：${IDENTITY_SUPPORT_LABELS[account.identitySupport.state]}${identityMarker}`);
+    const owner=account.identitySupport.ownerAnchor;
+    if(owner){
+      lines.push(`- 姓名归属：${escapeInline(owner.personLabel)} · ${escapeInline(owner.state)}${account.ownerValidity==='review'?' [需重新核对]':''}`);
+      if(owner.state==='self_declared')lines.push('- 姓名归属仅为账号或页面自述，尚未获得独立支持。');
+      if(owner.claims.length)lines.push(`- 姓名归属依据：${owner.claims.map(claim=>escapeInline(claim.evidenceId)).join('、')}`);
+    }
     if (account.identitySupport.evidenceIds.length > 0) {
       lines.push(`  - 支持证据：${account.identitySupport.evidenceIds.map((id) => escapeInline(id)).join('、')}`);
     }

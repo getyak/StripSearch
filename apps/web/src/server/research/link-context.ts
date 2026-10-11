@@ -1,0 +1,248 @@
+import { parse, parseFragment, type DefaultTreeAdapterTypes as Tree } from 'parse5';
+import {fromMarkdown} from 'mdast-util-from-markdown';
+import { classifyLinkContext, isExplicitDenialQuote } from '../../shared/first-step-discovery.js';
+import type { ResearchLinkContext } from './tool-contracts.js';
+
+function resolveLink(raw: string, base: string): string | null {
+  try {
+    const url = new URL(raw, base);
+    if (url.protocol !== 'https:' || url.username || url.password || url.port || raw.startsWith('//')) return null;
+    url.hash = '';
+    return url.href;
+  } catch { return null; }
+}
+
+const BLOCKS = new Set(['p', 'li', 'nav', 'footer', 'header', 'section', 'div', 'main']);
+const THIRD_PARTY = /(?:activity|timeline|feed|comment|recommend|suggest|reshare|repost|quote|people-also|related-post)/i;
+const PAGE_ROOTS = new Set(['main', 'body', 'html']);
+
+type MarkdownNode={type:string;position?:{start:{offset?:number};end:{offset?:number}};children?:MarkdownNode[]};
+type OriginalRange={start:number;end:number};
+const markdownRanges=new Map<string,{restricted:OriginalRange[];links:OriginalRange[]}>();
+/** Full HTML documents use HTML semantics; layout indentation is not Markdown code. */
+function originalIsHtmlDocument(original:string):boolean {
+ let at=original.startsWith('\uFEFF')?1:0;
+ const whitespace=():boolean=>{
+  let indentation=0;
+  while(at<original.length){
+   const char=original[at]!;
+   if(char===' '){if(++indentation>=4)return false;at++;}
+   else if(char==='\n'){indentation=0;at++;}
+   else if(char==='\r'&&original[at+1]==='\n'){indentation=0;at+=2;}
+   else if(char==='\t')return false;
+   else break;
+  }
+  return true;
+ };
+ if(!whitespace())return false;
+ while(original.startsWith('<!--',at)){
+  // Consume the FIRST actual end only. Regex backtracking must not skip a
+  // fence/indent boundary by finding another comment end inside an example.
+  const end=original.indexOf('-->',at+4);if(end<0)return false;
+  at=end+3;if(!whitespace())return false;
+ }
+ return /^(?:<!doctype\s+html(?:\s|>)|<(?:html|body)(?:\s|\/?>))/iu.test(original.slice(at));
+}
+
+function originalMarkdownRanges(original:string):{restricted:OriginalRange[];links:OriginalRange[]} {
+ const cached=markdownRanges.get(original);if(cached)return cached;
+ const ranges:{restricted:OriginalRange[];links:OriginalRange[]}={restricted:[],links:[]};
+ if(!originalIsHtmlDocument(original)){
+  const pending:MarkdownNode[]=[fromMarkdown(original)];
+  while(pending.length){
+   const node=pending.pop()!;
+   if(node.position?.start.offset!==undefined&&node.position.end.offset!==undefined){
+    const range={start:node.position.start.offset,end:node.position.end.offset};
+    if(['code','inlineCode','blockquote'].includes(node.type))ranges.restricted.push(range);
+    if(node.type==='link')ranges.links.push(range);
+   }
+   if(node.children)pending.push(...node.children);
+  }
+ }
+ if(markdownRanges.size>=8)markdownRanges.delete(markdownRanges.keys().next().value!);
+ markdownRanges.set(original,ranges);return ranges;
+}
+export function restrictedMarkdownAt(original:string,offset:number):boolean {
+ return originalMarkdownRanges(original).restricted.some(range=>offset>=range.start&&offset<range.end);
+}
+
+function restrictedIdentityContainer(node:Tree.Element):boolean {
+ return ['script','style','template','noscript','title','code','pre','blockquote','q','cite'].includes(node.tagName)||node.attrs.some(a=>['hidden','inert'].includes(a.name)||a.name==='aria-hidden'&&a.value.trim().toLowerCase()==='true'||a.name==='style'&&/display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)/iu.test(a.value));
+}
+
+function originalIdentityTree(original:string):Tree.Document|Tree.DocumentFragment {
+ return /<!doctype\s+html|<\s*(?:html|body)\b/iu.test(original)?parse(original,{sourceCodeLocationInfo:true}):parseFragment(original,{sourceCodeLocationInfo:true});
+}
+
+function originalTextSurfaceAt(root:Tree.Document|Tree.DocumentFragment,offset:number):'authorial'|'third_party'|'unknown' {
+ const pending:Tree.Node[]=[root];
+ while(pending.length){
+  const node=pending.pop()!;if('childNodes' in node)pending.push(...node.childNodes);
+  const location=node.sourceCodeLocation;
+  if(node.nodeName!=='#text'||!location||offset<location.startOffset||offset>=location.endOffset)continue;
+  let ancestor=node.parentNode;
+  while(ancestor&&'tagName' in ancestor){
+   if(ancestor.tagName==='a'||restrictedIdentityContainer(ancestor)||THIRD_PARTY.test(ancestor.attrs.map(a=>`${a.name}=${a.value}`).join(' ')))return 'third_party';
+   ancestor=ancestor.parentNode;
+  }
+  return 'authorial';
+ }
+ return 'unknown';
+}
+
+/** A root's adjacent heading/description belongs to this branch; an
+ * independent article elsewhere on the page does not. Keep a literal span. */
+export function adjacentRootSpan(root: Tree.Element | Tree.DocumentFragment | Tree.Document, branch: Tree.Node): {startOffset:number;endOffset:number} | null {
+  const location=branch.sourceCodeLocation;if(!location)return null;
+  const index=root.childNodes.findIndex(node=>node===branch);let start=location.startOffset,end=location.endOffset;
+  for(const direction of [-1,1]){
+   for(let i=index+direction;i>=0&&i<root.childNodes.length;i+=direction){
+    const sibling=root.childNodes[i]!;
+    if(sibling.nodeName==='#comment'||sibling.nodeName==='#text'&&'value' in sibling&&!sibling.value.trim())continue;
+    if('tagName' in sibling&&!/^(?:h[1-6]|p)$/.test(sibling.tagName))break;
+    if(!('tagName' in sibling)&&sibling.nodeName!=='#text')break;
+    const pending:Tree.Node[]=[sibling];let independentLink=false;
+    while(pending.length){const node=pending.pop()!;if('tagName' in node&&node.tagName==='a'){independentLink=true;break;}if('childNodes' in node)pending.push(...node.childNodes);}
+    if(independentLink&&'tagName' in sibling&&sibling.tagName==='p'){
+      const describingNavigation=navigationBranch(branch)&&sibling.sourceCodeLocation&&
+        /\b(?:about|bio(?:graphy)?|contact)\b|\b(?:this|these|following|below)\s+(?:links?|pages?|accounts?|profiles?)\b|(?:简介|关于页面|联系页面|这些链接|下面的链接)/i.test(nodeText(sibling));
+      if(!describingNavigation)break;
+    }
+    if(!sibling.sourceCodeLocation)break;
+    if(direction<0)start=sibling.sourceCodeLocation.startOffset;else end=sibling.sourceCodeLocation.endOffset;
+    if('tagName' in sibling&&/^h[1-6]$/.test(sibling.tagName))break;
+   }
+  }
+  return start<location.startOffset||end>location.endOffset?{startOffset:start,endOffset:end}:null;
+}
+
+function navigationBranch(node:Tree.Node):boolean {
+  if(!('tagName' in node))return false;
+  if(node.tagName==='nav')return true;
+  if(node.tagName!=='div'||THIRD_PARTY.test(node.attrs.map(attr=>attr.value).join(' ')))return false;
+  const children=node.childNodes.filter(child=>child.nodeName!=='#comment'&&!(child.nodeName==='#text'&&'value' in child&&!child.value.trim()));
+  return children.length===1&&navigationBranch(children[0]!);
+}
+
+function nodeText(node:Tree.Node):string {
+  // Text nodes preserve the local caption without reading another branch.
+  const pending:Tree.Node[]=[node];let text='';
+  while(pending.length){const item=pending.shift()!;if(item.nodeName==='#text'&&'value' in item)text+=item.value;if('childNodes' in item)pending.unshift(...item.childNodes);}
+  return text;
+}
+
+/** Retain actual HTML anchors and their original containing span. No source executes. */
+export function extractOriginalLinkContexts(original: string, base: string): ResearchLinkContext[] {
+  const contexts: ResearchLinkContext[] = [];
+  const root = originalIdentityTree(original);
+  const pending: Tree.Node[] = [root];
+  while (pending.length) {
+    const node = pending.pop()!;
+    if ('childNodes' in node) pending.push(...node.childNodes);
+    if (!('tagName' in node) || node.tagName !== 'a') continue;
+    const href = node.attrs.find(attr => attr.name === 'href')?.value;
+    const url = href ? resolveLink(href, base) : null;
+    if (!url || !node.sourceCodeLocation) continue;
+    const relMe=(node.attrs.find(attr=>attr.name==='rel')?.value??'').toLowerCase().split(/\s+/).includes('me');
+    let block: Tree.Element = node;
+    let semanticVeto: {startOffset:number;endOffset:number} | null = null;
+    let ancestor: Tree.Node | null = node.parentNode;
+    let branch: Tree.Node = node;
+    let thirdParty = restrictedMarkdownAt(original,node.sourceCodeLocation.startOffset);
+    let socialControls = false;
+    while (ancestor && 'tagName' in ancestor) {
+      const attrs = ancestor.attrs.map(attr => `${attr.name}=${attr.value}`).join(' ');
+      socialControls ||= ancestor.attrs.some(attr => attr.name === 'class' && attr.value.split(/\s+/).includes('social-media-icons'));
+      // An RSS subscription wrapper around explicit social controls is not
+      // a third-party timeline. Other feed/activity markers still veto it.
+      const surfaceAttrs = relMe && socialControls ? attrs.replace(/\brss-feed\b/gi, 'rss-subscription') : attrs;
+      if (restrictedIdentityContainer(ancestor) || THIRD_PARTY.test(surfaceAttrs)) thirdParty = true;
+      if (block === node && BLOCKS.has(ancestor.tagName) && ancestor.sourceCodeLocation) block = ancestor;
+      // A nested paragraph cannot erase the heading or description of an
+      // enclosing semantic container. Inspect actual ancestor text for a
+      // conservative veto; retain its exact span rather than invent context.
+      if (semanticVeto === null && ancestor.sourceCodeLocation) {
+        const relevant=PAGE_ROOTS.has(ancestor.tagName)?adjacentRootSpan(ancestor,branch):ancestor.sourceCodeLocation;
+        const span=relevant?original.slice(relevant.startOffset,relevant.endOffset):'';
+        if (relevant&&(isExplicitDenialQuote(span)||classifyLinkContext(span)==='third_party')) semanticVeto=relevant;
+      }
+      branch = ancestor;
+      ancestor = ancestor.parentNode;
+    }
+    // parseFragment removes body/html wrappers; their direct descriptions
+    // remain siblings in the document fragment and must still constrain nav.
+    if(semanticVeto===null&&ancestor===root){
+      const relevant=adjacentRootSpan(root,branch);
+      const span=relevant?original.slice(relevant.startOffset,relevant.endOffset):'';
+      if(relevant&&(isExplicitDenialQuote(span)||classifyLinkContext(span)==='third_party'))semanticVeto=relevant;
+    }
+    // Preserve the surrounding original semantics: rel=me cannot discard a
+    // nearby denial or attribution to someone else.
+    const location = semanticVeto ?? block.sourceCodeLocation!;
+    const quote = original.slice(location.startOffset, location.endOffset);
+    // A huge wrapper is not a target-specific attribution context.
+    const tooBroad = quote.length > 8000;
+    contexts.push({ url, targetOffset: tooBroad?0:node.sourceCodeLocation.startOffset-location.startOffset, quote: tooBroad ? original.slice(node.sourceCodeLocation.startOffset, node.sourceCodeLocation.endOffset) : quote,
+      locator: `HTML 原文第 ${String((tooBroad ? node.sourceCodeLocation : location).startOffset + 1)}–${String((tooBroad ? node.sourceCodeLocation : location).endOffset)} 字符`,
+      binding: relMe ? 'html_rel_me' : 'html_anchor', surface: thirdParty ? 'third_party' : tooBroad ? 'unknown' : relMe ? 'authorial' : block === node ? 'unknown' : 'authorial' });
+  }
+  // Markdown retains the literal href next to its anchor text. Paragraph
+  // boundaries preserve authorship context without borrowing a different link.
+  for (const match of original.matchAll(/\[[^\]\n]*\]\(<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\)/g)) {
+    if(!originalMarkdownRanges(original).links.some(range=>range.start===match.index&&range.end===match.index+match[0].length))continue;
+    const url = resolveLink(match[1]!, base);
+    if (!url) continue;
+    const index = match.index;
+    const boundary = original.lastIndexOf('\n\n', index);
+    const start = boundary < 0 ? 0 : boundary + 2;
+    const next = original.indexOf('\n\n', index + match[0].length);
+    const end = next < 0 ? original.length : next;
+    const quote = original.slice(start, end);
+    const thirdParty = restrictedMarkdownAt(original,index) || /^\s*>/m.test(quote) || THIRD_PARTY.test(quote);
+    const textSurface=originalTextSurfaceAt(root,index);
+    contexts.push({ url, quote, targetOffset:index-start, locator: `Markdown 原文第 ${String(start + 1)}–${String(end)} 字符`,
+      binding: 'markdown_link', surface: thirdParty||textSurface==='third_party' ? 'third_party' : quote.length > 8000||textSurface==='unknown' ? 'unknown' : 'authorial' });
+  }
+  return contexts;
+}
+
+/** Bind an actually observed literal URL to its original TEXT node, never an
+ * attribute, script, hidden element or somebody else's quotation. */
+type LiteralLinkContext=Omit<ResearchLinkContext,'binding'>&{binding:null};
+export function extractOriginalLiteralLinkContexts(original:string,base:string,url:string):LiteralLinkContext[] {
+ if(resolveLink(url,base)!==url)return [];
+ const root=originalIdentityTree(original),pending:Tree.Node[]=[root],contexts:LiteralLinkContext[]=[];
+ while(pending.length){
+  const node=pending.pop()!;if('childNodes' in node)pending.push(...node.childNodes);
+  if(node.nodeName!=='#text'||!('value' in node)||!node.sourceCodeLocation||!node.value.includes(url.replace(/\/+$/,'')))continue;
+  const location=node.sourceCodeLocation,literal=original.slice(location.startOffset,location.endOffset),at=literal.indexOf(url.replace(/\/+$/,''));
+  if(at<0)continue;
+  let block:Tree.Element|null=null,ancestor:Tree.Node|null=node.parentNode,branch:Tree.Node=node,restricted=restrictedMarkdownAt(original,location.startOffset+at),veto:{startOffset:number;endOffset:number}|null=null;
+  while(ancestor&&'tagName' in ancestor){
+   const attrs=ancestor.attrs.map(a=>`${a.name}=${a.value}`).join(' ');
+   restricted ||= ancestor.tagName==='a'||restrictedIdentityContainer(ancestor)||THIRD_PARTY.test(attrs);
+   if(!block&&BLOCKS.has(ancestor.tagName)&&ancestor.sourceCodeLocation)block=ancestor;
+   const span=PAGE_ROOTS.has(ancestor.tagName)?adjacentRootSpan(ancestor,branch):ancestor.sourceCodeLocation;
+   if(!veto&&span){const quote=original.slice(span.startOffset,span.endOffset);if(isExplicitDenialQuote(quote)||classifyLinkContext(quote)==='third_party')veto=span;}
+   branch=ancestor;ancestor=ancestor.parentNode;
+  }
+  if(!veto&&ancestor===root){const span=adjacentRootSpan(root,branch);if(span){const quote=original.slice(span.startOffset,span.endOffset);if(isExplicitDenialQuote(quote)||classifyLinkContext(quote)==='third_party')veto=span;}}
+  const span=veto??block?.sourceCodeLocation??{startOffset:0,endOffset:original.length},quote=original.slice(span.startOffset,span.endOffset);
+  contexts.push({url,quote,targetOffset:location.startOffset+at-span.startOffset,locator:`文字原文第 ${span.startOffset+1}–${span.endOffset} 字符`,binding:null,surface:restricted?'third_party':quote.length>8000?'unknown':'authorial'});
+ }
+ return contexts;
+}
+
+/** The native adapter has verified the account; its website field is self-supplied. */
+export function nativeProfileLinkContext(original: string, url: string, fieldOffset: number): ResearchLinkContext | null {
+  const index = Number.isInteger(fieldOffset) && fieldOffset >= 0 && original.slice(fieldOffset, fieldOffset + url.length) === url ? fieldOffset : -1;
+  return index < 0 ? null : { url, quote: url, locator: `账号资料 website 字段，第 ${String(index + 1)}–${String(index + url.length)} 字符`, binding: 'native_profile_field', surface: 'profile_field' };
+}
+
+
+/** A verified native username field binds its documented profile URL without manufacturing a quote. */
+export function nativeUsernameLinkContext(original: string, username: string, url: string, fieldOffset: number): ResearchLinkContext | null {
+  const field = `twitter_username: ${username}`;
+  const index = Number.isInteger(fieldOffset) && fieldOffset >= 0 && original.slice(fieldOffset, fieldOffset + field.length) === field ? fieldOffset : -1;
+  return index < 0 ? null : { url, quote: field, locator: `GitHub 公开账号 twitter_username 字段，第 ${index + 1}–${index + field.length} 字符`, binding: 'native_profile_field', surface: 'profile_field' };
+}

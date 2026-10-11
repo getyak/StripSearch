@@ -11,6 +11,9 @@ import { createAuthController, renderUserNav, showToast } from './auth.js';
 import { createFetchPanel } from './fetch.js';
 import { createCitationReturn } from './citation-return.js';
 import { byId, clear, make, setText, show } from './dom.js';
+import { createFirstStepPanel } from './first-step.js';
+import { clearFirstStepDrafts } from './first-step-draft-storage.js';
+import type { FirstStepPanel } from './first-step.js';
 import { createHomeMotion } from './home-motion.js';
 import { createLocalSearch } from './local-search.js';
 import type { LocalSearchItem } from './local-search.js';
@@ -87,6 +90,7 @@ const state: AppState = {
   activeRunId: null,
   signOutBusy: false
 };
+let sessionBootPending = true;
 
 const api = new ApiClient();
 const auth = createAuthController(api);
@@ -133,6 +137,7 @@ const els = {
   toggleInspector: byId<HTMLButtonElement>('toggle-inspector'),
   reportQuestion: byId('report-question'),
   needsPanel: byId<HTMLElement>('needs-input-panel'),
+  firstStepPanel: byId<HTMLElement>('first-step-panel'),
   needsPrompt: byId('needs-input-prompt'),
   resumeSeed: byId<HTMLInputElement>('resume-seed'),
   resumeError: byId('resume-error'),
@@ -292,6 +297,7 @@ const review = createReviewWorkbench({
  * one account's data to another.
  */
 function clearPrivateState(): void {
+  const draftOwnerId = state.user?.id;
   state.user = null;
   state.runs = [];
   state.run = null;
@@ -328,6 +334,7 @@ function clearPrivateState(): void {
   // flash the previous account's research while its run list is pending.
   renderAll();
   fetchPanel.reset();
+  if (draftOwnerId) clearFirstStepDrafts(draftOwnerId);
 }
 
 /** A review request returning 401 means the session ended; drop all private state. */
@@ -359,6 +366,7 @@ function route(): void {
   const reviewMatch = hash.match(/^#\/review(?:\/([^/?#]+))?/);
   const wantsReview = Boolean(reviewMatch);
   const wantsFetch = hash === '#/fetch';
+  if (sessionBootPending && (wantsApp || wantsReview || wantsFetch)) return;
   if ((wantsApp || wantsReview || wantsFetch) && !state.user) {
     window.location.hash = '#/';
     auth.open('signin', (user) => {
@@ -546,6 +554,7 @@ async function loadRuns(): Promise<void> {
 }
 
 async function selectRun(runId: string): Promise<void> {
+  byId<HTMLDetailsElement>('more-menu').open = false;
   const epoch = ++state.runEpoch;
   state.activeRunId = runId;
   state.resumeBusy = false;
@@ -645,7 +654,7 @@ function openStream(runId: string, since: number, epoch: number): void {
     state.streamState = 'open';
     state.reconnectAttempts = 0;
   };
-  for (const type of ['state', 'stage', 'source', 'observation', 'answer', 'needs_input', 'error', 'interrupted', 'revision', 'identity', 'person', 'usage']) {
+  for (const type of ['state', 'stage', 'source', 'observation', 'answer', 'needs_input', 'error', 'interrupted', 'revision', 'identity', 'person', 'usage', 'first_step_discovery', 'first_step_selection', 'first_step_ready']) {
     source.addEventListener(type, (event) => {
       if (state.runEpoch !== epoch || state.stream !== source) return;
       const message = event as MessageEvent<string>;
@@ -710,6 +719,13 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
   }
   const runId = state.run.runId;
   switch (type) {
+    case 'first_step_discovery':
+    case 'first_step_ready':
+    case 'first_step_selection':
+      // The authoritative projection changed: re-read it. The local user draft
+      // is preserved inside the panel and never overwritten by these pushes.
+      syncFirstStep(runId);
+      break;
     case 'stage':
       state.stages = stagesFromEvents(state.events);
       renderActivityPanel();
@@ -761,7 +777,10 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       const next = (payload as { state?: CanonicalView['state'] } | null)?.state;
       if (next) state.run.state = next;
       renderHeader();
+      renderRunSummary();
       renderActivityPanel();
+      renderReportView();
+      renderHistoryRail();
       if (next && isTerminalState(next)) scheduleSnapshotRefresh(runId, epoch);
       break;
     }
@@ -772,6 +791,7 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       if (typeof data?.revision === 'number' && Number.isInteger(data.revision)) state.run.revision = data.revision;
       state.run.state = 'needs_input';
       renderHeader();
+      renderRunSummary();
       renderNeedsPanel();
       break;
     }
@@ -950,10 +970,53 @@ function parseCandidates(raw: unknown): IdentityCandidate[] {
   return raw.filter((item): item is IdentityCandidate => Boolean(item && typeof item === 'object' && typeof item.label === 'string' && typeof item.detail === 'string'));
 }
 
+let firstStepPanel: FirstStepPanel | null = null;
+let firstStepRunId: string | null = null;
+
+function syncFirstStep(runId: string): void {
+  if (!firstStepPanel || firstStepRunId !== runId) {
+    firstStepPanel?.destroy();
+    firstStepRunId = runId;
+    firstStepPanel = createFirstStepPanel({
+      api,
+      container: els.firstStepPanel,
+      runId,
+      ownerId: state.user?.id,
+      onAfterExpand: () => { void selectRun(runId); },
+      onAfterSubmit: () => {
+        void selectRun(runId);
+      }
+    });
+  }
+  void firstStepPanel.refresh();
+}
+
+function teardownFirstStep(): void {
+  if (firstStepPanel) {
+    firstStepPanel.destroy();
+    firstStepPanel = null;
+    firstStepRunId = null;
+    els.firstStepPanel.hidden = true;
+  }
+}
+
 function renderNeedsPanel(): void {
   const run = state.run;
   const needs = Boolean(run && run.state === 'needs_input');
-  show(els.needsPanel, needs);
+  // First-step runs render the full discovery/selection experience from the
+  // authoritative projection (legacy paused jobs are handled inside it too).
+  const firstStep = Boolean(needs && run && run.provider === 'research');
+  show(els.needsPanel, needs && !firstStep);
+  show(els.firstStepPanel, firstStep);
+  els.workBody.classList.toggle('choosing-target', firstStep);
+  show(els.chatForm, !firstStep);
+  show(els.chatHint, !firstStep);
+  show(els.report, !firstStep);
+  if (firstStep && run) {
+    syncFirstStep(run.runId);
+  } else {
+    teardownFirstStep();
+  }
   clear(els.candidates);
   if (needs && run) {
     setText(els.needsPrompt, run.identity.note ?? '补充一个公开主页，让我们确认你想了解的人。');
@@ -1005,10 +1068,12 @@ function renderRunSummary(): void {
   if (!message && run?.state === 'partial') message = '已保留目前找到的资料，部分内容尚未完成。';
   if (!message && run?.state === 'failed') message = '这次研究未能完成。你的输入已保留，可以重试或补充线索。';
   if (run?.state === 'needs_input') message = '';
-  if (!message && research && (run?.state === 'queued' || run?.state === 'researching')) {
+  if (!message && run?.state === 'queued') message = '研究已保存，正在等待开始。';
+  if (!message && research && run?.state === 'researching') {
     const phases: Record<string, string> = { resolving: '正在核对人物身份。', identity: '正在核对人物身份。', identity_resolution: '正在核对人物身份。', searching: '正在发现原作、账号线索与反证。', planning: '正在按研究问题安排下一批资料。', reading: '正在读取原文与讨论上下文。', verifying: '正在独立核验断言与出处。', researching: '正在阅读公开资料，核对相关证据。', collecting: '正在阅读公开资料，核对相关证据。', synthesizing: '正在整理有出处的发现。', validating: '正在核对报告与出处。' };
     message = phases[research.phase] ?? '正在阅读与核对公开资料。';
   }
+  if (!message && run?.state === 'researching') message = '正在查找和核对公开资料。';
   setText(els.statusSummary, message);
   show(els.statusSummary, Boolean(message));
   if (research?.coverage) {
@@ -1120,8 +1185,13 @@ function renderSourcePanels(): void {
 }
 
 function renderHistoryRail(): void {
-  renderHistory(els.historyRail, state.runs, state.activeRunId, (runId) => void selectRun(runId));
-  renderHistory(els.drawerHistory, state.runs, state.activeRunId, (runId) => {
+  // The live canonical snapshot is newer than the initial history fetch. Derive
+  // this row for both rails without replacing other runs or private authority.
+  const rows = state.runs.map(row => state.run?.runId === row.runId && state.run.revision >= row.revision
+    ? {...row, state: state.run.state, revision: state.run.revision, updatedAt: state.run.updatedAt, sourceCount: state.run.sources.length}
+    : row);
+  renderHistory(els.historyRail, rows, state.activeRunId, (runId) => void selectRun(runId));
+  renderHistory(els.drawerHistory, rows, state.activeRunId, (runId) => {
     closeDrawer(els.historyDrawer, true);
     void selectRun(runId);
   });
@@ -1144,6 +1214,7 @@ type SourceOrigin = 'citation' | 'list' | 'search';
 
 function focusSource(sourceKey: string, origin: SourceOrigin = 'citation', trigger: HTMLElement | null = null): void {
   if (!state.run) return;
+  byId<HTMLDetailsElement>('more-menu').open = false;
   state.selectedSourceKey = sourceKey;
   if (origin !== 'list') state.filter = 'all';
   const narrow = isNarrow();
@@ -1592,20 +1663,34 @@ function onHashChange(): void {
 async function boot(): Promise<void> {
   wire();
   renderUserNav(null);
+  const protectedEntry = /^#\/(?:app|review|fetch)(?:\/|$)/.test(window.location.hash);
+  const opening = protectedEntry ? make('section', { className: 'app-opening', attrs: { role: 'status', 'aria-label': '恢复研究' }, children: [make('p', { text: '正在打开已保存研究…' })] }) : null;
+  if (opening) {
+    els.home.hidden = true;
+    els.footer.hidden = true;
+    document.getElementById('main')?.appendChild(opening);
+  }
   try {
-    const health = await api.health();
-    state.capabilities = health.capabilities;
+    try {
+      const health = await api.health();
+      state.capabilities = health.capabilities;
+    } catch {
+      // Entry stays usable; the actual request returns a recoverable service error.
+    }
+    const session = await api.session();
+    if (session) {
+      state.user = session.user;
+      renderUserNav(session.user);
+      await loadRuns();
+    }
   } catch {
-    // Entry stays usable; the actual request returns a recoverable service error.
+    showToast('暂时无法恢复登录，请刷新页面后重试。', 'error');
+  } finally {
+    sessionBootPending = false;
+    opening?.remove();
+    route();
+    renderAll();
   }
-  const session = await api.session();
-  if (session) {
-    state.user = session.user;
-    renderUserNav(session.user);
-    await loadRuns();
-  }
-  route();
-  renderAll();
 }
 
 void boot();
