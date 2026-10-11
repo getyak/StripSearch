@@ -15,3 +15,5 @@ npm test
 API 依据：[官方 server 教程](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/get-started/first-server.md)、[官方 client 教程](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/get-started/first-client.md)、[better-sqlite3 transaction](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md#databasetransactionfunction---function)。
 
 本机结果与限制记录在 [初始化验证](../../docs/initialization-validation.md)。
+
+2026-10-11 安全维护：v2 client/server/core 使用 `2.2.0`，v1 `mcp-v1` alias 使用 `1.31.0`；保留两个代际的 stdio 与 SQLite smoke，版本依据见[代码维护契约](../../docs/code-maintenance.md#依赖)。

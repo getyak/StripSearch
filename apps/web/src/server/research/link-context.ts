@@ -4,10 +4,43 @@ import { classifyLinkContext, isExplicitDenialQuote } from '../../shared/first-s
 import type { ResearchLinkContext } from './tool-contracts.js';
 
 function resolveLink(raw: string, base: string): string | null {
+  return normalizeHref(raw, base, FIRST_STEP_LINK_POLICY);
+}
+
+/**
+ * Explicit per-chain href normalization policy. The two policies DIFFER on
+ * purpose (docs/code-maintenance.md): legacy platform discovery matches
+ * self-links by a trailing-slash-collapsed key that allows instance ports and
+ * resolves protocol-relative hrefs, while first-step evidence links keep
+ * exact path bytes and refuse ports and `//`-relative hrefs.
+ */
+export interface HrefPolicy {
+  allowPort: boolean;
+  collapseTrailingSlash: boolean;
+  refuseProtocolRelative: boolean;
+}
+
+export const LEGACY_SELF_LINK_POLICY: HrefPolicy = {
+  allowPort: true,
+  collapseTrailingSlash: true,
+  refuseProtocolRelative: false
+};
+
+export const FIRST_STEP_LINK_POLICY: HrefPolicy = {
+  allowPort: false,
+  collapseTrailingSlash: false,
+  refuseProtocolRelative: true
+};
+
+/** Shared pure href resolution: https-only, no credentials, hash stripped. */
+export function normalizeHref(raw: string, base: string | undefined, policy: HrefPolicy): string | null {
   try {
     const url = new URL(raw, base);
-    if (url.protocol !== 'https:' || url.username || url.password || url.port || raw.startsWith('//')) return null;
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    if (policy.refuseProtocolRelative && raw.startsWith('//')) return null;
+    if (!policy.allowPort && url.port) return null;
     url.hash = '';
+    if (policy.collapseTrailingSlash) url.pathname = url.pathname.replace(/\/+$/, '') || '/';
     return url.href;
   } catch { return null; }
 }

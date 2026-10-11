@@ -382,6 +382,12 @@ test('frozen replay passes structurally with honest counters and deterministic h
     assert.ok(report.notEvaluated.some((line) => line.includes('freeze_chronology')));
     assert.ok(report.build.executedArtifacts.length > 0, 'executed worker bytes are hashed');
     assert.ok(report.source.manifestAggregateSha256.length === 64);
+    // Extracted implementation bytes must remain bound to replay provenance.
+    for (const sourcePath of ["apps/web/src/evals/shared/cli.ts", "apps/web/src/server/research/metered.ts", "apps/web/src/server/util/hash.ts", "apps/web/src/server/db/row-helpers.ts", "apps/web/src/shared/response-primitives.ts", "apps/web/src/shared/url-policy.ts"]) {
+      const sourceEntry = report.source.manifest.find((entry) => entry.path === sourcePath);
+      assert.ok(sourceEntry, `source manifest misses ${sourcePath}`);
+      assert.equal(sourceEntry.sha256, sha256Hex(readFileSync(path.join(repoRoot, sourcePath), 'utf8')));
+    }
     assert.ok(report.config.execution.sha256.length === 64);
 
     // runtime-v1 stays honestly labelled as its own track.

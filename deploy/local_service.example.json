@@ -1,0 +1,13 @@
+{
+  "node": "/absolute/path/to/node",
+  "npm": "/absolute/path/to/npm",
+  "tailscale": "/absolute/path/to/tailscale",
+  "origin": "https://your-machine.your-tailnet.ts.net:14443",
+  "port": 4392,
+  "stateDir": "/absolute/private/runtime-state",
+  "dataDir": "/absolute/private/persistent-data",
+  "envFile": "/absolute/private/runtime.env",
+  "signupMode": "open",
+  "label": "com.getyak.stripsearch.web",
+  "tools": {}
+}

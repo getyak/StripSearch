@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from './dom.js';
+
 /**
  * Native-dialog local search / navigation.
  *
@@ -104,11 +106,7 @@ export function createLocalSearch(options: LocalSearchOptions): LocalSearchContr
   let pendingClose: { epoch: number; reason: CloseReason } | null = null;
 
   function reducedMotion(): boolean {
-    try {
-      return Boolean(options.reducedMotion?.() ?? win.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    } catch {
-      return false;
-    }
+    return prefersReducedMotion(win, () => options.reducedMotion?.());
   }
 
   function lowerQuery(): string {

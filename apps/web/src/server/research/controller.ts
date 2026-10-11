@@ -1,5 +1,6 @@
 import { RESEARCH_FACETS, researchDepthCoverage, claimEvidenceIssue, quoteHasFirstPerson, presentedResearchUnknowns, type ResearchFacet } from '../../shared/research-depth.js';
 import { createHash } from 'node:crypto';
+import { jsonDigest24 as digest } from '../util/hash.js';
 import { allocateSourceKey } from './source-keys.js';
 import { NeedsInputError, type IdentityCandidate, type ProviderResult, type ResearchBudgetLimits, type SourceDraft } from '../../shared/types.js';
 import { extractGitHubHandle, normalizeResearchUrl, sanitizeText } from '../../shared/validation.js';
@@ -8,6 +9,7 @@ import type { Store, RunRecord } from '../store.js';
 import { type ResearchPlanner, invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
 import { RESEARCH_LIMITS, ResearchStop, remainingOf, type ActionUsage, type ResearchCheckpoint, type StoredPage, type ResearchClaim } from './research-store.js';
 import { genreReviewIssue, bindGenreReview, parseGenreDecisions } from './quote-genre.js';
+import { meteredInvoke } from './metered.js';
 import { FirstStepSelectionError } from './first-step-store.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchTools } from './tool-contracts.js';
 
@@ -41,7 +43,6 @@ export function failedUsage(error:unknown):ActionUsage {
 function isScopeStop(error:unknown):boolean {
  return (error instanceof ResearchStop&&error.code==='source_revoked')||(error instanceof FirstStepSelectionError&&error.code==='scope_changed');
 }
-function digest(value:unknown):string{return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);}
 function candidateId(url:string):string{return 'candidate_'+digest(url);}
 /** Keep everything a tool supplied: only control characters are stripped. */
 function retainText(value:unknown):string{return sanitizeText(value,Number.MAX_SAFE_INTEGER);}
@@ -191,17 +192,13 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
   // A scope refusal rejects BEFORE any metered reservation: never billed, no receipt.
   options.tools.predispatch?.(action);
   const key='tool:'+digest(action);
-  const old=store.research.reserve(run.id,key,'tool',action,{inputTokens:0,outputTokens:0},limits,Boolean(options.firstStepScope));
-  if(old){if(old.state==='failed')throw new ProviderError('provider_bad_response','资料请求已有已结算失败回执，不自动重放。');return old.result as ResearchToolResult;}
-  try{
-   const result=await tools.execute(action,signal);
-   if(result.requests!==1)throw new ResearchStop('tool_contract_violation');
-   store.research.settle(run.id,key,result,{estimatedUsd:result.estimatedUsd,credits:result.credits,bytes:result.bytes,unknownCost:result.estimatedUsd===null});
-   active();return result;
-  }catch(error){
-   if(!options.signal.aborted){try{store.research.settle(run.id,key,null,failedUsage(error),'failed');}catch{/* A cancelled/deleted run cannot accept late receipts. */}}
-   throw error;
-  }
+  return meteredInvoke<ResearchToolResult>({ledger:store.research,runId:run.id,key,kind:'tool',request:action,reservation:{inputTokens:0,outputTokens:0},limits,allowSettledFailure:Boolean(options.firstStepScope),
+   replayFailure:()=>new ProviderError('provider_bad_response','资料请求已有已结算失败回执，不自动重放。'),
+   execute:async()=>{const result=await tools.execute(action,signal);if(result.requests!==1)throw new ResearchStop('tool_contract_violation');return result;},
+   usageOf:(result)=>({estimatedUsd:result.estimatedUsd,credits:result.credits,bytes:result.bytes,unknownCost:result.estimatedUsd===null}),
+   onSettled:()=>{active();},
+   failureUsage:failedUsage,
+   settleFailure:()=>!options.signal.aborted});
  };
  const ask=async(mode:'plan'|'verify',claims?:ResearchClaim[]):Promise<unknown>=>{
   active();const step=checkpoint.steps;const budget=store.research.budget(run.id,limits);const activePages=stillActivePages();
@@ -222,13 +219,16 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
     const genreRequestBinding=genrePolicy?{bodyHash:createHash('sha256').update(JSON.stringify(request.body)).digest('hex'),...(mode==='verify'?{claims:claims??[]} : {}),sources:activePages.map(page=>({sourceKey:page.sourceKey,url:page.url,contentHash:createHash('sha256').update(page.text).digest('hex')}))}:undefined;
     const genreBindingHash=genreRequestBinding?createHash('sha256').update(JSON.stringify(genreRequestBinding)).digest('hex'):undefined;
     const key=`model:${step}${verificationPolicy?':quote_only_v1':''}${attributionPolicy?':attribution_v1':''}${lexicalPolicy?':literal_terms_v1':''}${rolePolicy?':preserve_actor_v1':''}${genrePolicy?`:genre_context_v1:binding_${genreBindingHash}`:''}`;const inputBound=Buffer.byteLength(JSON.stringify(request.body));
-    const old=store.research.reserve(run.id,key,'model',{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{}),...(rolePolicy?{rolePolicy}:{}),...(genrePolicy?{genrePolicy,genreBindingHash,genreRequestBinding}:{})},{inputTokens:inputBound,outputTokens:2500},limits,Boolean(options.firstStepScope));
-    if(old){if(old.state==='failed')throw new ProviderError('provider_bad_response','模型请求已有已结算失败回执，不自动重放。');return old.result as Awaited<ReturnType<typeof invokeDeepSeek>>;}
-    try{const result=await invokeDeepSeek(options.transport,options.deepseekApiKey,request);
-     const usage=parseMessagesUsage(result.body);
-     store.research.settle(run.id,key,result,{inputTokens:usage.known?usage.inputTokens:inputBound,outputTokens:usage.known?usage.outputTokens:2500,estimatedUsd:usage.known?estimateModelUsd(String(request.body.model),usage.inputTokens,usage.outputTokens):null,unknownCost:!usage.known||estimateModelUsd(String(request.body.model),usage.inputTokens,usage.outputTokens)===null,bytes:Buffer.byteLength(result.body)});
-     active();return result;
-    }catch(error){if(!options.signal.aborted){try{store.research.settle(run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');}catch{}}throw error;}
+    return meteredInvoke<Awaited<ReturnType<typeof invokeDeepSeek>>>({ledger:store.research,runId:run.id,key,kind:'model',
+     request:{model:request.body.model,path:request.path,...(verificationPolicy?{verificationPolicy}:{}),...(attributionPolicy?{attributionPolicy}:{}),...(lexicalPolicy?{lexicalPolicy}:{}),...(rolePolicy?{rolePolicy}:{}),...(genrePolicy?{genrePolicy,genreBindingHash,genreRequestBinding}:{})},
+     reservation:{inputTokens:inputBound,outputTokens:2500},limits,allowSettledFailure:Boolean(options.firstStepScope),
+     replayFailure:()=>new ProviderError('provider_bad_response','模型请求已有已结算失败回执，不自动重放。'),
+     // The transport/key guard above runs before this closure is built.
+     execute:()=>invokeDeepSeek(options.transport!,options.deepseekApiKey!,request),
+     usageOf:(result)=>{const usage=parseMessagesUsage(result.body);return {inputTokens:usage.known?usage.inputTokens:inputBound,outputTokens:usage.known?usage.outputTokens:2500,estimatedUsd:usage.known?estimateModelUsd(String(request.body.model),usage.inputTokens,usage.outputTokens):null,unknownCost:!usage.known||estimateModelUsd(String(request.body.model),usage.inputTokens,usage.outputTokens)===null,bytes:Buffer.byteLength(result.body)};},
+     onSettled:()=>{active();},
+     failureUsage:()=>({estimatedUsd:null,unknownCost:true}),
+     settleFailure:()=>!options.signal.aborted});
    });
   active();return decision;
  };

@@ -41,6 +41,7 @@ import {
   type FetchGithubTarget
 } from '../../shared/research-fetch-github.js';
 import { readBoundedBody } from '../adapters/http.js';
+import { asArray, asRecord, asSafeIntegerNumber, asString } from '../../shared/response-primitives.js';
 import { ProviderError } from '../adapters/types.js';
 import type { HttpTransport, HttpHeadersLike } from '../adapters/types.js';
 import { sha256Hex } from './completion-eval.js';
@@ -235,21 +236,13 @@ function headerOf(headers: HttpHeadersLike, name: string): string | null {
 /* Untrusted response parsing (validated against the frozen target)    */
 /* ------------------------------------------------------------------ */
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
+/**
+ * Shared response primitives; the numeric rule on THIS chain is safe
+ * integers only for persisted ids/counts — deliberately stricter than the
+ * finite `asNumber` of the report/research-tool chains. See
+ * docs/code-maintenance.md.
+ */
+const asNumber = asSafeIntegerNumber;
 
 function sameGithubRepoUrl(url: string | null, owner: string, name: string): boolean {
   if (!url) return false;

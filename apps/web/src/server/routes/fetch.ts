@@ -22,6 +22,7 @@ import type {
   FetchGithubStartRequest
 } from '../../shared/research-fetch-github.js';
 import { HttpError } from '../http/errors.js';
+import { readBody, readIdempotencyKey } from '../http/request-input.js';
 import { requireUser } from '../http/middleware.js';
 import type { Runner } from '../services/runner.js';
 import {
@@ -34,19 +35,6 @@ export interface FetchRouteDeps {
   fetchRunner: FetchGithubRunner;
   /** Legacy start gate: rate/start bounds identical to the existing routes. */
   runner: Runner;
-}
-
-function readBody(req: Request): Record<string, unknown> {
-  const body = req.body;
-  return body !== null && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
-}
-
-function readIdempotencyKey(req: Request): string | null {
-  const header = req.header('idempotency-key');
-  if (typeof header !== 'string') return null;
-  const trimmed = header.trim();
-  if (trimmed.length === 0) return null;
-  return trimmed.slice(0, 128);
 }
 
 function fingerprintOf(input: { targetUrl: string; question: string; accessScope: string }): string {

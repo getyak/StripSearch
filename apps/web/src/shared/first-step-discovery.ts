@@ -29,7 +29,8 @@ import type {
   UserSelection,
   AccessCoverage
 } from './research-case.js';
-import { ACCOUNT_KEY_PREFIX, canonicalJson } from './discovery-plan.js';
+import { ACCOUNT_KEY_PREFIX, urlFallbackAccountKey } from './discovery-plan.js';
+import { isLiteralIpHost, matchesNonPublicHostSuffix, normalizeSchemeHost } from './url-policy.js';
 import type { NativeWebsiteDeclaration } from './native-website.js';
 import type { DiscoveredAccountIdentity } from './discovery-plan.js';
 
@@ -295,30 +296,17 @@ const PLATFORM_LABELS: Record<FirstStepPlatform, string> = {
   web_page: '公开网页'
 };
 
-/** URL shapes the offline checks must never treat as public fetch targets. */
-const BLOCKED_HOST_SUFFIXES = ['localhost', 'local', 'internal', 'test', 'invalid', 'localdomain', 'example', 'example.com', 'example.org', 'example.net'];
-const BLOCKED_HOSTS = new Set(['example.com', 'example.org', 'example.net', 'example.invalid']);
-
+/**
+ * URL shapes the offline checks must never treat as public fetch targets.
+ * Rule data + predicates come from `shared/url-policy.ts`; the stricter
+ * first-step composition (suffix list + any literal IP) stays here.
+ */
 function isBlockedHost(host: string): boolean {
-  if (BLOCKED_HOSTS.has(host)) return true;
-  return BLOCKED_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+  return matchesNonPublicHostSuffix(host);
 }
 
 function isLiteralIp(host: string): boolean {
-  if (/^[0-9]{1,3}(?:\.[0-9]{1,3}){3}$/.test(host)) return true;
-  return host.includes(':') || /^\[.*\]$/.test(host);
-}
-
-/** GET-92-style conservative URL normalization (scheme + authority only). */
-function normalizeSchemeHost(value: string): string {
-  const schemeEnd = value.indexOf('://');
-  if (schemeEnd < 0) return value;
-  const scheme = value.slice(0, schemeEnd).toLowerCase();
-  const rest = value.slice(schemeEnd + 3);
-  const boundary = rest.search(/[/?#]/);
-  const authority = boundary < 0 ? rest : rest.slice(0, boundary);
-  const tail = boundary < 0 ? '' : rest.slice(boundary);
-  return `${scheme}://${authority.toLowerCase()}${tail}`;
+  return isLiteralIpHost(host);
 }
 
 /**
@@ -363,14 +351,21 @@ export function firstStepAccountKey(ref: {
   accountUrl: string;
 }): string {
   const identity = firstStepAccountIdentity(ref);
-  return `${ACCOUNT_KEY_PREFIX}:${canonicalJson({
-    v: ACCOUNT_KEY_PREFIX,
-    platformId: identity.platformId,
-    instance: identity.instance,
-    accountKind: identity.accountKind,
-    mode: 'url',
-    url: normalizeSchemeHost(identity.profileUrl as string)
-  })}`;
+  // Same URL-fallback key shape as GET-92 `canonicalAccountKey`; the key
+  // serialization lives in `shared/discovery-plan.ts`. The normalization
+  // ladder stays different ON PURPOSE: first-step has no static preflight and
+  // no tracking-parameter stripping here (its inputs pass `classifyFirstStepUrl`
+  // first), while GET-92 keys must survive `staticHttpsUrlPreflight` and an
+  // explicit tracking whitelist. See docs/code-maintenance.md.
+  return urlFallbackAccountKey(
+    {
+      v: ACCOUNT_KEY_PREFIX,
+      platformId: identity.platformId,
+      instance: identity.instance,
+      accountKind: identity.accountKind
+    },
+    normalizeSchemeHost(identity.profileUrl as string)
+  );
 }
 
 function refOf(

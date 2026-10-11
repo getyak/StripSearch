@@ -112,20 +112,19 @@ export async function safeFetchJson(options: SafeFetchOptions): Promise<SafeFetc
   }
 }
 
-export function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
+export {
+  asArray,
+  asFiniteNumber,
+  asRecord,
+  asSafeIntegerNumber,
+  asString
+} from '../../shared/response-primitives.js';
 
-export function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
-}
+import { asFiniteNumber } from '../../shared/response-primitives.js';
 
-export function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-export function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
+/**
+ * Historical name on the report/research-tool chains: FINITE number semantics.
+ * The GitHub acquisition chain uses `asSafeIntegerNumber` instead — the
+ * finite vs safe-integer difference is intentional and tested.
+ */
+export const asNumber = asFiniteNumber;

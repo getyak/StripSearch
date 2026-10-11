@@ -9,12 +9,13 @@
  * failure for the case that triggered it.
  */
 
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
+
+import { findRepoRoot, gitInfo, parseEvalCliArgs, safeFilename } from './shared/cli.js';
+
+export { findRepoRoot };
 
 import { createExaProvider } from '../server/adapters/exa.js';
 import { githubProvider } from '../server/adapters/github.js';
@@ -49,25 +50,6 @@ export class EvalRunError extends Error {
     super(message);
     this.name = 'EvalRunError';
   }
-}
-
-/** Walk up from this module to the repository root (the directory with evals/ and apps/). */
-export function findRepoRoot(moduleUrl: string = import.meta.url): string {
-  let dir = path.dirname(fileURLToPath(moduleUrl));
-  for (let depth = 0; depth < 12; depth += 1) {
-    if (existsSync(path.join(dir, 'evals')) && existsSync(path.join(dir, 'apps'))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  let cwd = process.cwd();
-  for (let depth = 0; depth < 12; depth += 1) {
-    if (existsSync(path.join(cwd, 'evals')) && existsSync(path.join(cwd, 'apps'))) return cwd;
-    const parent = path.dirname(cwd);
-    if (parent === cwd) break;
-    cwd = parent;
-  }
-  return process.cwd();
 }
 
 function requestUrl(input: unknown): string {
@@ -246,21 +228,6 @@ function crashResult(evalCase: EvalCase, error: unknown): CaseResult {
   };
 }
 
-function safeFilename(caseId: string): string {
-  return caseId.replace(/[^A-Za-z0-9._-]/g, '_');
-}
-
-function gitInfo(repoRoot: string): { commit: string | null; dirty: boolean | null; dirtyPaths: number | null } {
-  try {
-    const commit = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    const status = execFileSync('git', ['-C', repoRoot, 'status', '--porcelain'], { encoding: 'utf8' });
-    const dirtyPaths = status.split('\n').filter((line) => line.trim().length > 0).length;
-    return { commit, dirty: dirtyPaths > 0, dirtyPaths };
-  } catch {
-    return { commit: null, dirty: null, dirtyPaths: null };
-  }
-}
-
 export interface RunEvalOptions {
   datasetPath: string;
   datasetDisplayPath: string;
@@ -340,23 +307,13 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
 
 /** CLI entry point. Returns the process exit code (0 pass, 1 case failure, 2 invalid usage/dataset). */
 export async function runCli(argv: string[]): Promise<number> {
-  let values: { dataset?: string; output?: string; split?: string };
-  try {
-    const parsed = parseArgs({
-      args: argv,
-      options: {
-        dataset: { type: 'string' },
-        output: { type: 'string' },
-        split: { type: 'string' }
-      },
-      allowPositionals: false,
-      strict: true
-    });
-    values = parsed.values;
-  } catch (error) {
-    console.error(`eval: ${error instanceof Error ? error.message : String(error)}`);
-    return 2;
-  }
+  const parsedArgs = parseEvalCliArgs<{ dataset?: string; output?: string; split?: string }>(
+    argv,
+    { dataset: { type: 'string' }, output: { type: 'string' }, split: { type: 'string' } },
+    'eval'
+  );
+  if (!parsedArgs.ok) return 2;
+  const values = parsedArgs.values;
 
   const splitRaw = values.split;
   if (splitRaw !== undefined && splitRaw !== 'discovery' && splitRaw !== 'regression') {

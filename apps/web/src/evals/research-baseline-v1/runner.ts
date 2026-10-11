@@ -18,14 +18,17 @@
  * run-level failures instead of throwing the report away.
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { parseArgs } from 'node:util';
+import { pathToFileURL } from 'node:url';
+
+import { findRepoRoot, gitInfo, parseEvalCliArgs, safeFilename } from '../shared/cli.js';
+
+export { findRepoRoot };
 
 import { RESEARCH_LIMITS } from '../../server/research/research-store.js';
 import { crashRecord, limitsFor, type CaseExecution } from './case-runner.js';
@@ -86,6 +89,12 @@ const SOURCE_MANIFEST_FILES = [
   'apps/web/src/evals/research-baseline-v1/network-guard.mjs',
   'apps/web/src/evals/research-baseline-v1/network-probe.mjs',
   'apps/web/src/evals/canonical-store.ts',
+  'apps/web/src/evals/shared/cli.ts',
+  'apps/web/src/server/research/metered.ts',
+  'apps/web/src/server/util/hash.ts',
+  'apps/web/src/server/db/row-helpers.ts',
+  'apps/web/src/shared/response-primitives.ts',
+  'apps/web/src/shared/url-policy.ts',
   'apps/web/src/server/research/controller.ts',
   'apps/web/src/server/research/research-store.ts',
   'apps/web/src/server/research/planner.ts',
@@ -102,39 +111,9 @@ const SOURCE_MANIFEST_FILES = [
 
 const GUARD_FILE = 'apps/web/src/evals/research-baseline-v1/network-guard.mjs';
 
-/** Walk up from this module to the repository root (the directory with evals/ and apps/). */
-export function findRepoRoot(moduleUrl: string = import.meta.url): string {
-  let dir = path.dirname(fileURLToPath(moduleUrl));
-  for (let depth = 0; depth < 12; depth += 1) {
-    if (existsSync(path.join(dir, 'evals')) && existsSync(path.join(dir, 'apps'))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  let cwd = process.cwd();
-  for (let depth = 0; depth < 12; depth += 1) {
-    if (existsSync(path.join(cwd, 'evals')) && existsSync(path.join(cwd, 'apps'))) return cwd;
-    const parent = path.dirname(cwd);
-    if (parent === cwd) break;
-    cwd = parent;
-  }
-  return process.cwd();
-}
-
 function tempBase(): string {
   const configured = process.env.TMPDIR?.trim();
   return configured && configured.length > 0 ? configured : tmpdir();
-}
-
-function gitInfo(repoRoot: string): { commit: string | null; dirty: boolean | null; dirtyPaths: number | null } {
-  try {
-    const commit = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    const status = execFileSync('git', ['-C', repoRoot, 'status', '--porcelain'], { encoding: 'utf8' });
-    const dirtyPaths = status.split('\n').filter((line) => line.trim().length > 0).length;
-    return { commit, dirty: dirtyPaths > 0, dirtyPaths };
-  } catch {
-    return { commit: null, dirty: null, dirtyPaths: null };
-  }
 }
 
 /** The manifest must be complete: a missing required source file fails the run explicitly. */
@@ -315,10 +294,6 @@ function parseWorkerRecords(recordsPath: string): ParsedWorkerRecords {
     } else if (event.type === 'worker-done') parsed.workerDone = true;
   }
   return parsed;
-}
-
-function safeFilename(caseId: string): string {
-  return caseId.replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
 function receiptsSummary(execution: CaseExecution): { total: number; completed: number; failed: number; inflight: number } {
@@ -646,22 +621,13 @@ export async function runResearchBaseline(options: RunResearchBaselineOptions): 
 
 /** CLI entry point. Returns the process exit code (0 pass, 1 violation, 2 invalid usage/dataset). */
 export async function runCli(argv: string[]): Promise<number> {
-  let values: { dataset?: string; output?: string };
-  try {
-    const parsed = parseArgs({
-      args: argv,
-      options: {
-        dataset: { type: 'string' },
-        output: { type: 'string' }
-      },
-      allowPositionals: false,
-      strict: true
-    });
-    values = parsed.values;
-  } catch (error) {
-    console.error(`eval:research: ${error instanceof Error ? error.message : String(error)}`);
-    return 2;
-  }
+  const parsedArgs = parseEvalCliArgs<{ dataset?: string; output?: string }>(
+    argv,
+    { dataset: { type: 'string' }, output: { type: 'string' } },
+    'eval:research'
+  );
+  if (!parsedArgs.ok) return 2;
+  const values = parsedArgs.values;
 
   const repoRoot = findRepoRoot();
   const datasetArg = values.dataset ?? path.join('evals', 'research-baseline-v2', 'cases.jsonl');

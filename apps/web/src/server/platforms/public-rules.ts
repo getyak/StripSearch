@@ -20,6 +20,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { hash12 } from '../util/hash.js';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -855,10 +856,6 @@ export function publicRuleCatalogEntries(union: PublicRuleUnion, sources: Catalo
     });
   }
   return entries;
-}
-
-function hash12(input: string): string {
-  return createHash('sha256').update(input, 'utf8').digest('hex').slice(0, 12);
 }
 
 /* ------------------------------------------------------------------ */

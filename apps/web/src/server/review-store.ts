@@ -24,7 +24,7 @@ import {
   REASON_TAG_LABELS
 } from '../shared/review.js';
 import type { DB } from './db/index.js';
-import { nowIso, newId } from './store.js';
+import { newRecordId as newId, nowIso, parseJson } from './db/row-helpers.js';
 import type { SeedCase } from './review-seed.js';
 import { LIMITS } from '../shared/limits.js';
 import type {
@@ -159,13 +159,6 @@ interface AnnotationRow {
   created_at: string;
 }
 
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 /** Deterministic, key-sorted JSON used for immutable content hashes. */
 export function stableStringify(value: unknown): string {

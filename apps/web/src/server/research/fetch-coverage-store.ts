@@ -46,7 +46,7 @@
  * enforce owner/case isolation (owner mismatch reports "not found").
  */
 
-import { randomUUID } from 'node:crypto';
+import { newRecordId, nowIso, parseJson } from '../db/row-helpers.js';
 
 import type { DB } from '../db/index.js';
 import type { CaseStore } from './case-store.js';
@@ -106,22 +106,6 @@ import type {
   MediaMetadataEntry
 } from '../../shared/research-completion.js';
 import { dependencyValidationMap, sha256Hex, stableStringify } from './completion-eval.js';
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function newRecordId(prefix: string): string {
-  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-}
-
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 const SUPPORT_ROLES: ReadonlySet<EvidenceRole> = new Set<EvidenceRole>(['factual_support', 'identity_support']);
 const COUNTER_ROLES: ReadonlySet<EvidenceRole> = new Set<EvidenceRole>([

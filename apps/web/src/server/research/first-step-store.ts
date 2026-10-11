@@ -16,7 +16,8 @@ import {nativeOrganizationKeys} from './native-account-kind.js';
  *   or become a person conclusion.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { newRecordId, nowIso, parseJson } from '../db/row-helpers.js';
 import {identitySemanticReviewAccounts} from './identity-semantic-validity.js';
 import type { DB } from '../db/index.js';
 import {
@@ -131,18 +132,6 @@ export interface FirstStepSelectionResult {
   excludedAccountIds: string[];
   submittedAt: string;
   idempotent: boolean;
-}
-
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
 }
 
 function fingerprintOf(input: FirstStepSelectionInput): string {
@@ -811,7 +800,7 @@ export class FirstStepStore {
               .prepare(
                 'INSERT INTO first_step_exclusions (id, run_id, case_id, account_id, statement, recorded_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)'
               )
-              .run(`excl_${randomUUID().replace(/-/g, '').slice(0, 24)}`, runId, link.caseId, decision.accountId, decision.note ?? '用户声明：不是此人。', timestamp);
+              .run(newRecordId('excl'), runId, link.caseId, decision.accountId, decision.note ?? '用户声明：不是此人。', timestamp);
           }
         } else if (active) {
           this.db.prepare('UPDATE first_step_exclusions SET revoked_at = ? WHERE id = ?').run(timestamp, active.id);

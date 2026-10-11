@@ -10,7 +10,7 @@ import type { ExportFormat, ResumeInput } from './api.js';
 import { createAuthController, renderUserNav, showToast } from './auth.js';
 import { createFetchPanel } from './fetch.js';
 import { createCitationReturn } from './citation-return.js';
-import { byId, clear, make, setText, show } from './dom.js';
+import { byId, clear, escapeAttrValue as attr, make, setText, show } from './dom.js';
 import { createFirstStepPanel } from './first-step.js';
 import { clearFirstStepDrafts } from './first-step-draft-storage.js';
 import type { FirstStepPanel } from './first-step.js';
@@ -820,11 +820,6 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
 /* ---------------- rendering ---------------- */
 
 type FocusAnchor = { containerId: string; selector: string; runId: string; sourceKey?: string; mode: 'dom-run' | 'row-id' };
-
-function attr(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-    .replace(/[\n\r\f]/g, (character) => `\\${character.charCodeAt(0).toString(16)} `);
-}
 
 /**
  * Polling snapshot refreshes re-render report and source DOM. Record what the

@@ -27,6 +27,7 @@ import type {
   DiscoveryTaskRecord
 } from '../discovery-store.js';
 import { DiscoveryStore } from '../discovery-store.js';
+import { LEGACY_SELF_LINK_POLICY, normalizeHref } from '../research/link-context.js';
 import type {
   CorrectionCandidate,
   DiscoveryCheckpoint,
@@ -80,13 +81,11 @@ function methodOf(rule: PlatformRule): ProbeMethod {
 }
 
 function profileKey(value: string, base?: string): string | null {
-  try {
-    const url = new URL(value, base);
-    if (url.protocol !== 'https:' || url.username || url.password) return null;
-    url.hash = '';
-    url.pathname = url.pathname.replace(/\/+$/, '') || '/';
-    return url.href;
-  } catch { return null; }
+  // Legacy self-link MATCHING key: trailing slashes collapse to '/', instance
+  // ports and protocol-relative hrefs stay allowed. Deliberately different
+  // from first-step evidence links — see `normalizeHref` policies in
+  // ../research/link-context.js and docs/code-maintenance.md.
+  return normalizeHref(value, base, LEGACY_SELF_LINK_POLICY);
 }
 
 /** Only actual HTML self-links count, never mentions, comments or script text. */

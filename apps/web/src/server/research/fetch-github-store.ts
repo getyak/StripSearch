@@ -12,7 +12,7 @@
  * item or history cap — the journal makes the acquisition resumable.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newRecordId as recordId, nowIso } from '../db/row-helpers.js';
 import type { DB } from '../db/index.js';
 import type { Store } from '../store.js';
 import type {
@@ -234,14 +234,6 @@ export type PutItemResult =
   | { outcome: 'created' }
   | { outcome: 'duplicate' }
   | { outcome: 'hash_changed'; detail: string };
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function recordId(prefix: string): string {
-  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-}
 
 interface RunRow {
   id: string;

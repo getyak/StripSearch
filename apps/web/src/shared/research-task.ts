@@ -12,7 +12,7 @@
  */
 
 import { LIMITS } from './limits.js';
-import { validateSeedUrl } from './validation.js';
+import { stripControlCharacters as stripControls, validateSeedUrl } from './validation.js';
 
 export const RESEARCH_MODEL_INPUT_VERSION = 'stripsearch/research-model-input/v1';
 export const RESEARCH_SPEC_EXPORT_VERSION = 'stripsearch/research-task-spec/v1';
@@ -103,11 +103,6 @@ export type ResearchTaskSpec = ResearchTaskInput;
 export type ResearchParseResult =
   | { ok: true; spec: ResearchTaskSpec }
   | { ok: false; message: string };
-
-/** Same control-character policy as the review routes' `cleanText`. */
-function stripControls(value: string): string {
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
-}
 
 function plainObject(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

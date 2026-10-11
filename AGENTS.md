@@ -9,3 +9,4 @@
 - Author public examples from synthetic or clearly licensed materials. User research belongs in an authorized local workspace excluded from Git.
 - Keep docs concise and update the shared contract before independent renderers. Format changes must not create new facts.
 - Use python3 scripts/check_design.py for this baseline. Runtime and model evaluations are separate and must be reported honestly.
+- After a committed local Web change, use the single-instance release manager in docs/local-service.md; read back the Tailscale health, release revision and entry assets before claiming the change is available. Update the existing Notion project workspace with actual verified state. Keep annotation/evaluation tools on demand and avoid starting another Web instance.
