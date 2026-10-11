@@ -13,6 +13,7 @@ import type {
   SourceKind
 } from '../shared/types.js';
 import { byId, clear, formatDate, formatDateTime, hostnameOf, make } from './dom.js';
+import { readableSourceText } from './source-text.js';
 
 export type SourceFilter = 'all' | 'profile' | 'work' | 'third_party' | 'excluded';
 
@@ -32,6 +33,7 @@ export interface SourceHandlers {
 
 export interface StageView {
   key: string;
+  observedSeq?: number;
   index: number;
   total: number;
   label: string;
@@ -137,14 +139,30 @@ export function renderReport(
       make('p', { className: 'review-flag', text: '服务重启，这份报告被标记为中断，可以手动重试。' })
     );
   }
-  if (view.identity.status !== 'resolved' && view.identity.note) {
+  if (view.identity.status !== 'resolved' && view.identity.note && !['queued','researching'].includes(view.state)) {
     header.appendChild(make('p', { className: 'identity-note', text: view.identity.note }));
   } else if (view.identity.profileUrl) {
-    header.appendChild(make('p', { className: 'identity-note', text: '基于该账号及本次读取的公开资料。' }));
+    header.appendChild(make('p', { className: 'identity-note', text: '基于本次选定范围内已读取的公开资料。' }));
   }
   container.appendChild(header);
   if (view.answer.length === 0 && (view.state === 'queued' || view.state === 'researching')) {
-    container.appendChild(make('p', { className: 'reading-arrival', text: '正在核对人物线索。找到的资料会逐步出现在这里。' }));
+    container.appendChild(make('p', { className: 'reading-arrival', text: view.state==='queued'?'研究已排队。开始后，找到的资料会逐步出现在这里。':'正在核对人物线索。找到的资料会逐步出现在这里。' }));
+  }
+
+  const hasAnswer = view.answer.some(section => section.body.trim() || section.bullets.length > 0);
+  if (!hasAnswer && view.observations.length === 0 && !['queued', 'researching', 'needs_input'].includes(view.state)) {
+    const incomplete = make('section', { className: 'report-section report-incomplete' });
+    incomplete.appendChild(make('h3', { text: '还没有可核对的结论' }));
+    const retained = view.sources.filter(source => !source.excluded && source.fetchStatus === 'ok');
+    incomplete.appendChild(make('p', { text: retained.length > 0
+      ? `已保留 ${retained.length} 个来源，但这次研究未形成有依据的结论。可以先查看已取得的材料。`
+      : '这次研究尚未取得足够的公开材料。可以从更多菜单重试，或新建研究补充一个公开主页。' }));
+    if (view.limitations.length > 0) {
+      const gaps=make('details',{className:'report-incomplete-gaps'});gaps.appendChild(make('summary',{text:`查看未完成原因与限制（${view.limitations.length}）`}));
+      const list=make('ul',{});for(const gap of view.limitations)list.appendChild(make('li',{text:gap}));gaps.appendChild(list);incomplete.appendChild(gaps);
+    }
+    for (const source of retained.slice(0, 6)) incomplete.appendChild(citationButton(source.sourceKey, `retained-${source.sourceKey}`, source.title, handlers));
+    container.appendChild(incomplete);
   }
 
   view.answer.forEach((section, sectionIndex) => {
@@ -171,6 +189,15 @@ export function renderReport(
     container.appendChild(sectionEl);
   });
 
+  if (view.research?.accountMaterials?.length) {
+    const section=make('section',{className:'report-section report-account-materials'});
+    section.append(make('h3',{text:'独立账号的原文片段'}),make('p',{className:'limit-note',text:'以下是所选账号的原文材料，未独立核实内容，也未并入人物结论。'}));
+    for(const [index,material] of view.research.accountMaterials.entries()){
+      const quote=make('blockquote',{text:readableSourceText(material.quote)});
+      quote.appendChild(citationButton(material.sourceKey,`account-material-${index}`,material.sourceUrl,handlers));section.appendChild(quote);
+    }
+    container.appendChild(section);
+  }
   if (view.observations.length > 0) {
     const details = make('details', { className: 'report-observations' });
     details.open = observationsOpen;
@@ -339,7 +366,10 @@ export function renderSourceDetail(
   if (source.excerpt) {
     const quote = make('div', { className: 'source-quote' });
     quote.appendChild(make('span', { className: 'source-label', text: source.excerptLocator ?? '原文摘录' }));
-    quote.appendChild(make('p', { text: source.excerpt }));
+    quote.appendChild(make('p', { text: readableSourceText(source.excerpt) }));
+    if (/<[^>]*>|&(?:[a-z]+|#x?[0-9a-f]+);/i.test(source.excerpt)) {
+      const original=make('details',{className:'source-original'});original.appendChild(make('summary',{text:'查看原始文本（含标记）'}));original.appendChild(make('pre',{text:source.excerpt}));quote.appendChild(original);
+    }
     container.appendChild(quote);
   } else {
     container.appendChild(make('p', { className: 'source-placeholder', text: '这份来源没有可用于展示的短摘录。' }));
@@ -356,7 +386,7 @@ export function renderSourceDetail(
   list.appendChild(detailRow('发表时间', formatDate(source.publishedAt)));
   list.appendChild(detailRow('获取时间', formatDateTime(source.retrievedAt)));
   list.appendChild(
-    detailRow('身份归属', source.identityConfirmed ? '已确认（种子账号）' : '未确认，不合并同名')
+    detailRow('身份归属', source.identityConfirmed ? '已确认（种子账号）' : source.identityLabel || '未确认，不合并同名')
   );
   list.appendChild(
     detailRow(
@@ -413,6 +443,7 @@ export function stagesFromEvents(events: RunEventRecord[]): StageView[] {
     total = Math.max(total, typeof payload.total === 'number' ? payload.total : 0);
     map.set(payload.key, {
       key: payload.key,
+      observedSeq: event.seq,
       index: typeof payload.index === 'number' ? payload.index : 0,
       total: typeof payload.total === 'number' ? payload.total : total,
       label: typeof payload.label === 'string' ? payload.label : payload.key,
@@ -438,15 +469,17 @@ export function renderActivity(
   const total = stages[0]?.total ?? 0;
   const done = stages.filter((stage) => stage.status === 'done').length;
   const running = state === 'researching' || state === 'queued';
+  const currentStage = running ? stages.filter(stage=>stage.status==='active').reduce<StageView|undefined>((latest,stage)=>!latest||(stage.observedSeq??stage.index)>=(latest.observedSeq??latest.index)?stage:latest,undefined) : undefined;
   if (stages.length === 0) {
     list.appendChild(make('p', { className: 'stage-empty', text: '还没有可观察的研究步骤。' }));
   } else {
     for (const stage of stages) {
       const item = make('div', { className: 'stage-item enter' });
-      item.dataset.status = stage.status;
+      const isRecord = openEnded && stage.status === 'active' && stage !== currentStage;
+      item.dataset.status = isRecord ? 'record' : stage.status;
       item.appendChild(make('span', { className: 'stage-index', text: String(stage.index + 1).padStart(2, '0') }));
       item.appendChild(make('span', { className: 'stage-label', text: stage.label }));
-      item.appendChild(make('span', { className: 'stage-tag', text: openEnded && !running && stage.status === 'active' ? '过程记录' : STAGE_TAGS[stage.status] }));
+      item.appendChild(make('span', { className: 'stage-tag', text: isRecord ? '过程记录' : STAGE_TAGS[stage.status] }));
       if (stage.detail) item.appendChild(make('span', { className: 'stage-detail', text: stage.detail }));
       list.appendChild(item);
     }
@@ -458,7 +491,7 @@ export function renderActivity(
   progressBar.setAttribute('aria-valuenow', String(done));
   progressBar.setAttribute('aria-valuetext', `${done} / ${total || 0} 步已完成`);
   progressText.textContent = openEnded ? `${stages.length} 条过程记录` : `${done} / ${total || 0}`;
-  activityState.textContent = running ? [...stages].reverse().find((stage) => stage.status === 'active')?.label ?? stateLabel(state) : stateLabel(state);
+  activityState.textContent = running ? currentStage?.label ?? stateLabel(state) : stateLabel(state);
   indicator.hidden = !running;
 }
 

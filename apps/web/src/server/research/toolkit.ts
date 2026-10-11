@@ -1,9 +1,14 @@
+import { pacedFirecrawl } from './provider-gate.js';
 import { isIP } from 'node:net';
+import { createHash } from 'node:crypto';
 import { extractGitHubHandle, isPrivateHost, sanitizeText } from '../../shared/validation.js';
+import { classifyFirstStepUrl } from '../../shared/first-step-discovery.js';
+import { extractOriginalLinkContexts, nativeProfileLinkContext, nativeUsernameLinkContext } from './link-context.js';
 import { asArray, asNumber, asRecord, asString, safeFetchJson } from '../adapters/http.js';
 import { ProviderError } from '../adapters/types.js';
 import type { HttpRequestInit } from '../adapters/types.js';
-import type { ResearchAccount, ResearchPage, ResearchToolAction, ResearchToolResult, ResearchTools, ResearchToolsOptions } from './tool-contracts.js';
+import type { ResearchAccount, ResearchAliasProof, ResearchLinkContext, ResearchPage, ResearchToolAction, ResearchToolResult, ResearchTools, ResearchToolsOptions } from './tool-contracts.js';
+import type { NativeWebsiteDeclaration } from '../../shared/native-website.js';
 
 const TEXT_LIMIT = 6000;
 const LINK_LIMIT = 100;
@@ -24,11 +29,114 @@ function publicUrl(raw: unknown): string {
   url.hash = '';
   return url.href;
 }
+
+/** Parse a namespace without creating transport permission from a different protocol. */
+function nativeWebsiteDeclaration(account: ResearchAccount, requestedUrl: string, payloadField: 'blog' | 'website', rawLiteral: string, original: string, fieldOffset: number): NativeWebsiteDeclaration {
+  let protocol: NativeWebsiteDeclaration['protocol'] = 'invalid', declaredUrl: string | null = null, publicHttpsUrl: string | null = null;
+  const raw = rawLiteral.trim();
+  try {
+    if (raw.length > 2048 || /[\u0000-\u0020\u007f\\]/.test(raw)) throw new Error('invalid declaration');
+    const candidateProtocol = /^https:\/\//i.test(raw) ? 'https' : /^http:\/\//i.test(raw) ? 'http' : !/^[a-z][a-z0-9+.-]*:/i.test(raw) ? 'protocol_less' : 'invalid';
+    if (candidateProtocol === 'invalid' || candidateProtocol === 'protocol_less' && /^(?:\/(?!\/)|[?#])/.test(raw)) throw new Error('invalid declaration');
+    const parsed = new URL(candidateProtocol === 'protocol_less' ? (raw.startsWith('//') ? `https:${raw}` : `https://${raw}`) : raw);
+    // Validate public namespace using the existing HTTPS validator, locally.
+    // This temporary validation URL is never returned as an HTTP self-link.
+    const checked = new URL(parsed.href); checked.protocol = 'https:';
+    publicUrl(checked.href);
+    protocol = candidateProtocol;
+    declaredUrl = candidateProtocol === 'protocol_less' ? `//${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}` : parsed.href;
+    if (candidateProtocol === 'https') publicHttpsUrl = publicUrl(raw);
+  } catch { /* Preserve the raw declaration, including rejected private/invalid namespaces. */ }
+  return {platform:account.platform,nativeId:account.id,requestedUrl,returnedProfileUrl:account.profileUrl,payloadField,rawLiteral,fieldOffset,
+    sourceContentHash:createHash('sha256').update(original).digest('hex'),protocol,declaredUrl,publicHttpsUrl};
+}
+
+/** Re-check adapter metadata against the actual request and original field; no new IO. */
+export function verifiedNativeAccountRequest(page:ResearchPage,action:ResearchToolAction):boolean {
+  const account=page.account;
+  if(!account||page.retrieval!=='profile'||page.kind!=='profile'||account.profileUrl!==page.url||
+    typeof account.id!=='string'||!/^\d+$/.test(account.id)||typeof account.handle!=='string'||
+    !['github','x'].includes(account.platform)||action.type!==(account.platform==='github'?'github_profile':'social_profile'))return false;
+  try{
+    const requested=account.platform==='github'?extractGitHubHandle(publicUrl(action.url)):xHandle(action.url);
+    const returned=account.platform==='github'?extractGitHubHandle(publicUrl(page.url)):xHandle(page.url);
+    return Boolean(requested&&returned&&requested.toLowerCase()===account.handle.toLowerCase()&&returned===account.handle);
+  }catch{return false;}
+}
+
+export function verifiedNativeWebsiteDeclaration(page:ResearchPage,action:ResearchToolAction):NativeWebsiteDeclaration|null {
+  const declaration=page.nativeWebsiteDeclaration,account=page.account;
+  if(!declaration||!account||!verifiedNativeAccountRequest(page,action)||action.type==='search'||page.retrieval!=='profile'||page.kind!=='profile'||account.profileUrl!==page.url||
+    typeof account.id!=='string'||!/^\d+$/.test(account.id)||declaration.platform!==account.platform||declaration.nativeId!==account.id||
+    declaration.requestedUrl!==action.url||declaration.returnedProfileUrl!==page.url||
+    declaration.payloadField!==(account.platform==='github'?'blog':'website')||action.type!==(account.platform==='github'?'github_profile':'social_profile')||
+    typeof declaration.rawLiteral!=='string'||!Number.isInteger(declaration.fieldOffset)||declaration.fieldOffset<0||
+    page.text.slice(declaration.fieldOffset,declaration.fieldOffset+declaration.rawLiteral.length)!==declaration.rawLiteral) return null;
+  try {
+    const remainder=page.text.slice(declaration.fieldOffset+declaration.rawLiteral.length);
+    if(remainder&&!(account.platform==='github'&&/^\ntwitter_username: [A-Za-z0-9_]{1,15}$/.test(remainder)&&page.linkContexts?.some(context=>context.nativeField?.name==='twitter_username'&&context.nativeField.offset===page.text.length-remainder.length+1&&verifiedNativeFieldContext(page,context,null))))return null;
+    const requestedHandle=account.platform==='github'?extractGitHubHandle(publicUrl(action.url)):xHandle(action.url);
+    const returnedHandle=account.platform==='github'?extractGitHubHandle(publicUrl(page.url)):xHandle(page.url);
+    if(!requestedHandle||!returnedHandle||requestedHandle.toLowerCase()!==account.handle.toLowerCase()||returnedHandle!==account.handle) return null;
+    const expected=nativeWebsiteDeclaration(account,action.url,declaration.payloadField,declaration.rawLiteral,page.text,declaration.fieldOffset);
+    return (Object.keys(expected) as Array<keyof NativeWebsiteDeclaration>).every(key=>declaration[key]===expected[key])?declaration:null;
+  } catch {return null;}
+}
+
+/** Website proof cannot come from HTTP text or a biography occurrence. */
+export function verifiedNativeFieldContext(page:ResearchPage,context:ResearchLinkContext,declaration:NativeWebsiteDeclaration|null):boolean {
+  if(context.binding!=='native_profile_field')return true;
+  const field=context.nativeField;
+  if(field?.name==='twitter_username'){
+    const match=context.quote.match(/^twitter_username: ([A-Za-z0-9_]{1,15})$/);
+    if(!match||page.account?.platform!=='github'||field.nativeId!==page.account.id||field.offset!==page.text.length-context.quote.length)return false;
+    const expected=nativeUsernameLinkContext(page.text,match[1]!,`https://x.com/${match[1]}`,field.offset);
+    return Boolean(expected&&context.url===expected.url&&context.locator===expected.locator&&context.surface===expected.surface);
+  }
+  if(page.nativeWebsiteDeclaration){
+    if(!declaration?.publicHttpsUrl||!field||field.name!==declaration.payloadField||field.nativeId!==declaration.nativeId||field.offset!==declaration.fieldOffset)return false;
+    const expected=nativeProfileLinkContext(page.text,declaration.rawLiteral,declaration.fieldOffset);
+    return Boolean(expected&&context.quote===declaration.rawLiteral&&context.url===declaration.publicHttpsUrl&&context.locator===expected.locator&&context.surface===expected.surface);
+  }
+  // Old real receipts remain unassessed; their URL field still cannot state
+  // HTTP while claiming to have observed HTTPS. Historical rows aren't edited.
+  if(field)return false;
+  const twitter=context.quote.match(/^twitter_username: ([A-Za-z0-9_]{1,15})$/);
+  if(twitter)return page.account?.platform==='github'&&context.url===`https://x.com/${twitter[1]}`;
+  try{return publicUrl(context.quote.trim())===context.url;}catch{return false;}
+}
+
+/** Record field offsets during assembly; duplicate strings in biography are not field locators. */
+function assembleProfile(prefix: Array<string | null>, website: string | null, suffix?: string | null): {content:string;websiteOffset:number;suffixOffset:number} {
+  let content = prefix.filter(Boolean).join('\n');
+  const append = (value: string | null | undefined): number => {
+    if (!value) return -1;
+    if (content) content += '\n';
+    const offset = content.length; content += value; return offset;
+  };
+  const websiteOffset = append(website), suffixOffset = append(suffix);
+  return {content,websiteOffset,suffixOffset};
+}
+
+/** A provider-native organization marker is account metadata, never personal authorship. */
+export function verifiedNativeAccountKind(page:ResearchPage,action:ResearchToolAction):'person'|'organization'|null {
+ const kind=page.nativeKindDeclaration;
+ if(!kind||kind.platform!=='github'||!['User','Organization'].includes(kind.type)||!verifiedNativeAccountRequest(page,action)||
+   action.type!=='github_profile'||kind.nativeId!==page.account?.id||kind.requestedUrl!==action.url||kind.returnedUrl!==page.url||
+   kind.sourceContentHash!==createHash('sha256').update(page.text).digest('hex'))return null;
+ return kind.type==='Organization'?'organization':'person';
+}
+
+function nativeName(account:ResearchAccount,requestedUrl:string,raw:unknown,original:string):ResearchPage['nativeNameDeclaration'] {
+  if(typeof raw!=='string'||!raw.trim()||raw!==text(raw,200)||original.slice(0,raw.length)!==raw)return undefined;
+  return {platform:account.platform,nativeId:account.id,requestedUrl,returnedProfileUrl:account.profileUrl,payloadField:'name',rawLiteral:raw,fieldOffset:0,sourceContentHash:createHash('sha256').update(original).digest('hex')};
+}
 function comparable(url: string): string { const parsed = new URL(publicUrl(url)); parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/'; return parsed.href; }
 function isXHost(host: string): boolean { return host === 'x.com' || host.endsWith('.x.com') || host === 'twitter.com' || host.endsWith('.twitter.com'); }
 function ordinaryUrl(raw: unknown): string { const url = publicUrl(raw); if (/\.pdf(?:$|\/)/i.test(new URL(url).pathname)) fail('这里只读取普通网页，不转换 PDF 文档。'); if (isXHost(new URL(url).hostname)) fail('X 资料须通过公开账号工具读取，不能使用网页摘要路线。'); return url; }
 function linksFrom(rawText: string, extra: unknown[] = [], base?: string): string[] {
   const values: unknown[] = [...extra];
+  if (base) values.push(...extractOriginalLinkContexts(rawText, base).map(link => link.url));
   // Extract discovery links before clipping the retained text. Never execute source instructions.
   values.push(...(rawText.match(/https:\/\/[^\s<>"'\]）)]+/g) ?? []).map(value => value.replace(/[.,;。；]+$/, '')));
   for (const match of rawText.matchAll(/\[[^\]\n]*\]\(<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\)/g)) values.push(match[1]);
@@ -61,8 +169,12 @@ function text(raw: unknown, max = TEXT_LIMIT): string { return sanitizeText(raw,
 /** Original text keeps everything a provider supplied; HTTP bytes stay bounded. */
 function retainText(raw: unknown): string { return sanitizeText(raw, Number.MAX_SAFE_INTEGER); }
 function profileKind(url: string): ResearchPage['kind'] {
-  const parsed = new URL(url);
-  if (extractGitHubHandle(url) || (X_HOSTS.has(parsed.hostname) && /^\/[A-Za-z0-9_]{1,15}\/?$/.test(parsed.pathname)) || /(^|\.)linkedin\.com$/.test(parsed.hostname) && /^\/in\/[^/]+\/?$/.test(parsed.pathname) || /^\/(?:about|bio|profile)\/?$/i.test(parsed.pathname)) return 'profile';
+  // Shared first-step classification replaces the old profile whitelist: a
+  // personal-site root, video channel, publication or academic profile is a
+  // profile instead of being dropped as third-party. Content pages stay
+  // third-party.
+  const classified = classifyFirstStepUrl(url);
+  if (classified.ok && classified.ref.entry === 'profile') return 'profile';
   return 'third_party';
 }
 function result(pages: ResearchPage[], bytes: number, estimatedUsd: number | null, credits: number | null = null, limitations: string[] = [], nextCursor?: string | null): ResearchToolResult {
@@ -76,6 +188,27 @@ function xHandle(raw: string): string {
   return handle;
 }
 function decimalId(raw: unknown): string | null { return typeof raw === 'string' && /^[0-9]+$/.test(raw) ? raw : null; }
+/**
+ * Strictly eligible same-document alias: the ACTUAL final URL differs from the
+ * requested one only in the www/apex host prefix with EXACTLY the same
+ * pathname+query, and BOTH sides classify as profile entries. Arbitrary paths,
+ * subdomains, domains and non-profile pages never attest an alias; a missing
+ * final URL is never invented.
+ */
+function sameDocumentAliasProof(requested: string, finalUrl: string): ResearchAliasProof | null {
+  if (requested === finalUrl) return null;
+  let a: URL; let b: URL;
+  try { a = new URL(requested); b = new URL(finalUrl); } catch { return null; }
+  const baseA = a.hostname.replace(/^www\./, '');
+  const baseB = b.hostname.replace(/^www\./, '');
+  if (baseA !== baseB || a.hostname === b.hostname) return null;
+  if (a.hostname !== `www.${b.hostname}` && b.hostname !== `www.${a.hostname}`) return null;
+  if (a.pathname !== b.pathname || a.search !== b.search) return null;
+  const source = classifyFirstStepUrl(requested);
+  const returned = classifyFirstStepUrl(finalUrl);
+  if (!source.ok || !returned.ok || source.ref.entry !== 'profile' || returned.ref.entry !== 'profile') return null;
+  return { kind: 'same_document_redirect', requestedUrl: requested, returnedUrl: finalUrl };
+}
 function xAccount(raw: unknown, requestedHandle: string): { data: Record<string, unknown>; account: ResearchAccount } {
   const data = asRecord(raw);
   const handle = asString(data.profile);
@@ -100,15 +233,27 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const query = searching ? action.query.trim() : '';
     if (searching && (!query || query.length > 600)) fail('搜索内容为空或过长。');
     const requested = action.type === 'read' ? publicUrl(action.url) : null;
+    // Search result counts are configurable (first-step wide recall); the
+    // historical default of 5 stays for every caller that does not ask.
+    const searchCount = action.type === 'search' ? Math.min(25, Math.max(1, Math.trunc(action.numResults ?? 5))) : 5;
     // Original contents requests must not fix maxCharacters: the toolkit keeps
     // all supplied text and any provider/HTTP truncation is an explicit gap.
-    const payload = searching ? { query, numResults: 5, contents: { text: { maxCharacters: TEXT_LIMIT }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: true, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
+    // Keep href + original context together. An extras link index alone cannot
+    // establish ownership. includeHtmlTags is a documented Exa text option.
+    const domains = action.type === 'search' ? action.includeDomains : undefined;
+    if (domains && (domains.length < 1 || domains.length > 12 || domains.some(domain => !/^[a-z0-9.-]+$/i.test(domain) || !domain.includes('.') || isPrivateHost(domain) || isIP(domain) !== 0))) fail('检索平台过滤范围无效。');
+    const payload = searching ? { query, numResults: searchCount, ...(domains ? { includeDomains: [...domains] } : {}), contents: { text: { maxCharacters: TEXT_LIMIT, includeHtmlTags: true }, extras: { links: LINK_LIMIT } } } : { urls: [requested], text: { includeHtmlTags: true }, extras: { links: LINK_LIMIT }, maxAgeHours: 24, subpages: 0, livecrawlTimeout: Math.min(10_000, options.timeoutMs) };
     const { body, bytes } = await request(`https://api.exa.ai/${searching ? 'search' : 'contents'}`, { method: 'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json' }, body: JSON.stringify(payload) }, signal);
     if (!Array.isArray(body.results)) fail('网页供应商返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
-    for (const raw of asArray(body.results).slice(0, searching ? 5 : 1)) {
+    let excludedSearchResults = 0;
+    for (const raw of asArray(body.results).slice(0, searching ? searchCount : 1)) {
       const item = asRecord(raw);
-      const url = publicUrl(item.url);
+      let url: string;
+      try { url = publicUrl(item.url); } catch (error) {
+        if (!searching) throw error;
+        excludedSearchResults++; continue;
+      }
       if (requested && comparable(url) !== comparable(requested)) fail('返回网页与请求地址不匹配。');
       if (requested) {
         const status = asArray(body.statuses).map(asRecord).find(s => typeof s.id === 'string' && (s.id === item.id || s.id === item.url || s.id === requested));
@@ -118,22 +263,39 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
       // Discovery snippets stay bounded; original contents retain all supplied
       // text. Bounded truncation is an explicit gap, never completed content.
       const content = searching ? text(rawContent, TEXT_LIMIT) : retainText(rawContent);
-      if (!content) { if (requested) fail('请求网页没有可用正文。'); else continue; }
+      if (!content && requested) fail('请求网页没有可用正文。');
       const author = text(item.author, 160);
       const limitations = ['网页内容仍需核对人物归属；同名不代表同一人。'];
+      if (searching && !content) limitations.push('仅返回公开搜索入口；供应商未提供摘要正文，不作原文证据。');
       if (author) limitations.push(`页面返回的作者署名：${author}；尚未独立核实。`);
       const truncated = searching && rawContent.length > TEXT_LIMIT;
       if (truncated) limitations.push(`供应商正文为有界读取，最多保留 ${TEXT_LIMIT} 个字符；后续正文是缺口，不能当作完整原文。`);
       else if (!searching) limitations.push('本次读取未指定供应商正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。');
-      pages.push({ url, title: text(item.title, 200) || url, text: content, kind: profileKind(url), publishedAt: asString(item.publishedDate), author: author || null, retrieval: searching ? 'search' : 'read', textTruncated: truncated, links: linksFrom(rawContent, asArray(asRecord(item.extras).links), url), limitations: [...limitations, '自链仅作发现线索；供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整，不自动确认身份或历史完整。'] });
+      const extras = asRecord(item.extras);
+      const extraLinks = [...asArray(extras.links), ...asArray(extras.richLinks).map(link => asRecord(link).url)];
+      pages.push({ url, ...(!searching && requested ? {documentBinding:{requestedUrl:requested,returnedUrl:url}} : {}), title: text(item.title, 200) || url, text: content, kind: profileKind(url), publishedAt: asString(item.publishedDate), author: author || null, retrieval: searching ? 'search' : 'read', textTruncated: truncated, links: linksFrom(rawContent, extraLinks, url), linkContexts: extractOriginalLinkContexts(content, url), limitations: [...limitations, '自链仅作发现线索；供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整，不自动确认身份或历史完整。'] });
     }
     if (requested && pages.length !== 1) fail('请求网页没有返回对应正文。');
-    return {...result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。']),...(!searching?{coverageGaps:['供应商未证明整页正文与出站链接提取完整。']}: {})};
+    return {...result(pages, bytes, estimate(asRecord(body.costDollars).total), null, ['网页费用为供应商估算，并非最终账单。', ...(excludedSearchResults > 0 ? [`${String(excludedSearchResults)} 条不安全或非 HTTPS 搜索地址已排除；其余实际安全结果保留，未发起被排除地址的读取。`] : [])]),...(!searching?{coverageGaps:['供应商未证明整页正文与出站链接提取完整。']}: {})};
+  }
+  async function blueskySearch(action:Extract<ResearchToolAction,{type:'search'}>,signal:AbortSignal):Promise<ResearchToolResult> {
+    const query=action.query.trim();if(!query||query.length>600)fail('公开账号检索内容为空或过长。');
+    const limit=Math.min(25,Math.max(1,Math.trunc(action.numResults??12)));
+    const {body,bytes}=await request(`https://public.api.bsky.app/xrpc/app.bsky.actor.searchActors?q=${encodeURIComponent(query)}&limit=${limit}`,{},signal);
+    if(!Array.isArray(body.actors))fail('Bluesky 搜索返回了不支持的数据结构。');
+    const pages:ResearchPage[]=[];
+    for(const raw of body.actors.slice(0,limit)){
+      const actor=asRecord(raw),handle=asString(actor.handle),did=asString(actor.did);
+      if(!handle||!/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z][a-zA-Z0-9-]{1,62}$/.test(handle)||!did?.startsWith('did:'))continue;
+      const url=`https://bsky.app/profile/${handle}`;
+      pages.push({url,title:text(actor.displayName,200)||handle,text:[asString(actor.displayName),asString(actor.description)].filter(Boolean).join('\n'),kind:'profile',retrieval:'search',publishedAt:null,links:[],limitations:['Bluesky 公共账号搜索入口；尚未回读，姓名和搜索排序不能证明跨平台归属。']});
+    }
+    return result(pages,bytes,0,null,['Bluesky 公共 AppView，无额外 API 付费；仅读取当前候选页，不声明索引完整。'],asString(body.cursor));
   }
   async function firecrawl(urlInput: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const url = ordinaryUrl(urlInput);
     const apiKey = key(options.firecrawlApiKey, '网页');
-    const { body, bytes } = await request('https://api.firecrawl.dev/v2/scrape', { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown'], parsers: [], onlyMainContent: true, onlyCleanContent: false, timeout: Math.min(30_000, options.timeoutMs), skipTlsVerification: false }) }, signal);
+    const { body, bytes } = await pacedFirecrawl(options.transport, signal, Number.isFinite(options.firecrawlIntervalMs) ? Math.max(0, options.firecrawlIntervalMs!) : 6100, () => request('https://api.firecrawl.dev/v2/scrape', { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ url, formats: ['markdown', 'html'], parsers: [], onlyMainContent: false, onlyCleanContent: false, timeout: Math.min(30_000, options.timeoutMs), skipTlsVerification: false }) }, signal));
     const data = asRecord(body.data); const metadata = asRecord(data.metadata);
     if (body.success !== true || metadata.statusCode !== 200 || metadata.error) fail('目标网页未成功返回公开正文。');
     const contentType = asString(metadata.contentType) ?? asString(metadata.mimeType) ?? asString(metadata['content-type']);
@@ -142,10 +304,15 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (comparable(sourceUrl) !== comparable(url)) fail('抓取来源与请求地址不匹配。');
     const canonicalHost = (value: string) => new URL(value).hostname.replace(/^www\./, '');
     if (canonicalHost(finalUrl) !== canonicalHost(url)) fail('网页跳转到了其他网站，未采用返回资料。');
-    const rawContent = asString(data.markdown) ?? '';
+    // All content belongs to the observed final URL. Only a strictly eligible
+    // same-document www/apex redirect may additionally carry an alias proof.
+    const aliasProof = sameDocumentAliasProof(url, finalUrl);
+    // Preserve provider-supplied HTML hrefs and their real surrounding spans.
+    // Markdown remains the fallback; never reconstruct anchors from a link index.
+    const rawContent = asString(data.html) || asString(data.markdown) || '';
     const content = retainText(rawContent); if (!content) fail('目标网页没有可用正文。');
     const limitations = ['网页原文仍需核对人物归属。', `请求地址：${sourceUrl}`, `最终地址：${finalUrl}`, '本次读取未指定正文截断上限，返回正文是否完整无法确认；未见部分仍是缺口。'];
-    return result([{ url: sourceUrl, title: text(metadata.title, 200) || sourceUrl, text: content, kind: profileKind(sourceUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], sourceUrl), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
+    return result([{ url: finalUrl, documentBinding: { requestedUrl: url, returnedUrl: finalUrl }, title: text(metadata.title, 200) || finalUrl, text: content, kind: profileKind(finalUrl), publishedAt: null, retrieval: 'read', author: asString(metadata.author), textTruncated: false, links: linksFrom(rawContent, [finalUrl], finalUrl), linkContexts: extractOriginalLinkContexts(content, finalUrl), ...(aliasProof ? { aliasProof } : {}), limitations: [...limitations, '供应商补充索引请求 100 条，正文自链保留全部，索引未保证完整自链，不代表完整索引。'] }], bytes, null, estimate(metadata.creditsUsed), ['费用按返回的 credits 记录，美元成本未确认。']);
   }
   async function social(type: 'social_profile' | 'social_posts', url: string, signal: AbortSignal): Promise<ResearchToolResult> {
     const handle = xHandle(url); const apiKey = key(options.tikhubApiKey, '公开账号');
@@ -159,8 +326,16 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     if (type === 'social_posts' && data.status !== 'ok') fail('公开帖子没有返回成功的读取状态。');
     const target = xAccount(type === 'social_profile' ? data : data.user, handle);
     if (type === 'social_profile') {
-      const content = [text(target.data.name, 200), retainText(target.data.desc), asString(target.data.website)].filter(Boolean).join('\n');
-      return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [target.data.website]), limitations: ['账号资料是账号自述；不自动证明跨平台身份。'] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
+      const website = typeof target.data.website === 'string' && target.data.website.trim() ? target.data.website : null;
+      const {content,websiteOffset} = assembleProfile([text(target.data.name, 200), retainText(target.data.desc)], website);
+      const nameDeclaration=nativeName(target.account,url,target.data.name,content);
+      const declaration = website ? nativeWebsiteDeclaration(target.account,url,'website',website,content,websiteOffset) : null;
+      const context = declaration?.publicHttpsUrl ? nativeProfileLinkContext(content, website!, websiteOffset) : null;
+      if (context) {context.url = declaration!.publicHttpsUrl!;context.nativeField={name:'website',offset:websiteOffset,nativeId:target.account.id};}
+      // The requested-vs-returned handle and the stable native id are already
+      // verified above: this proof is the only attestation of a case alias.
+      const aliasProof: ResearchAliasProof = { kind: 'native_profile', platform: 'x', nativeId: target.account.id, requestedUrl: url, returnedUrl: target.account.profileUrl };
+      return result([{ url: target.account.profileUrl, title: text(target.data.name, 200) || handle, text: content || `公开账号 @${handle}`, kind: 'profile', retrieval: 'profile', author: target.account.handle, publishedAt: null, account: target.account, links: linksFrom(content, [declaration?.publicHttpsUrl]), linkContexts: context ? [context] : [], ...(declaration ? {nativeWebsiteDeclaration:declaration} : {}), ...(nameDeclaration?{nativeNameDeclaration:nameDeclaration}:{}), aliasProof, limitations: ['账号资料是账号自述；不自动证明跨平台身份。', ...(declaration && declaration.protocol !== 'https' ? ['网站字段为原始声明；未取得可派发的安全 HTTPS 自链，不推定协议等价或账号归属。'] : [])] }], bytes, .001, null, ['账号读取费用按目录价估算，并非最终账单。']);
     }
     if (!Array.isArray(data.timeline)) fail('公开帖子返回了不支持的数据结构。');
     const pages: ResearchPage[] = [];
@@ -189,14 +364,29 @@ export function createResearchTools(options: ResearchToolsOptions): ResearchTool
     const login = asString(body.login); const returnedUrl = publicUrl(body.html_url);
     const id = decimalId(body.id) ?? (typeof body.id === 'number' && Number.isSafeInteger(body.id) && body.id >= 0 ? String(body.id) : null);
     if (!login || login.toLowerCase() !== handle.toLowerCase() || !id || comparable(returnedUrl).toLowerCase() !== comparable(url).toLowerCase()) fail('返回的 GitHub 账号与请求不匹配。');
-    const content = [text(body.name, 200), retainText(body.bio), text(body.company, 200), asString(body.blog)].filter(Boolean).join('\n');
+    const twitter = asString(body.twitter_username);
+    const twitterUsername = twitter && /^[A-Za-z0-9_]{1,15}$/.test(twitter) ? twitter : null;
     const account: ResearchAccount = { platform: 'github', handle: login, id, profileUrl: returnedUrl };
-    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: content || `GitHub 公开账号 ${login}`, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, links: linksFrom(content, [body.blog]), limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。'] }], bytes, 0);
+    const website = typeof body.blog === 'string' && body.blog.trim() ? body.blog : null;
+    const {content,websiteOffset,suffixOffset} = assembleProfile([text(body.name, 200), retainText(body.bio), text(body.company, 200)], website, twitterUsername ? `twitter_username: ${twitterUsername}` : null);
+    const retainedContent=content || `GitHub 公开账号 ${login}`;
+    const nativeKindDeclaration: ResearchPage['nativeKindDeclaration'] = body.type === 'User' || body.type === 'Organization'
+      ? {platform:'github',type:body.type,nativeId:id,requestedUrl:raw,returnedUrl,sourceContentHash:createHash('sha256').update(retainedContent).digest('hex')} : undefined;
+    const nameDeclaration=nativeName(account,raw,body.name,content);
+    // The requested-vs-returned handle and the stable native id are already
+    // verified above: this proof is the only attestation of a case alias.
+    const aliasProof: ResearchAliasProof = { kind: 'native_profile', platform: 'github', nativeId: id, requestedUrl: raw, returnedUrl };
+    const declaration = website ? nativeWebsiteDeclaration(account,raw,'blog',website,content,websiteOffset) : null;
+    const context = declaration?.publicHttpsUrl ? nativeProfileLinkContext(content, website!, websiteOffset) : null;
+    if (context) {context.url = declaration!.publicHttpsUrl!;context.nativeField={name:'blog',offset:websiteOffset,nativeId:id};}
+    const twitterContext=twitterUsername?nativeUsernameLinkContext(content,twitterUsername,`https://x.com/${twitterUsername}`,suffixOffset):null;
+    if(twitterContext)twitterContext.nativeField={name:'twitter_username',offset:suffixOffset,nativeId:id};
+    return result([{ url: returnedUrl, title: text(body.name, 200) || login, text: retainedContent, kind: 'profile', retrieval: 'profile', author: login, publishedAt: null, account, ...(nativeKindDeclaration?{nativeKindDeclaration}:{}), links: linksFrom(content, [declaration?.publicHttpsUrl, twitterUsername ? `https://x.com/${twitterUsername}` : null]), linkContexts: [context,twitterContext].filter((item): item is NonNullable<typeof item> => item !== null), ...(declaration ? {nativeWebsiteDeclaration:declaration} : {}), ...(nameDeclaration?{nativeNameDeclaration:nameDeclaration}:{}), aliasProof, limitations: ['公开账号资料为自述；仓库和跨平台身份尚未核实。', ...(declaration && declaration.protocol !== 'https' ? ['网站字段为原始声明；未取得可派发的安全 HTTPS 自链，不推定协议等价或账号归属。'] : [])] }], bytes, 0);
   }
   return { async execute(action, signal) {
     signal.throwIfAborted();
     switch (action.type) {
-      case 'search': return exa(action, signal);
+      case 'search': return action.provider==='bluesky'?blueskySearch(action,signal):exa(action, signal);
       case 'read': return exa({ type: 'read', url: action.url }, signal);
       case 'firecrawl': return firecrawl(action.url, signal);
       case 'social_profile': case 'social_posts': return social(action.type, action.url, signal);

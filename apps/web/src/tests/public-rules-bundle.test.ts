@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,7 +149,7 @@ test(
       bundleCounts: { sourceRows: number; loaded: number; excluded: number };
     };
     assert.ok(
-      result.dataDir.startsWith(copyRoot),
+      realpathSync(result.dataDir).startsWith(realpathSync(copyRoot)),
       `production must read bundled rules inside the copied build, got ${result.dataDir}`
     );
     assert.equal(result.bundleCounts.sourceRows, 6923);

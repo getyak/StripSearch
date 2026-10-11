@@ -21,6 +21,7 @@ import type { Auth } from '../auth.js';
 import { HttpError } from '../http/errors.js';
 import { requireUser } from '../http/middleware.js';
 import type { Runner } from '../services/runner.js';
+import type { FirstStepStore } from '../research/first-step-store.js';
 import type { RunRecord, Store } from '../store.js';
 import { fingerprintInput, normalizeProvider } from '../util/fingerprint.js';
 
@@ -30,6 +31,8 @@ export interface RunRouteDeps {
   auth: Auth;
   exaConfigured: boolean;
   researchConfigured?: boolean;
+  /** When present, fresh research runs default to the new first-step flow. */
+  firstStep?: FirstStepStore | null;
 }
 
 function readBody(req: Request): Record<string, unknown> {
@@ -78,7 +81,6 @@ function lookupIdempotent(
 
 export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
   const { store, runner, auth, exaConfigured, researchConfigured } = deps;
-
   router.post('/runs', (req: Request, res: Response) => {
     const user = requireUser(res);
     const body = readBody(req);
@@ -120,6 +122,20 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     if (parentRunId && !store.getRunForOwner(parentRunId, user.id)) {
       throw new HttpError(404, 'parent_not_found', '未找到父研究。');
     }
+    // A follow-up always needs a valid owned parent; the orphan followup flag
+    // can never bypass the first-step scope flow.
+    if (followup && !parentRunId) {
+      throw new HttpError(400, 'invalid_parent', '追问必须指定已完成范围确认的父研究。');
+    }
+    if (parentRunId && followup) {
+      const parent = store.getRunForOwner(parentRunId, user.id)!;
+      if ((parent.provider !== 'research' && parent.provider !== 'exa') || parent.provider !== provider) {
+        throw new HttpError(409, 'invalid_parent_provider', '追问必须沿用父研究的研究方式。');
+      }
+    }
+    if (parentRunId && followup && deps.firstStep?.link(parentRunId) && !deps.firstStep?.selectionBinding(parentRunId)) {
+      throw new HttpError(409, 'parent_scope_not_frozen', '父研究尚未确认研究范围，无法追问。');
+    }
     if (retryOf && !store.getRunForOwner(retryOf, user.id)) {
       throw new HttpError(404, 'retry_source_not_found', '未找到要重试的研究。');
     }
@@ -151,6 +167,17 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
       idempotencyKey,
       bodyFingerprint: fingerprint
     });
+    // Fresh production research runs default to the new first-step flow. A
+    // follow-up of a first-step parent INHERITS its frozen scope (no repeat
+    // confirmation, no widening); a legacy parent keeps the frozen controller
+    // semantics, and historical runs simply have no link.
+    if (provider === 'research' && deps.firstStep) {
+      if (followup && parentRunId && deps.firstStep.link(parentRunId)) {
+        deps.firstStep.inheritFirstStepScope(user.id, run, parentRunId);
+      } else if (!followup) {
+        deps.firstStep.attachRun({ id: run.id, ownerId: user.id, question }, question);
+      }
+    }
     if (idempotencyKey) store.recordIdempotencyKey(user.id, idempotencyKey, fingerprint, run.id);
     store.addEvent(run.id, 'state', { state: 'queued' });
     runner.recordStart(user.id);
@@ -283,6 +310,11 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     const run = store.getRunForOwner(String(req.params.id), user.id);
     if (!run) throw new HttpError(404, 'run_not_found', '未找到该研究。');
     if (run.state !== 'needs_input') throw new HttpError(409, 'run_not_waiting', '该研究不在等待补充信息状态。');
+    // A first-step run waits for the atomic scope confirmation: the legacy
+    // single-candidate resume can never bypass the batch selection.
+    if (deps.firstStep?.link(run.id)) {
+      throw new HttpError(409, 'first_step_selection_required', '该研究需通过第一步范围确认提交，请使用 /first-step/selection。');
+    }
     let seedUrl: string | null = null;
     if (run.provider === 'research') {
       if (!researchConfigured) throw new HttpError(409, 'provider_unavailable', '人物研究服务尚未配置。');
@@ -354,6 +386,10 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
       idempotencyKey,
       bodyFingerprint: fingerprint
     });
+    if (parent.provider === 'research' && deps.firstStep?.link(parent.id)) {
+      if (deps.firstStep.selectionBinding(parent.id)) deps.firstStep.inheritFirstStepScope(user.id, run, parent.id);
+      else deps.firstStep.attachRun(run, parent.question);
+    }
     if (idempotencyKey) store.recordIdempotencyKey(user.id, idempotencyKey, fingerprint, run.id);
     store.addEvent(run.id, 'state', { state: 'queued', retryOf: parent.id });
     runner.recordStart(user.id);
@@ -380,6 +416,12 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     const questionCheck = validateQuestion(question);
     if (!questionCheck.ok) {
       throw new HttpError(400, 'invalid_question', questionCheck.error ?? '追问内容无效。');
+    }
+    // A first-step parent must have its scope frozen before any follow-up; the
+    // child then inherits that scope instead of silently re-reading anything.
+    const parentFirstStep = deps.firstStep?.link(parent.id);
+    if (parentFirstStep && !deps.firstStep?.selectionBinding(parent.id)) {
+      throw new HttpError(409, 'parent_scope_not_frozen', '父研究尚未确认研究范围，无法追问。');
     }
     const screen = screenQuestion(question);
     if (screen.disallowed) {
@@ -415,6 +457,9 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
       idempotencyKey,
       bodyFingerprint: fingerprint
     });
+    if (parent.provider === 'research' && deps.firstStep && parentFirstStep) {
+      deps.firstStep.inheritFirstStepScope(user.id, run, parent.id);
+    }
     if (idempotencyKey) store.recordIdempotencyKey(user.id, idempotencyKey, fingerprint, run.id);
     store.addEvent(run.id, 'state', { state: 'queued', parentRunId: parent.id });
     runner.recordStart(user.id);
