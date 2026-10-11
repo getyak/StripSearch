@@ -60,6 +60,8 @@ StripSearch 是一个以身份核验和证据追溯为核心的人物研究 Web 
 
 官网与工作台共用 `apps/web`，采用 Nginx HTTPS + 单实例 Node / SQLite 部署。容器、持久化、注册控制、备份与回滚步骤见[部署说明](docs/deployment.md)。代码与容器检查不等于线上验收；实际发布版本通过 `/release.json` 核对。
 
+本机采用[单实例服务与发布契约](docs/local-service.md)：统一更新命令构建指定提交、保留数据并自动校验 Tailscale 入口版本与资源；标注和评测工具默认按需启动。完成修改后必须核对运行版本并同步项目工作区记录。
+
 ## 核心设计
 
 ```mermaid
