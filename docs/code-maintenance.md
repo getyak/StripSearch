@@ -84,7 +84,15 @@
 
 ## 依赖
 
-`apps/web/package.json` 审计结论：**无可证明未使用的声明**。`better-call` 经 `server/http/middleware.ts` 的 `better-call/node` 在用；DSH、SQLite（better-sqlite3）、Chromium（playwright-core PDF）功能保留；不改任何版本、不动 `overrides`/`allowScripts`。依赖版本与 `package-lock.json` 不改；`npm test` 默认限制 2 并发，避免一次启动全部测试进程。
+`apps/web/package.json` 审计结论：**无可证明未使用的声明**。`better-call` 经 `server/http/middleware.ts` 的 `better-call/node` 在用；DSH、SQLite（better-sqlite3）、Chromium（playwright-core PDF）功能保留。`npm test` 默认限制 2 并发，避免一次启动全部测试进程。保留原有 `fflate` override 与 `allowScripts`，仅为下述已核实安全补丁调整版本和锁文件：
+
+| 告警 | 修复版本 | 范围与依据 |
+|---|---|---|
+| MCP OAuth 凭据 issuer 绑定 | v2 client/core/server `2.2.0`；兼容 probe 的 v1 SDK alias `1.31.0` | Web DSH 的 client 传递依赖采用精确 override，probe 直接依赖升级。[官方 advisory](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h)。本项目 stdio probe 不使用 OAuth；不删除应用认证数据或全局连接凭据。 |
+| sharp 的 librsvg 漏洞 | `sharp@0.35.5`（libvips `1.3.4`） | DSH 传递依赖精确 override；保留图片处理能力。[官方 advisory](https://github.com/lovell/sharp/security/advisories/GHSA-wq5f-xc86-pv6w)。 |
+| source-map-js 事件循环拒绝服务 | `1.2.2` | Web 构建与 design QA 精确 override。[官方发布](https://github.com/7rulnik/source-map-js/releases/tag/v1.2.2)。 |
+
+兼容 probe 只显式允许已使用的 `better-sqlite3@13.0.3` 安装脚本；依赖目录和复用符号链接均排除在 Git 外。三份锁文件仅变更这些包及对应平台二进制，依赖缓存与运行发布按新锁文件隔离；保留当前和必要回滚版本引用的旧缓存。
 
 ## 回归保护
 
