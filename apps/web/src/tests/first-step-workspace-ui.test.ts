@@ -108,6 +108,15 @@ test('one compact card per candidate holds button + provenance; provenance actio
     const panel = createFirstStepPanel({ api: panelApi(fixture), container, runId: fixture.run.id });
     await panel.refresh();
 
+    const progress = container.querySelector<HTMLElement>('nav.first-step-progress');
+    assert.equal(progress?.getAttribute('aria-label'), '研究进度');
+    assert.equal(progress?.querySelector('[aria-current="step"]')?.textContent, '确认研究范围');
+    assert.deepEqual(
+      [...(progress?.querySelectorAll('span') ?? [])].map((item) => item.textContent),
+      ['确认研究范围', '深入研究', '整理报告'],
+      'the path uses semantic stage names instead of decorative step numbers'
+    );
+
     // Combined card: exactly one article frame per candidate, holding BOTH the
     // aria-pressed choice button and the expandable provenance details.
     const cards = container.querySelectorAll('article.first-step-candidate');

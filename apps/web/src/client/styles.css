@@ -1061,19 +1061,16 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 /* ============ First step workspace (2026-10-12 Figma 251:4082 adaptation) ============ */
 /* Account-selection component adapted into the existing research shell: person
    candidates left, account cards right, fixed actions host. Grounded in the
-   archived 251-4085/4147/4316/4514/5520/5527/5473 sources (92px footer,
-   280px person column, 484x288 nominal cards, 24px gap). Paper/green palette
-   and semantic tokens; system CJK font fallback; no external fonts. */
+   archived 251-4085/4147/4316/4514/5520/5527/5473 sources. The product
+   adaptation uses denser decision units and an 80px control layer. */
 .first-step, .first-step-actions {
   --fs-card: var(--surface);
   --fs-card-border: #d6dfd8;
-  --fs-card-shadow: 0 4px 14px #172b240e;
   --fs-soft: #eaf1eb;
 }
 @media (prefers-color-scheme: dark) {
   .first-step, .first-step-actions {
     --fs-card-border: var(--border);
-    --fs-card-shadow: none;
     --fs-soft: var(--surface-2);
   }
 }
@@ -1094,7 +1091,7 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 .first-step-progress .current { color: var(--accent); }
 .first-step .muted { color: var(--muted); font-size: 13px; line-height: 20px; }
 
-/* Workspace: person/candidate column 280px + account grid (2 x 1fr, 24px gap). */
+/* Workspace: compact identity anchor + two-column account decisions. */
 .first-step-workspace { display: grid; grid-template-columns: 244px minmax(0, 1fr); gap: 32px; align-items: start; }
 .first-step-clusters { position: sticky; top: 16px; display: grid; gap: 10px; min-width: 0; }
 .first-step-clusters[data-single="true"] > h3 { display: none; }
@@ -1264,6 +1261,8 @@ body[data-view="home"] .footer-return { font-size: 13px; }
   .first-step { gap: 18px; }
   .work-body.choosing-target { padding: 24px 16px 32px; }
   .first-step h2 { font-size: 24px; line-height: 32px; }
+  .first-step-progress { overflow: hidden; white-space: nowrap; }
+  .first-step-progress span + span::before { width: 12px; margin-inline: 6px; }
   .first-step-card { padding: 16px; min-height: 0; }
   .first-step-card-head { gap: 12px; }
   .first-step-avatar { width: 42px; height: 42px; }
@@ -1272,6 +1271,9 @@ body[data-view="home"] .footer-return { font-size: 13px; }
   .first-step-watermark.wm-linkedin { height: 70px; }
   .first-step-candidate.chosen .first-step-cluster { padding: 16px 16px 12px; }
   .first-step-candidate.chosen .first-step-cluster-basis { padding: 0 16px 12px; }
+  .first-step-footer { column-gap: 12px; }
+}
+@media (max-width: 360px) {
   .first-step-footer { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "hint" "error" "notice" "action"; row-gap: 8px; }
   .first-step-primary { width: 100%; }
 }
@@ -1281,7 +1283,7 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 
 /* ============ App workspace chrome (app view only) ============ */
 /* Compact 52px brand/account bar without marketing navigation or the duplicate
-   saved-research action, full-viewport shell, 200px history rail and 56px
+   saved-research action, full-viewport shell, 216px history rail and 56px
    internal toolbar. Home/review/fetch keep their existing chrome. */
 body[data-view="app"] .site-nav { border-bottom-color: color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, var(--nav-bg) 92%, var(--surface)); }
 body[data-view="app"] .nav-inner { min-height: 52px; }
@@ -1301,6 +1303,8 @@ body[data-view="app"] .history-item { min-height: 56px; margin: 2px 6px; width: 
 body[data-view="app"] .history-item[aria-current="true"] { box-shadow: none; background: color-mix(in srgb, var(--accent-dark) 72%, var(--surface)); }
 @media (max-width: 640px) {
   body[data-view="app"] .app-shell, body[data-view="app"] .app-shell.inspector-collapsed { height: calc(100dvh - 53px); }
+  body[data-view="app"] .work-main:has(.work-body.choosing-target) #open-mobile-sources { display: none; }
+  body[data-view="app"] .work-main:has(.work-body.choosing-target) .work-actions { flex-wrap: nowrap; }
 }
 
 .first-step-original pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; font-size: .8rem; }
