@@ -1095,30 +1095,31 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 .first-step .muted { color: var(--muted); font-size: 13px; line-height: 20px; }
 
 /* Workspace: person/candidate column 280px + account grid (2 x 1fr, 24px gap). */
-.first-step-workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 24px; align-items: start; }
-.first-step-clusters { display: grid; gap: 12px; min-width: 0; }
+.first-step-workspace { display: grid; grid-template-columns: 244px minmax(0, 1fr); gap: 32px; align-items: start; }
+.first-step-clusters { position: sticky; top: 16px; display: grid; gap: 10px; min-width: 0; }
 .first-step-clusters[data-single="true"] > h3 { display: none; }
 .first-step-clusters[data-compact="true"] > .muted { margin: 0; }
 
 /* ONE compact card per competing candidate: button + provenance in one frame. */
 .first-step-candidate {
   display: grid; min-width: 0;
-  border: 1px solid var(--fs-card-border); border-radius: 16px;
-  background: var(--fs-card); box-shadow: var(--fs-card-shadow); overflow: hidden;
+  border: 1px solid var(--fs-card-border); border-radius: 12px;
+  background: color-mix(in srgb, var(--fs-card) 94%, var(--bg)); overflow: hidden;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out, transform 120ms ease-out;
 }
-.first-step-candidate.chosen { border-color: var(--accent); }
+.first-step-candidate.chosen { border-color: color-mix(in srgb, var(--accent) 34%, var(--fs-card-border)); background: color-mix(in srgb, var(--accent-dark) 42%, var(--fs-card)); box-shadow: inset 2px 0 0 var(--accent); }
 .first-step-cluster {
   display: grid; gap: 8px; width: 100%; min-width: 0;
   padding: 16px; border: 0; background: transparent;
   color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
-.first-step-candidate.chosen .first-step-cluster { gap: 12px; padding: 24px 24px 16px; }
+.first-step-candidate.chosen .first-step-cluster { gap: 8px; padding: 16px 16px 12px; }
 .first-step-cluster-titles { display: grid; gap: 4px; min-width: 0; }
 .first-step-cluster-titles strong { font-size: 18px; line-height: 28px; font-weight: 600; overflow-wrap: anywhere; }
-.first-step-candidate.chosen .first-step-cluster-titles strong { font-size: 24px; line-height: 34px; }
-.first-step-person-ref { display: grid; gap: 12px; }
-.first-step-person-image { width: min(232px, 100%); aspect-ratio: 1; border-radius: 12px; background: var(--fs-soft); display: grid; place-items: center; }
-.first-step-person-image span { color: var(--muted); font-size: 40px; line-height: 1; font-weight: 500; }
+.first-step-candidate.chosen .first-step-cluster-titles strong { font-size: 20px; line-height: 28px; letter-spacing: -.02em; }
+.first-step-person-ref { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; align-items: center; margin-bottom: 2px; }
+.first-step-person-image { width: 44px; height: 44px; border-radius: 10px; background: var(--fs-soft); display: grid; place-items: center; }
+.first-step-person-image span { color: var(--accent); font-size: 18px; line-height: 1; font-weight: 650; }
 .first-step-person-caption { margin: 0; color: var(--muted); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 .first-step-choice-tag { justify-self: start; color: var(--accent); font-size: 13px; line-height: 20px; font-weight: 600; }
 .first-step-cluster-anchor { min-width: 0; color: var(--accent); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
@@ -1128,10 +1129,10 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 .first-step-cluster:not(.chosen) .first-step-lead { -webkit-line-clamp: 2; }
 .first-step-cluster .first-step-lead-source { display: block; color: var(--muted); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
 .first-step-conflict { color: var(--danger); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
-.first-step-cluster-basis { margin: 0; padding: 0 16px 12px; border: 0; border-top: 1px solid var(--fs-card-border); font-size: 13px; line-height: 20px; }
-.first-step-candidate.chosen .first-step-cluster-basis { padding: 0 24px 16px; }
+.first-step-cluster-basis { margin: 0; padding: 0 16px 8px; border: 0; border-top: 1px solid color-mix(in srgb, var(--fs-card-border) 72%, transparent); font-size: 13px; line-height: 20px; }
+.first-step-candidate.chosen .first-step-cluster-basis { padding: 0 16px 8px; }
 .first-step-cluster-basis summary { cursor: pointer; color: var(--accent); min-height: 44px; align-content: center; }
-.first-step-other-people { border: 1px dashed var(--fs-card-border); border-radius: 16px; padding: 0 16px 12px; font-size: 13px; line-height: 20px; }
+.first-step-other-people { border: 0; border-radius: 10px; padding: 0 12px 8px; background: color-mix(in srgb, var(--surface-2) 60%, transparent); font-size: 13px; line-height: 20px; }
 .first-step-other-people summary { cursor: pointer; color: var(--muted); min-height: 44px; align-content: center; }
 .first-step-other-people > .first-step-candidate { margin-top: 8px; box-shadow: none; }
 
@@ -1245,9 +1246,7 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 
 @media (max-width: 1100px) {
   .first-step-workspace { grid-template-columns: minmax(0, 1fr); }
-  .first-step-person-ref { grid-template-columns: 64px minmax(0, 1fr); align-items: center; }
-  .first-step-person-image { width: 64px; height: 64px; }
-  .first-step-person-image span { font-size: 28px; }
+  .first-step-clusters { position: static; }
 }
 @media (max-width: 860px) {
   .first-step-cards { grid-template-columns: minmax(0, 1fr); }
@@ -1259,9 +1258,7 @@ body[data-view="home"] .footer-return { font-size: 13px; }
   .first-step-card { padding: 16px; min-height: 0; }
   .first-step-card-head { gap: 12px; }
   .first-step-avatar { width: 48px; height: 48px; }
-  .first-step-person-ref { grid-template-columns: 48px minmax(0, 1fr); align-items: center; }
-  .first-step-person-image { width: 48px; height: 48px; }
-  .first-step-person-image span { font-size: 20px; }
+  .first-step-person-ref { grid-template-columns: 44px minmax(0, 1fr); }
   .first-step-watermark { width: 96px; height: 96px; top: 12px; right: 12px; }
   .first-step-watermark.wm-linkedin { height: 99px; }
   .first-step-candidate.chosen .first-step-cluster { padding: 16px 16px 12px; }

@@ -260,12 +260,12 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         on: { click: chooseCandidate }
       });
       const titles = make('div', { className: 'first-step-cluster-titles' });
-      if (chosen && !compact) {
+      if (chosen) {
         // Person reference (runtime carries no verified avatar URL): a paper
         // monogram block with an honest "头像尚未取得" note — never a photo.
         const reference = make('div', { className: 'first-step-person-ref' });
         reference.appendChild(make('div', { className: 'first-step-person-image', attrs: { 'aria-hidden': 'true' }, children: [make('span', { text: monogramOf(cluster.displayName) })] }));
-        reference.appendChild(make('p', { className: 'first-step-person-caption', text: `人物参照 · ${shortUrl(cluster.anchorUrl) || cluster.anchorLabel} · 头像尚未取得` }));
+        reference.appendChild(make('p', { className: 'first-step-person-caption', text: `人物参照 · ${shortUrl(cluster.anchorUrl) || cluster.anchorLabel}` }));
         titles.appendChild(reference);
       }
       titles.appendChild(make('strong', { text: cluster.displayName }));
