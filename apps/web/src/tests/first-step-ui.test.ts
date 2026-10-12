@@ -101,7 +101,7 @@ test('real GET/POST integration: render, choose one scope confirmation, fetch st
   checkboxes[0]!.click();
   const primary2 = container.querySelector<HTMLButtonElement>('.first-step-primary')!;
   assert.equal(primary2.disabled, false);
-  assert.match(primary2.textContent ?? '', /研究已选 1 个账号/);
+  assert.match(primary2.textContent ?? '', /继续研究（1 个账号）/, 'the action keeps the visible selection count');
 
   // Evidence details carry real source metadata and never toggle selection.
   const before = panel.draft().get([...panel.draft().keys()][0]!)!.selection;

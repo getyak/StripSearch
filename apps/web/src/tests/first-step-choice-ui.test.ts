@@ -289,13 +289,17 @@ test('literal name matches lead the visible choices while unrelated page titles 
     const other=main.querySelector<HTMLDetailsElement>('.first-step-other-people')!;
     assert.equal(other.open,false);
     assert.match(other.querySelector('.first-step-cluster')!.textContent??'',/Lantern Compiler Data Services/);
-    assert.equal([...main.children].filter(child=>child.matches('button.first-step-cluster')).length,1);
-    assert.match(main.querySelector(':scope > button.first-step-cluster')!.textContent??'',/Lin Zhou/);
+    // Candidates are compact articles (button + provenance in one card); the
+    // promoted candidate sits directly in the column, not in the collapsed others.
+    assert.equal([...main.children].filter(child=>child.matches('article.first-step-candidate')).length,1);
+    assert.match(main.querySelector(':scope > article.first-step-candidate > button.first-step-cluster')!.textContent??'',/Lin Zhou/);
     assert.equal(panel.selectedCount(),0);
     assert.deepEqual(posted,[]);
     other.open=true;
     other.querySelector<HTMLButtonElement>('.first-step-cluster')!.click();
-    assert.match(container.querySelector('.first-step-clusters > button.first-step-cluster.chosen')!.textContent??'',/Lantern Compiler Data Services/);
+    const chosenButton=container.querySelector('.first-step-clusters > article.first-step-candidate.chosen > button.first-step-cluster')!;
+    assert.match(chosenButton.textContent??'',/Lantern Compiler Data Services/);
+    assert.equal(chosenButton.getAttribute('aria-pressed'),'true');
     assert.equal(fixture.firstStep.selectionBinding(fixture.run.id),null);
   } finally {panel.destroy();fixture.db.close();container.remove();}
 });

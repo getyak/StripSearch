@@ -253,7 +253,13 @@
                 <div id="chat-log" class="chat-log" aria-live="polite"></div>
               </div>
 
-              <div class="chat-dock">
+              <!-- First-step confirmation/actions host: OUTSIDE the scrollable
+                   work-body so the count/error/submit controls stay reachable
+                   with many candidate cards or expanded evidence. Filled and
+                   cleared by createFirstStepPanel via its footerContainer. -->
+              <div class="first-step-actions" id="first-step-actions" hidden></div>
+
+              <div class="chat-dock" id="chat-dock">
                 <div class="followup-rail" id="followup-rail" hidden></div>
                 <form class="chat-form" id="chat-form">
                   <label class="sr-only" for="chat-input">追问</label>

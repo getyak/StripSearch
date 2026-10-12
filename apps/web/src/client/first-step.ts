@@ -45,6 +45,13 @@ export interface FirstStepPanelDeps {
   api: FirstStepPanelApi;
   container: HTMLElement;
   runId: string;
+  /**
+   * Optional dedicated actions host OUTSIDE the scrollable work body. When
+   * given, the confirmation footer (count, errors, primary action) renders
+   * there so it stays reachable with many cards or expanded evidence. Other
+   * callers keep the in-panel footer unchanged.
+   */
+  footerContainer?: HTMLElement;
   /** Owner isolates optional local input drafts; the server remains authority. */
   ownerId?: string;
   /** Called after a successful submit so the host can refresh the run view. */
@@ -170,11 +177,23 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     return initial;
   };
 
+  /** Supplied Figma platform assets (emblem 18px / watermark 128px slots). */
+  const PLATFORM_ICONS: Readonly<Record<string, string>> = { github: 'github', x: 'x', youtube: 'youtube', bilibili: 'bilibili' };
+  const PLATFORM_WATERMARKS: Readonly<Record<string, string>> = { github: 'github', x: 'x', personal_site: 'website', youtube: 'youtube', bilibili: 'bilibili', linkedin: 'linkedin' };
+
+  const monogramOf = (name: string): string => ([...name.trim()][0] ?? '·').toLocaleUpperCase();
+
   const render = (): void => {
     if (destroyed) return;
     const root = deps.container;
+    const footerHost = deps.footerContainer ?? null;
     const active = root.ownerDocument.activeElement as HTMLElement | null;
-    const focusKey = active && root.contains(active) ? active.dataset.focusKey : null;
+    const inPanel = (node: Node | null): boolean => Boolean(node && (root.contains(node) || footerHost?.contains(node)));
+    const focusKey = active && inPanel(active) ? active.dataset.focusKey : null;
+    const focusables = (): HTMLElement[] => [
+      ...root.querySelectorAll<HTMLElement>('[data-focus-key]'),
+      ...(footerHost ? [...footerHost.querySelectorAll<HTMLElement>('[data-focus-key]')] : [])
+    ];
     const scroller = root.closest<HTMLElement>('.work-body');
     const scrollTop = scroller?.scrollTop;
     const openKeys = new Set([...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map(el => el.dataset.detailKey));
@@ -182,19 +201,28 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     if (previousHint) hintDraft = previousHint.value;
     persistDraft();
     clear(root);
+    if (footerHost) clear(footerHost);
     root.className = 'first-step';
     if (!view) {
       root.appendChild(make('p', { className: 'first-step-status', text: status === 'loading' ? '正在读取发现结果…' : status }));
       return;
     }
     const intro = make('header', { className: 'first-step-intro' });
-    intro.append(make('p', {className:'first-step-eyebrow', text:'01 确认目标   ·   02 深入研究   ·   03 整理报告'}),
-      make('h2', {text:'确认人物与公开账号'}),
-      make('p', {text:'核对归属后，深入研究你选中的范围。'}));
+    const progress = make('nav', { className: 'first-step-progress', attrs: { 'aria-label': '研究进度' } });
+    progress.append(
+      make('span', { className: 'current', text: '确认研究范围', attrs: { 'aria-current': 'step' } }),
+      make('span', { text: '深入研究' }),
+      make('span', { text: '整理报告' })
+    );
+    intro.append(progress,
+      make('h2', {text: clusterId === null && view.clusters.length > 1 ? '先确认目标人物' : '选择要了解的公开账号'}),
+      make('p', {text: clusterId === null && view.clusters.length > 1 ? '先核对人物，再决定本轮研究哪些公开账号。' : '核对归属与出处，选择本轮研究范围。'}));
     root.appendChild(intro);
-    // Person cluster choice.
-    const clusterBox = make('section', { className: 'first-step-clusters', attrs: { 'aria-label': '人物候选', 'data-single':view.clusters.length === 1 ? 'true' : 'false' } });
-    clusterBox.appendChild(make('h3', { text: '确认目标人物' }));
+
+    // Person choice (left) and account choice (right) in one workspace.
+    const workspace = make('section', { className: 'first-step-workspace' });
+    const peopleBox = make('section', { className: 'first-step-clusters', attrs: { 'aria-label': '目标人物候选', 'data-single': view.clusters.length === 1 ? 'true' : 'false' } });
+    peopleBox.appendChild(make('h3', { text: '确认目标人物' }));
     const linkedChoices = view.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0 && clusterFitsInput(cluster, view!));
     const recommendedOnly = linkedChoices.length === 1 && clusterId === linkedChoices[0]!.clusterId;
     const matchingClusters = view.clusters.filter(cluster => clusterFitsInput(cluster, view!));
@@ -203,37 +231,53 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const otherCount = view.clusters.filter(cluster => !prominentIds.has(cluster.clusterId)).length;
     const others = make('details', {className:'first-step-other-people', attrs:{'data-detail-key':'other-people'}});
     others.appendChild(make('summary', {text:`其它人物或主页线索（${String(otherCount)}）`}));
-    clusterBox.dataset.single = recommendedOnly || view.clusters.length === 1 ? 'true' : 'false';
-    clusterBox.dataset.compact = clusterId !== null ? 'true' : 'false';
-    if (recommendedOnly&&otherCount>0) clusterBox.appendChild(make('p',{className:'muted',text:'建议目标 · 可展开其它候选更换；点击继续才会提交。'}));
+    peopleBox.dataset.single = recommendedOnly || view.clusters.length === 1 ? 'true' : 'false';
+    peopleBox.dataset.compact = clusterId !== null ? 'true' : 'false';
+    if (recommendedOnly&&otherCount>0) peopleBox.appendChild(make('p',{className:'muted',text:'建议目标 · 可展开其它候选更换；点击继续才会提交。'}));
     for (const cluster of view.clusters) {
-      const destination = prominentIds.has(cluster.clusterId) ? clusterBox : others;
+      const destination = prominentIds.has(cluster.clusterId) ? peopleBox : others;
       const chosen = clusterId === cluster.clusterId;
       const compact = recommendedOnly && chosen;
+      const chooseCandidate = (): void => {
+        clusterId = cluster.clusterId;
+        // Changing the person cannot grant reading a different person's accounts.
+        let removed = 0;
+        for (const [id, decision] of draft) {
+          if (decision.selection === 'selected' && !cluster.accountIds.includes(id)) { decision.selection = 'not_selected'; removed++; }
+        }
+        selectionNotice = removed > 0 ? `已更换目标，移除 ${String(removed)} 个不属于此分组的账号选择。独立账号范围仍保留。` : '';
+        render();
+      };
+      // ONE compact card per competing candidate: the choice button and its
+      // expandable provenance share a single frame — never a double border box.
+      const candidate = make('article', {
+        className: `first-step-candidate${chosen ? ' chosen' : ''}`,
+        attrs: { 'aria-label': `${cluster.displayName} · 人物候选` }
+      });
       const button = make('button', {
         className: `first-step-cluster${chosen ? ' chosen' : ''}`,
         attrs: { type: 'button', 'aria-pressed': chosen ? 'true' : 'false', 'data-focus-key': `cluster-${cluster.clusterId}` },
-        on: {
-          click: () => {
-            clusterId = cluster.clusterId;
-            // Changing the person cannot grant reading a different person's accounts.
-            let removed = 0;
-            for (const [id, decision] of draft) {
-              if (decision.selection === 'selected' && !cluster.accountIds.includes(id)) { decision.selection = 'not_selected'; removed++; }
-            }
-            selectionNotice = removed > 0 ? `已更换目标，移除 ${String(removed)} 个不属于此分组的账号选择。独立账号范围仍保留。` : '';
-            render();
-          }
-        }
+        on: { click: chooseCandidate }
       });
-      button.append(
-        make('strong', { text: cluster.displayName }),
-        make('span', { className: 'first-step-cluster-anchor', text: shortUrl(cluster.anchorUrl) || cluster.anchorLabel }),
+      const titles = make('div', { className: 'first-step-cluster-titles' });
+      if (chosen) {
+        // Person reference (runtime carries no verified avatar URL): a paper
+        // monogram block with an honest "头像尚未取得" note — never a photo.
+        const reference = make('div', { className: 'first-step-person-ref' });
+        reference.appendChild(make('div', { className: 'first-step-person-image', attrs: { 'aria-hidden': 'true' }, children: [make('span', { text: monogramOf(cluster.displayName) })] }));
+        reference.appendChild(make('p', { className: 'first-step-person-caption', text: `人物参照 · ${shortUrl(cluster.anchorUrl) || cluster.anchorLabel}` }));
+        titles.appendChild(reference);
+      }
+      titles.appendChild(make('strong', { text: cluster.displayName }));
+      titles.appendChild(make('span', { className: 'first-step-choice-tag', text: chosen ? '已选择为目标' : '选择此候选' }));
+      titles.appendChild(make('span', { className: 'first-step-cluster-anchor', text: shortUrl(cluster.anchorUrl) || cluster.anchorLabel }));
+      titles.appendChild(
         make('span', {
           className: `first-step-cluster-linkage${cluster.linkage === 'unconfirmed' ? ' uncertain' : ''}`,
           text: cluster.linkage === 'unconfirmed' ? '未确认候选 · 同名不合并' : '有公开原文链接依据'
         })
       );
+      button.appendChild(titles);
       // Grounded concise descriptor: plain statement text with its real source
       // label — never a raw URL dump, and never discarded just because the
       // source URL exists beside the summary.
@@ -250,7 +294,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       if (cluster.conflicts.length > 0) {
         button.appendChild(make('small', { className: 'first-step-conflict', text: cluster.conflicts.join('；') }));
       }
-      destination.appendChild(button);
+      candidate.appendChild(button);
       // Inspectable linkage basis and descriptor sources: exact spans of the
       // retained originals, rendered as escaped plain text (source HTML never
       // executes) while the original stays inspectable.
@@ -273,31 +317,21 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         basisList.appendChild(make('p', { className: 'muted', text: '暂无可展示的原文依据；这只是候选线索。' }));
       }
       basis.appendChild(basisList);
-      destination.appendChild(basis);
+      candidate.appendChild(basis);
+      // Clicking the card body chooses this candidate; provenance/evidence
+      // actions inside the details never change the selection.
+      candidate.addEventListener('click', (event) => {
+        const target = event.target as HTMLElement | null;
+        if (target && target.closest('button, a, input, summary, details, label')) return;
+        chooseCandidate();
+      });
+      destination.appendChild(candidate);
     }
-    if (otherCount > 0) clusterBox.appendChild(others);
+    if (otherCount > 0) peopleBox.appendChild(others);
     if (view.clusters.length === 0) {
-      clusterBox.appendChild(make('p', { className: 'muted', text: '暂未辨识出可确认的人物；可以补充一个公开主页或区分线索。' }));
+      peopleBox.appendChild(make('p', { className: 'muted', text: '暂未辨识出可确认的人物；可以补充一个公开主页或区分线索。' }));
     }
-    root.appendChild(clusterBox);
-
-    // Discovery status and honest gaps.
-    const statusBox = make('section', { className: 'first-step-status-box', attrs: { 'aria-label': '发现状态' } });
-    statusBox.appendChild(
-      make('p', {
-        className: 'first-step-status',
-        text: view.readyForChoice ? `找到 ${String(view.accounts.length)} 个公开入口 · 请核对后选择` : '正在寻找公开主页与跨平台线索…'
-      })
-    );
-    if (view.gaps.length > 0) {
-      const details = make('details', { className: 'first-step-gaps', attrs: {'data-detail-key':'gaps'} });
-      details.appendChild(make('summary', { text: `发现边界与缺口（${String(view.gaps.length)}）` }));
-      const list = make('ul', {});
-      for (const gap of view.gaps.slice(0, 12)) list.appendChild(make('li', { text: gap }));
-      details.appendChild(list);
-      statusBox.appendChild(details);
-    }
-    root.appendChild(statusBox);
+    workspace.appendChild(peopleBox);
 
     // Account cards: the chosen person's accounts are the main choices;
     // unconfirmed/unrelated leads live in a clearly labeled COLLAPSED secondary
@@ -308,6 +342,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         ? chosen.accountIds.includes(account.accountId)
         : account.identity.state === 'supported' || account.defaultSuggestion.suggested);
     const mainAccounts = view.accounts.filter(inMain);
+    workspace.dataset.choosingPerson = chosen === null && view.clusters.length > 0 && mainAccounts.length === 0 ? 'true' : 'false';
     const otherLinkedAccounts = chosen === null ? [] : view.accounts.filter(account => personal(account) && !inMain(account) && account.identity.state === 'supported' && !account.requiresIndependentScope);
     const otherLinkedIds = new Set(otherLinkedAccounts.map(account => account.accountId));
     const namedLabels = new Map<string,string>();
@@ -326,7 +361,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const linkedLeadIds=new Set(linkedLeads.map(account=>account.accountId));
     const organizationAccounts=view.accounts.filter(account=>!personal(account));
     const secondaryAccounts = view.accounts.filter((account) => personal(account)&&!inMain(account)&&!namedIds.has(account.accountId)&&!linkedLeadIds.has(account.accountId)&&!otherLinkedIds.has(account.accountId));
-    const cardsBox = make('section', { className: 'first-step-accounts', attrs: { 'aria-label': '公开账号候选' } });
+    const cardsBox = make('section', { className: 'first-step-accounts', attrs: { 'aria-label': '选择研究账号' } });
+    cardsBox.appendChild(make('h3', { className: chosen ? 'sr-only' : '', text: '选择研究账号' }));
     if (mainAccounts.length === 0 && view.clusters.length > 0) {
       cardsBox.appendChild(make('p', { className: 'muted', text: '请先确认目标人物；这个人的公开账号会显示在这里。' }));
     }
@@ -379,7 +415,26 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       }
       cardsBox.appendChild(secondary);
     }
-    root.appendChild(cardsBox);
+    workspace.appendChild(cardsBox);
+    root.appendChild(workspace);
+
+    // Discovery status and honest gaps.
+    const statusBox = make('section', { className: 'first-step-status-box', attrs: { 'aria-label': '发现状态' } });
+    statusBox.appendChild(
+      make('p', {
+        className: 'first-step-status',
+        text: view.readyForChoice ? `找到 ${String(view.accounts.length)} 个公开入口 · 请核对后选择` : '正在寻找公开主页与跨平台线索…'
+      })
+    );
+    if (view.gaps.length > 0) {
+      const details = make('details', { className: 'first-step-gaps', attrs: {'data-detail-key':'gaps'} });
+      details.appendChild(make('summary', { text: `发现边界与缺口（${String(view.gaps.length)}）` }));
+      const list = make('ul', {});
+      for (const gap of view.gaps.slice(0, 12)) list.appendChild(make('li', { text: gap }));
+      details.appendChild(list);
+      statusBox.appendChild(details);
+    }
+    root.appendChild(statusBox);
 
     // Secondary actions: manual clue / continue search.
     const secondary = make('details', { className: 'first-step-secondary', attrs: {'data-detail-key':'hint'} });
@@ -440,7 +495,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     if (selectionNotice) footer.appendChild(make('p', { className: 'muted first-step-selection-notice', text: selectionNotice, attrs: { role: 'status' } }));
     const primary = make('button', {
       className: 'button primary first-step-primary',
-      text: count > 0 ? `确认目标，研究已选 ${String(count)} 个账号` : '确认目标，研究已选账号',
+      text: count > 0 ? `继续研究（${String(count)} 个账号）` : '继续研究',
       attrs: { type: 'button', 'data-focus-key':'submit' },
       on: {
         click: () => {
@@ -454,12 +509,12 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     if (count === 0) {
       footer.appendChild(make('p', { className: 'muted', text: '请至少选择一个账号；不确定的账号可选“仅研究这个公开账号”。' }));
     }
-    root.appendChild(footer);
+    (footerHost ?? root).appendChild(footer);
     for (const details of root.querySelectorAll<HTMLDetailsElement>('details')) {
       if (openKeys.has(details.dataset.detailKey)) details.open = true;
     }
     if (focusKey) {
-      const replacement = [...root.querySelectorAll<HTMLElement>('[data-focus-key]')].find(el => el.dataset.focusKey === focusKey);
+      const replacement = focusables().find(el => el.dataset.focusKey === focusKey);
       replacement?.focus({preventScroll:true});
     }
     if (scroller && scrollTop !== undefined) scroller.scrollTop = scrollTop;
@@ -498,8 +553,11 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     const mayJoinPerson=Boolean(personCluster?.accountIds.includes(account.accountId))&&validateSelectionDecision(account,{accountId:account.accountId,selection:'selected',excluded:false},{anchorAccountIds:ownAnchor?new Set([account.accountId]):new Set()}).ok;
     const requiresIndependentScope = account.accountKind==='organization' || !mayJoinPerson;
     const checked = decision.selection === 'selected' || decision.selection === 'only_this_account';
-    const card = make('div', {
-      className: `first-step-card${checked ? ' checked' : ''}${decision.excluded ? ' excluded' : ''}`
+    const iconKey = PLATFORM_ICONS[account.platform];
+    const watermarkKey = PLATFORM_WATERMARKS[account.platform];
+    const card = make('article', {
+      className: `first-step-card${checked ? ' checked' : ''}${decision.excluded ? ' excluded' : ''}`,
+      attrs: { 'data-platform': account.platform }
     });
     const applyChecked = (next: boolean): void => {
       if (decision.excluded) return;
@@ -511,7 +569,45 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       render();
     };
     const toggle = (): void => applyChecked(!checked);
-    const top = make('div', { className: 'first-step-card-top' });
+    // Card head uses a neutral monogram because the runtime has no verified
+    // avatar URL. It never invents or implies an identity photo.
+    const head = make('div', { className: 'first-step-card-head' });
+    head.appendChild(make('div', { className: 'first-step-avatar', attrs: { 'aria-hidden': 'true' }, children: [make('span', { text: monogramOf(account.displayName || account.handle || account.platformLabel) })] }));
+    const titles = make('div', { className: 'first-step-card-titles' });
+    const platformLine = make('p', { className: 'first-step-platform' });
+    if (iconKey) {
+      platformLine.appendChild(make('span', { className: `first-step-platform-icon icon-${iconKey}`, attrs: { 'aria-hidden': 'true' } }));
+    } else if (account.platform === 'personal_site') {
+      platformLine.appendChild(make('span', { className: 'first-step-platform-icon icon-link', text: '↗', attrs: { 'aria-hidden': 'true' } }));
+    }
+    platformLine.appendChild(make('span', { text: account.platformLabel }));
+    titles.append(platformLine, make('p', { className: 'first-step-name', text: account.displayName || account.handle || accountLabel }));
+    head.appendChild(titles);
+    card.appendChild(head);
+    if (watermarkKey) card.appendChild(make('span', { className: `first-step-watermark wm-${watermarkKey}`, attrs: { 'aria-hidden': 'true' } }));
+    card.appendChild(make('p', { className: 'first-step-handle', text: accountLabel }));
+    if(matchedTitle)card.appendChild(make('p',{className:'first-step-value',text:`匹配的主页标题：${matchedTitle}；归属未确认。`}));
+    card.appendChild(make('p', { className: 'first-step-value', text: account.researchSummary }));
+
+    // Attribution row: quiet compact state tag plus the grounded reason; the
+    // full basis, quotes and counterevidence stay in the card disclosure.
+    const attribution = make('p', { className: 'first-step-attribution' });
+    attribution.appendChild(make('span', {
+      className: `first-step-badge${account.identity.state === 'supported' && account.identity.validity !== 'review' ? '' : ' uncertain'}`,
+      text: account.accountKind==='organization'?'组织账号':account.identity.validity === 'review' ? '原归属依据已失效' : STATE_LABELS[account.identity.state] ?? account.identity.state
+    }));
+    if(account.identity.ownerAnchor){
+      const owner=account.identity.ownerAnchor;
+      attribution.appendChild(make('span', {className:'first-step-reason',text:account.identity.ownerValidity==='review'?'姓名归属依据已失效，请核对原文':owner.state==='self_declared'?'账号自述姓名一致 · 尚未独立验证':owner.state==='unbound'?'姓名归属尚未核对':owner.state==='independently_supported'?'姓名归属有独立支持':'姓名归属存在冲突，请核对'}));
+    } else if (account.attribution) {
+      attribution.appendChild(make('span', {className:'first-step-reason',text:account.attribution.reason}));
+    }
+    card.appendChild(attribution);
+    if(requiresIndependentScope)card.appendChild(make('p',{className:'first-step-boundary',text:view?.selection.submitted?'范围已提交 · 单独研究，不并入人物结论。':'单独研究，不并入人物结论。'}));
+
+    // Bottom row: independent selection at bottom-left, inline provenance
+    // disclosure at bottom-right — the disclosure lives INSIDE its card.
+    const bottom = make('div', { className: 'first-step-card-bottom' });
     const label = make('label', { className: 'first-step-select' });
     const checkbox = make('input', {
       attrs: { type: 'checkbox', 'data-focus-key': `account-${account.accountId}`, 'aria-label': `选择 ${account.platformLabel} ${account.handle ?? ''} · ${shortUrl(account.profileUrl)}`, ...(checked ? { checked: true } : {}) }
@@ -528,32 +624,85 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       event.stopPropagation();
       syncFromCheckbox();
     });
-    label.append(
-      checkbox,
-      make('div', {
-        children: [
-          make('span', { className: 'first-step-platform', text: account.platformLabel }),
-          make('span', { className: 'first-step-handle', text: accountLabel })
-        ]
-      })
+    label.append(checkbox, make('span', { className: 'first-step-select-text', text: checked ? '已加入' : '加入本轮' }));
+    bottom.appendChild(label);
+
+    // Evidence panel: source title/URL, exact span, role and limitation.
+    const evidence = make('details', { className: 'first-step-evidence', attrs:{'data-detail-key':`evidence-${account.accountId}`} });
+    const summary = make('summary', { attrs:{'data-focus-key':`evidence-${account.accountId}`} });
+    summary.append(
+      make('span', { className: 'first-step-disclosure-open', text: '查看资料' }),
+      make('span', { className: 'first-step-disclosure-open', text: '⌄', attrs: { 'aria-hidden': 'true' } }),
+      make('span', { className: 'first-step-disclosure-close', text: '收起资料' }),
+      make('span', { className: 'first-step-disclosure-close', text: '⌃', attrs: { 'aria-hidden': 'true' } })
     );
-    top.appendChild(label);
-    top.appendChild(
-      make('span', {
-        className: `first-step-badge${account.identity.state === 'supported' && account.identity.validity !== 'review' ? '' : ' uncertain'}`,
-        text: account.accountKind==='organization'?'组织账号':account.identity.validity === 'review' ? '原归属依据已失效' : STATE_LABELS[account.identity.state] ?? account.identity.state
-      })
-    );
-    card.appendChild(top);
-    if(account.identity.ownerAnchor){
-      const owner=account.identity.ownerAnchor;
-      card.appendChild(make('p',{className:'first-step-reason',text:account.identity.ownerValidity==='review'?'姓名归属依据已失效，请核对原文':owner.state==='self_declared'?'账号自述姓名一致 · 尚未独立验证':owner.state==='unbound'?'姓名归属尚未核对':owner.state==='independently_supported'?'姓名归属有独立支持':'姓名归属存在冲突，请核对'}));
+    evidence.appendChild(summary);
+    evidence.addEventListener('toggle', () => {
+      if (evidence.open) {
+        openEvidence = {
+          close: () => {
+            evidence.open = false;
+            summary.focus();
+          }
+        };
+      }
+    });
+    // Keyboard: Esc closes the evidence panel and returns to its trigger.
+    evidence.addEventListener('keydown', (event) => {
+      const key = (event as KeyboardEvent).key;
+      if (key === 'Escape' && evidence.open) {
+        event.stopPropagation();
+        evidence.open = false;
+        summary.focus();
+      }
+    });
+    const evidenceList = make('div', {});
+    evidenceList.appendChild(make('p',{className:'first-step-reason',text:`读取情况：${account.accessLabel}`}));
+    if(account.attribution) evidenceList.appendChild(make('p',{className:'first-step-reason',text:`${account.attribution.reason} 支撑来源组：${account.attribution.sourceGroups}；同源页面不增加独立性。`}));
+    evidenceList.appendChild(make('p', {className:'first-step-reason', text:`${account.identity.basisLabel}；${account.defaultSuggestion.reason}`}));
+    const owner=account.identity.ownerAnchor;
+    if(owner){
+      const labels={unbound:'姓名归属尚未核对',self_declared:'账号自述姓名与查询一致',independently_supported:'姓名归属有独立支持',disputed:'姓名归属存在冲突',contradicted:'姓名归属受到否认'};
+      evidenceList.appendChild(make('p',{className:'first-step-reason',text:account.identity.ownerValidity==='review'?'姓名归属依据需重新核对':labels[owner.state]}));
+      if(owner.state==='self_declared')evidenceList.appendChild(make('p',{className:'first-step-reason',text:'这是账号或页面的自述；尚未获得独立人物身份验证。'}));
+      for(const evidence of account.identity.ownerEvidence??[]){
+        const block=make('blockquote');
+        block.appendChild(make('p',{text:`${evidence.sourceTitle} · ${evidence.revoked?'已撤回的姓名自述':'姓名自述原文'}`}));
+        block.appendChild(make('p',{text:evidence.quote}));
+        evidenceList.appendChild(block);
+      }
     }
-    if(matchedTitle)card.appendChild(make('p',{className:'first-step-value',text:`匹配的主页标题：${matchedTitle}；归属未确认。`}));
-    card.appendChild(make('p', { className: 'first-step-value', text: account.researchSummary }));
+    for (const declaration of account.nativeWebsiteDeclarations ?? []) {
+      const block=make('div',{className:'first-step-evidence-item'});
+      block.append(make('p',{text:'账号自述的网站字段'}),make('p',{text:declaration.rawLiteral}),
+        make('small',{className:'first-step-limit',text:declaration.protocol==='https'?'网站字段由该账号自行填写；不代表独立身份核验。':'尚未核对安全 HTTPS 入口；不会自动改写协议或选择网站。'}));
+      evidenceList.appendChild(block);
+    }
+    for (const item of account.identity.evidence) {
+      const block = make('div', { className: 'first-step-evidence-item' });
+      block.appendChild(make('p', { text: `${item.sourceTitle}（${shortUrl(item.sourceUrl)}）· ${item.role === 'identity_support' ? '归属依据' : '反证' }` }));
+      if (item.quote) appendEvidenceQuote(block, item.quote);
+      block.appendChild(make('small', { className: 'first-step-limit', text: item.limitation }));
+      evidenceList.appendChild(block);
+    }
+    for (const item of account.identity.counterevidence) {
+      const block = make('div', { className: 'first-step-evidence-item counter' });
+      block.appendChild(make('p', { text: `反证：${item.sourceTitle}（${shortUrl(item.sourceUrl)}）` }));
+      if (item.quote) appendEvidenceQuote(block, item.quote);
+      block.appendChild(make('small', { className: 'first-step-limit', text: item.limitation }));
+      evidenceList.appendChild(block);
+    }
+    for (const conflict of account.identity.conflicts) {
+      evidenceList.appendChild(make('p', { className: 'first-step-limit', text: conflict }));
+    }
+    if (account.identity.evidence.length === 0 && account.identity.counterevidence.length === 0) {
+      evidenceList.appendChild(make('p', { className: 'muted', text: '只有候选线索，没有可展示的原文依据。' }));
+    }
+    evidence.appendChild(evidenceList);
+    bottom.appendChild(evidence);
+    card.appendChild(bottom);
 
-    if(requiresIndependentScope)card.appendChild(make('p',{className:'first-step-boundary',text:view?.selection.submitted?'范围已提交 · 单独研究，不并入人物结论。':'单独研究，不并入人物结论。'}));
-
+    // Card-level statements stay explicit buttons, never implied by the checkbox.
     const actions = make('div', { className: 'first-step-row-actions' });
     if (!decision.excluded && !view?.selection.submitted) {
       actions.appendChild(
@@ -606,78 +755,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         })
       );
     }
-    const compactActions=actions.children.length<=1;
-    const bottom=compactActions?make('div',{className:'first-step-card-bottom'}):card;
-    if(!compactActions)card.appendChild(actions);
-
-    // Evidence panel: source title/URL, exact span, role and limitation.
-    const evidence = make('details', { className: 'first-step-evidence', attrs:{'data-detail-key':`evidence-${account.accountId}`} });
-    const summary = make('summary', { text: `${account.identity.evidence.length?'归属依据':'核对来源'}（${String(account.identity.evidence.length)} 条）`, attrs:{'data-focus-key':`evidence-${account.accountId}`} });
-    evidence.appendChild(summary);
-    evidence.addEventListener('toggle', () => {
-      if (evidence.open) {
-        openEvidence = {
-          close: () => {
-            evidence.open = false;
-            summary.focus();
-          }
-        };
-      }
-    });
-    // Keyboard: Esc closes the evidence panel and returns to its trigger.
-    evidence.addEventListener('keydown', (event) => {
-      const key = (event as KeyboardEvent).key;
-      if (key === 'Escape' && evidence.open) {
-        event.stopPropagation();
-        evidence.open = false;
-        summary.focus();
-      }
-    });
-    const evidenceList = make('div', {});
-    evidenceList.appendChild(make('p',{className:'first-step-reason',text:`读取情况：${account.accessLabel}`}));
-    if(account.attribution) evidenceList.appendChild(make('p',{className:'first-step-reason',text:`${account.attribution.reason} 支撑来源组：${account.attribution.sourceGroups}；同源页面不增加独立性。`}));
-    evidenceList.appendChild(make('p', {className:'first-step-reason', text:`${account.identity.basisLabel}；${account.defaultSuggestion.reason}`}));
-    const owner=account.identity.ownerAnchor;
-    if(owner){
-      const labels={unbound:'姓名归属尚未核对',self_declared:'账号自述姓名与查询一致',independently_supported:'姓名归属有独立支持',disputed:'姓名归属存在冲突',contradicted:'姓名归属受到否认'};
-      evidenceList.appendChild(make('p',{className:'first-step-reason',text:account.identity.ownerValidity==='review'?'姓名归属依据需重新核对':labels[owner.state]}));
-      if(owner.state==='self_declared')evidenceList.appendChild(make('p',{className:'first-step-reason',text:'这是账号或页面的自述；尚未获得独立人物身份验证。'}));
-      for(const evidence of account.identity.ownerEvidence??[]){
-        const block=make('blockquote');
-        block.appendChild(make('p',{text:`${evidence.sourceTitle} · ${evidence.revoked?'已撤回的姓名自述':'姓名自述原文'}`}));
-        block.appendChild(make('p',{text:evidence.quote}));
-        evidenceList.appendChild(block);
-      }
-    }
-    for (const declaration of account.nativeWebsiteDeclarations ?? []) {
-      const block=make('div',{className:'first-step-evidence-item'});
-      block.append(make('p',{text:'账号自述的网站字段'}),make('p',{text:declaration.rawLiteral}),
-        make('small',{className:'first-step-limit',text:declaration.protocol==='https'?'网站字段由该账号自行填写；不代表独立身份核验。':'尚未核对安全 HTTPS 入口；不会自动改写协议或选择网站。'}));
-      evidenceList.appendChild(block);
-    }
-    for (const item of account.identity.evidence) {
-      const block = make('div', { className: 'first-step-evidence-item' });
-      block.appendChild(make('p', { text: `${item.sourceTitle}（${shortUrl(item.sourceUrl)}）· ${item.role === 'identity_support' ? '归属依据' : '反证'}` }));
-      if (item.quote) appendEvidenceQuote(block, item.quote);
-      block.appendChild(make('small', { className: 'first-step-limit', text: item.limitation }));
-      evidenceList.appendChild(block);
-    }
-    for (const item of account.identity.counterevidence) {
-      const block = make('div', { className: 'first-step-evidence-item counter' });
-      block.appendChild(make('p', { text: `反证：${item.sourceTitle}（${shortUrl(item.sourceUrl)}）` }));
-      if (item.quote) appendEvidenceQuote(block, item.quote);
-      block.appendChild(make('small', { className: 'first-step-limit', text: item.limitation }));
-      evidenceList.appendChild(block);
-    }
-    for (const conflict of account.identity.conflicts) {
-      evidenceList.appendChild(make('p', { className: 'first-step-limit', text: conflict }));
-    }
-    if (account.identity.evidence.length === 0 && account.identity.counterevidence.length === 0) {
-      evidenceList.appendChild(make('p', { className: 'muted', text: '只有候选线索，没有可展示的原文依据。' }));
-    }
-    evidence.appendChild(evidenceList);
-    bottom.appendChild(evidence);
-    if(compactActions){bottom.appendChild(actions);card.appendChild(bottom);}
+    if (actions.children.length > 0) card.appendChild(actions);
 
     // Card-level click toggles the checkbox, but never on interactive parts.
     card.addEventListener('click', (event) => {
@@ -766,6 +844,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
 
   const renderLegacy = (response: FirstStepDiscoveryResponse): void => {
     if (destroyed) return;
+    if (deps.footerContainer) clear(deps.footerContainer);
     clear(deps.container);
     deps.container.className = 'first-step legacy';
     deps.container.appendChild(make('h3', { text: '先确认你想了解的人' }));
@@ -825,6 +904,9 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       destroyed = true;
       openEvidence?.close();
       clear(deps.container);
+      // The dedicated actions host is panel-owned: a run switch, destroy or
+      // logout must never leave stale selection/error controls behind.
+      if (deps.footerContainer) clear(deps.footerContainer);
       draft.clear(); view = null; hintDraft = '';
     },
     statusText() {

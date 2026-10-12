@@ -151,6 +151,8 @@ const els = {
   stageList: byId('stage-list'),
   report: byId('report'),
   chatLog: byId('chat-log'),
+  chatDock: byId('chat-dock'),
+  firstStepActions: byId<HTMLElement>('first-step-actions'),
   followupRail: byId('followup-rail'),
   chatForm: byId<HTMLFormElement>('chat-form'),
   chatInput: byId<HTMLInputElement>('chat-input'),
@@ -975,6 +977,9 @@ function syncFirstStep(runId: string): void {
     firstStepPanel = createFirstStepPanel({
       api,
       container: els.firstStepPanel,
+      // The confirmation/actions footer lives OUTSIDE the scrollable work-body
+      // so it stays reachable with many cards or expanded evidence.
+      footerContainer: els.firstStepActions,
       runId,
       ownerId: state.user?.id,
       onAfterExpand: () => { void selectRun(runId); },
@@ -993,6 +998,9 @@ function teardownFirstStep(): void {
     firstStepRunId = null;
     els.firstStepPanel.hidden = true;
   }
+  // Run switches and logout reset the actions host unconditionally.
+  clear(els.firstStepActions);
+  els.firstStepActions.hidden = true;
 }
 
 function renderNeedsPanel(): void {
@@ -1004,6 +1012,10 @@ function renderNeedsPanel(): void {
   show(els.needsPanel, needs && !firstStep);
   show(els.firstStepPanel, firstStep);
   els.workBody.classList.toggle('choosing-target', firstStep);
+  // The whole chat dock (followups, form, hint) is inactive during the scope
+  // confirmation — hidden entirely so no blank row remains.
+  show(els.chatDock, !firstStep);
+  show(els.firstStepActions, firstStep);
   show(els.chatForm, !firstStep);
   show(els.chatHint, !firstStep);
   show(els.report, !firstStep);
