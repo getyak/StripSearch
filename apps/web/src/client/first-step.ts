@@ -208,9 +208,15 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       return;
     }
     const intro = make('header', { className: 'first-step-intro' });
-    intro.append(make('p', {className:'first-step-eyebrow', text:'01 确认目标   ·   02 深入研究   ·   03 整理报告'}),
+    const progress = make('nav', { className: 'first-step-progress', attrs: { 'aria-label': '研究进度' } });
+    progress.append(
+      make('span', { className: 'current', text: '确认研究范围', attrs: { 'aria-current': 'step' } }),
+      make('span', { text: '深入研究' }),
+      make('span', { text: '整理报告' })
+    );
+    intro.append(progress,
       make('h2', {text: clusterId === null && view.clusters.length > 1 ? '先确认目标人物' : '选择要了解的公开账号'}),
-      make('p', {text: clusterId === null && view.clusters.length > 1 ? '同名主页分别核对。选择一个候选，再决定要研究的账号。' : '勾选要加入的账号，资料就在这里展开。'}));
+      make('p', {text: clusterId === null && view.clusters.length > 1 ? '先核对人物，再决定本轮研究哪些公开账号。' : '核对归属与出处，选择本轮研究范围。'}));
     root.appendChild(intro);
 
     // Person choice (left) and account choice (right) in one workspace.
