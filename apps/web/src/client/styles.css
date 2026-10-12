@@ -1228,24 +1228,27 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 .first-step-secondary summary { cursor: pointer; min-height: 44px; align-content: center; }
 .first-step-secondary input { width: 100%; margin: 8px 0; padding: 12px; border: 1px solid var(--fs-card-border); border-radius: 8px; background: var(--surface); color: var(--fg); font: inherit; }
 
-/* Continuously visible confirmation footer (design Continuation 251:5527, 92px). */
+/* Continuously visible control layer. Material is reserved for this chrome. */
 .first-step-actions {
-  min-height: 92px; display: flex; align-items: center;
-  padding: 12px clamp(16px, 3vw, 64px);
-  border-top: 1px solid var(--fs-card-border); background: var(--surface);
+  min-height: 80px; display: flex; align-items: center;
+  padding: 10px clamp(16px, 4vw, 64px) max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid color-mix(in srgb, var(--fs-card-border) 76%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, var(--bg));
+  box-shadow: 0 -12px 32px rgba(17, 35, 26, .04);
 }
-.first-step-actions .first-step-footer { width: 100%; position: static; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.first-step-actions .first-step-footer { width: min(1180px, 100%); margin-inline: auto; position: static; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .first-step-footer {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "title action" "hint action" "error error" "notice notice";
   align-items: center; column-gap: 24px; row-gap: 2px;
   padding: 12px 0; border-top: 1px solid var(--fs-card-border); background: var(--surface);
 }
-.first-step-selection-title { grid-area: title; color: var(--fg); font-size: 16px; line-height: 24px; font-weight: 600; }
+.first-step-selection-title { grid-area: title; color: var(--fg); font-size: 15px; line-height: 22px; font-weight: 650; letter-spacing: -.01em; }
 .first-step-footer > p.muted { grid-area: hint; margin: 0; color: var(--muted); font-size: 13px; line-height: 20px; }
 .first-step-footer > p.first-step-selection-notice { grid-area: notice; }
 .first-step .error-text, .first-step-footer .error-text { grid-area: error; margin: 4px 0 0; color: var(--danger); font-size: 13px; line-height: 20px; }
-.first-step-primary { grid-area: action; min-width: 106px; min-height: 44px; border-radius: 8px; }
+.first-step-primary { grid-area: action; min-width: 148px; min-height: 44px; border-radius: 10px; box-shadow: 0 1px 2px rgba(0, 55, 24, .12); }
+.first-step-primary:not([disabled]):active { transform: scale(.985); }
 .first-step-primary[disabled] { background: var(--fs-soft); border-color: var(--fs-soft); color: var(--muted); opacity: 1; }
 .first-step :is(button,input,summary):focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .first-step .first-step-cluster:focus-visible { outline-offset: -4px; }
@@ -1280,7 +1283,7 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 /* Compact 52px brand/account bar without marketing navigation or the duplicate
    saved-research action, full-viewport shell, 200px history rail and 56px
    internal toolbar. Home/review/fetch keep their existing chrome. */
-body[data-view="app"] .site-nav { border-bottom-color: color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, var(--nav-bg) 88%, transparent); backdrop-filter: blur(18px) saturate(1.08); -webkit-backdrop-filter: blur(18px) saturate(1.08); }
+body[data-view="app"] .site-nav { border-bottom-color: color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, var(--nav-bg) 92%, var(--surface)); }
 body[data-view="app"] .nav-inner { min-height: 52px; }
 body[data-view="app"] .nav-links, body[data-view="app"] #open-app { display: none; }
 body[data-view="app"] .app-shell, body[data-view="app"] .app-shell.inspector-collapsed {
