@@ -569,9 +569,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       render();
     };
     const toggle = (): void => applyChecked(!checked);
-    // Card head: 64px paper monogram avatar (runtime has no verified avatar
-    // URL — an honest "头像尚未取得" note, never a fabricated identity photo),
-    // platform emblem or external-link mark and the account name.
+    // Card head uses a neutral monogram because the runtime has no verified
+    // avatar URL. It never invents or implies an identity photo.
     const head = make('div', { className: 'first-step-card-head' });
     head.appendChild(make('div', { className: 'first-step-avatar', attrs: { 'aria-hidden': 'true' }, children: [make('span', { text: monogramOf(account.displayName || account.handle || account.platformLabel) })] }));
     const titles = make('div', { className: 'first-step-card-titles' });
@@ -582,11 +581,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       platformLine.appendChild(make('span', { className: 'first-step-platform-icon icon-link', text: '↗', attrs: { 'aria-hidden': 'true' } }));
     }
     platformLine.appendChild(make('span', { text: account.platformLabel }));
-    titles.append(
-      platformLine,
-      make('p', { className: 'first-step-name', text: account.displayName || account.handle || accountLabel }),
-      make('p', { className: 'first-step-avatar-note', text: '头像尚未取得' })
-    );
+    titles.append(platformLine, make('p', { className: 'first-step-name', text: account.displayName || account.handle || accountLabel }));
     head.appendChild(titles);
     card.appendChild(head);
     if (watermarkKey) card.appendChild(make('span', { className: `first-step-watermark wm-${watermarkKey}`, attrs: { 'aria-hidden': 'true' } }));
