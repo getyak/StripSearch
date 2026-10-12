@@ -1321,6 +1321,6 @@ body[data-view="app"] .brand-mark > span { display: none; }
 /* Identity ambiguity is a choice page first; it does not leave an empty
    account column beside unselected candidates. Account scopes stay visible. */
 .first-step-workspace[data-choosing-person="true"] { display: block; }
-.first-step-workspace[data-choosing-person="true"] > .first-step-clusters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); align-items: start; }
+.first-step-workspace[data-choosing-person="true"] > .first-step-clusters { position: static; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); align-items: start; }
 .first-step-workspace[data-choosing-person="true"] > .first-step-clusters > :is(h3, .first-step-other-people, .muted) { grid-column: 1 / -1; }
 .first-step-workspace[data-choosing-person="true"] > .first-step-accounts { margin-top: 24px; }
