@@ -1,0 +1,163 @@
+{
+  "implementationRevision": "1cfc92d4fe339e6bac4defe695814939abd91c89",
+  "pr": "https://github.com/getyak/StripSearch/pull/43",
+  "local": {
+    "typecheck": "pass",
+    "build": "pass",
+    "testRuns": {
+      "baseline": {
+        "logSha256": "eb6f8dde035304ce851f5bdf2d102e857bbb1713f5b55272bb45f7181672a9b1",
+        "tests": 1270,
+        "pass": 1263,
+        "fail": 1,
+        "skipped": 6
+      },
+      "initial_final": {
+        "logSha256": "d7303b9e09114fc8cd56a79c0f02e8f40cd56a605e8148ae7e9434ff81aea266",
+        "tests": 1398,
+        "pass": 1395,
+        "fail": 2,
+        "skipped": 1
+      },
+      "offline_final": {
+        "logSha256": "f111af2fe5067a8a76dc536d898bc6f0da735346380607cde9541cd784aca904",
+        "tests": 1401,
+        "pass": 1399,
+        "fail": 1,
+        "skipped": 1
+      },
+      "dsh_isolated": {
+        "logSha256": "3749cd3eb0ddf8a5a40403cf752777fc4ddfa513070c69415a913c0e623ffb05",
+        "tests": 7,
+        "pass": 7,
+        "fail": 0,
+        "skipped": 0
+      },
+      "pdf_file": {
+        "logSha256": "3367c616efddc4f43781e5509f90f0051087f409d1976770cb788c83c721a664",
+        "tests": 7,
+        "pass": 6,
+        "fail": 1,
+        "skipped": 0
+      },
+      "pdf_isolated": {
+        "logSha256": "578dbe1fb49e9be370eace24c978e11122594feb75893aa99a5dfe03803f3723",
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "skipped": 0
+      }
+    },
+    "deploymentUnits": 27,
+    "evidenceGateUnits": 33,
+    "evidenceGateCases": 23,
+    "evidenceGateChecks": 134,
+    "singleCleanLocalFullRun": false
+  },
+  "ci": {
+    "checks": [
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408978238/job/115335976336",
+        "name": "container-runtime",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408978238/job/115335975823",
+        "name": "web-evals",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408978487/job/115335972452",
+        "name": "validate",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408978487/job/115335972214",
+        "name": "research-workspace",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408978487/job/115335972054",
+        "name": "runtime-compat",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408859799/job/115335597267",
+        "name": "web-evals",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408859799/job/115335596956",
+        "name": "container-runtime",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408859719/job/115335571926",
+        "name": "validate",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408859719/job/115335571842",
+        "name": "runtime-compat",
+        "status": "completed"
+      },
+      {
+        "conclusion": "success",
+        "details_url": "https://github.com/getyak/StripSearch/actions/runs/38408859719/job/115335571487",
+        "name": "research-workspace",
+        "status": "completed"
+      }
+    ],
+    "revision": "1cfc92d4fe339e6bac4defe695814939abd91c89"
+  },
+  "evals": {
+    "runtime": {
+      "passed": 40,
+      "total": 40,
+      "networkCalls": 0,
+      "modelCalls": 0
+    },
+    "research": {
+      "structuralPass": 11,
+      "total": 11,
+      "networkSubprocessAttempts": 0,
+      "modelInvocations": 0,
+      "tokensCost": "not_measured"
+    },
+    "sprint": {
+      "passed": 33,
+      "total": 33,
+      "independentGuardViolations": 0,
+      "qualityClaim": false,
+      "reviewStatus": "unreviewed"
+    }
+  },
+  "review": {
+    "unresolvedP0P1": 0,
+    "filesBound": 24,
+    "record": "final-review.md"
+  },
+  "localRelease": {
+    "revision": "1cfc92d4fe339e6bac4defe695814939abd91c89",
+    "healthRevisionAssetsVerified": true,
+    "entryAssets": 2,
+    "storedRunStatesUnchanged": true,
+    "signupMode": "open",
+    "publicHostVerified": false
+  },
+  "notionSync": {
+    "state": "blocked",
+    "reason": "browser_requires_login; no connected callable Notion capability"
+  },
+  "historicalLocalOutbound": "unmeasured; corrected test harness prevents default provider transport before bootstrap",
+  "scope": "Synthetic offline contract checks; no model quality or broader milestone acceptance"
+}

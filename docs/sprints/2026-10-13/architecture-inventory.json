@@ -1,0 +1,3294 @@
+{
+  "schema": "stripsearch/architecture-inventory/v1",
+  "base_revision": "0017e1159f77a1b2dfd99ba335590d1ab12d71dd",
+  "history_limit": 40,
+  "method": "Regex-resolved relative TS imports, including type imports; reach is not executed coverage. Churn counts first-parent file touches, not defects. Comments may match and computed imports are omitted.",
+  "counts": {
+    "typescript_files": 234,
+    "production_files": 106,
+    "test_files": 105
+  },
+  "largest_modules": [
+    {
+      "path": "apps/web/src/client/review.ts",
+      "lines": 2638,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/dom.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/research-task.ts",
+        "apps/web/src/shared/review.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 7
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-pipeline.ts",
+      "lines": 2245,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/server/research/fetch-pipeline-plan.ts",
+        "apps/web/src/server/research/fetch-pipeline-store.ts",
+        "apps/web/src/server/research/research-runtime.ts",
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts",
+        "apps/web/src/shared/research-fetch-pipeline.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 34
+    },
+    {
+      "path": "apps/web/src/shared/first-step-discovery.ts",
+      "lines": 2152,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/discovery-plan.ts",
+        "apps/web/src/shared/native-website.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/url-policy.ts"
+      ],
+      "incoming_imports": 38,
+      "test_files_reaching": 79
+    },
+    {
+      "path": "apps/web/src/server/research/first-step-discovery.ts",
+      "lines": 2033,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/server/research/alias-proof.ts",
+        "apps/web/src/server/research/dsh-decision.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/metered.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/search-agent.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/server/util/hash.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/native-website.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 8,
+      "test_files_reaching": 34
+    },
+    {
+      "path": "apps/web/src/server/research/research-tool-dispatch.ts",
+      "lines": 1799,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-case.ts"
+      ],
+      "incoming_imports": 13,
+      "test_files_reaching": 43
+    },
+    {
+      "path": "apps/web/src/client/main.ts",
+      "lines": 1728,
+      "history_touches": 12,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/auth.ts",
+        "apps/web/src/client/citation-return.ts",
+        "apps/web/src/client/dom.ts",
+        "apps/web/src/client/fetch.ts",
+        "apps/web/src/client/first-step-draft-storage.ts",
+        "apps/web/src/client/first-step.ts",
+        "apps/web/src/client/home-motion.ts",
+        "apps/web/src/client/local-search.ts",
+        "apps/web/src/client/render.ts",
+        "apps/web/src/client/review.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/research-depth.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 5
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-github-acquisition.ts",
+      "lines": 1365,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/adapters/http.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/server/research/fetch-github-store.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-fetch-github.ts",
+        "apps/web/src/shared/response-primitives.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/server/research/case-store.ts",
+      "lines": 1330,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 7,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/first-step-store.ts",
+      "lines": 1304,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/identity-semantic-validity.ts",
+        "apps/web/src/server/research/named-owner.ts",
+        "apps/web/src/server/research/native-account-kind.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 17,
+      "test_files_reaching": 51
+    },
+    {
+      "path": "apps/web/src/server/platforms/public-rules.ts",
+      "lines": 1252,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/util/hash.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 7,
+      "test_files_reaching": 41
+    },
+    {
+      "path": "apps/web/src/server/research/completion-store.ts",
+      "lines": 1199,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/discovery/route-planner.ts",
+      "lines": 1181,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/server/util/hash.ts",
+        "apps/web/src/shared/discovery-plan.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/public-discovery-rules.ts",
+        "apps/web/src/shared/url-policy.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 5
+    },
+    {
+      "path": "apps/web/src/server/platforms/catalog.ts",
+      "lines": 1054,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/platforms/public-rules.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/shared/discovery-plan.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/platform-discovery.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 8,
+      "test_files_reaching": 37
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-coverage-store.ts",
+      "lines": 986,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/server/research/completion-store.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts",
+        "apps/web/src/shared/research-fetch-coverage.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/discovery/rule-executor.ts",
+      "lines": 981,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/pinned-transport.ts",
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 5
+    }
+  ],
+  "nodes": [
+    {
+      "path": "apps/web/src/client/api.ts",
+      "lines": 472,
+      "history_touches": 6,
+      "imports": [
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-fetch-github.ts",
+        "apps/web/src/shared/research-task.ts",
+        "apps/web/src/shared/review.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 14,
+      "test_files_reaching": 15
+    },
+    {
+      "path": "apps/web/src/client/auth.ts",
+      "lines": 211,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/dom.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 6
+    },
+    {
+      "path": "apps/web/src/client/citation-return.ts",
+      "lines": 260,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/dom.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 7
+    },
+    {
+      "path": "apps/web/src/client/dom.ts",
+      "lines": 90,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/url-policy.ts"
+      ],
+      "incoming_imports": 8,
+      "test_files_reaching": 18
+    },
+    {
+      "path": "apps/web/src/client/fetch.ts",
+      "lines": 399,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/shared/research-fetch-github.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 5
+    },
+    {
+      "path": "apps/web/src/client/first-step-draft-storage.ts",
+      "lines": 66,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/first-step.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 11
+    },
+    {
+      "path": "apps/web/src/client/first-step.ts",
+      "lines": 918,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/dom.ts",
+        "apps/web/src/client/first-step-draft-storage.ts",
+        "apps/web/src/client/source-text.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 8,
+      "test_files_reaching": 11
+    },
+    {
+      "path": "apps/web/src/client/home-motion.ts",
+      "lines": 179,
+      "history_touches": 2,
+      "imports": [],
+      "incoming_imports": 2,
+      "test_files_reaching": 6
+    },
+    {
+      "path": "apps/web/src/client/local-search.ts",
+      "lines": 340,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/client/dom.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 6
+    },
+    {
+      "path": "apps/web/src/client/main.ts",
+      "lines": 1728,
+      "history_touches": 12,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/auth.ts",
+        "apps/web/src/client/citation-return.ts",
+        "apps/web/src/client/dom.ts",
+        "apps/web/src/client/fetch.ts",
+        "apps/web/src/client/first-step-draft-storage.ts",
+        "apps/web/src/client/first-step.ts",
+        "apps/web/src/client/home-motion.ts",
+        "apps/web/src/client/local-search.ts",
+        "apps/web/src/client/render.ts",
+        "apps/web/src/client/review.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/research-depth.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 5
+    },
+    {
+      "path": "apps/web/src/client/render.ts",
+      "lines": 573,
+      "history_touches": 5,
+      "imports": [
+        "apps/web/src/client/dom.ts",
+        "apps/web/src/client/source-text.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 6
+    },
+    {
+      "path": "apps/web/src/client/review.ts",
+      "lines": 2638,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/dom.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/research-task.ts",
+        "apps/web/src/shared/review.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 7
+    },
+    {
+      "path": "apps/web/src/client/source-text.ts",
+      "lines": 1,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/source-text.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 12
+    },
+    {
+      "path": "apps/web/src/evals/canonical-store.ts",
+      "lines": 157,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 3
+    },
+    {
+      "path": "apps/web/src/evals/fixture-transport.ts",
+      "lines": 135,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/schema.ts",
+        "apps/web/src/server/adapters/types.ts"
+      ],
+      "incoming_imports": 4,
+      "test_files_reaching": 1
+    },
+    {
+      "path": "apps/web/src/evals/grade.ts",
+      "lines": 229,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/fixture-transport.ts",
+        "apps/web/src/evals/revocation.ts",
+        "apps/web/src/evals/schema.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 1
+    },
+    {
+      "path": "apps/web/src/evals/report.ts",
+      "lines": 353,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/fixture-transport.ts",
+        "apps/web/src/evals/grade.ts",
+        "apps/web/src/evals/revocation.ts",
+        "apps/web/src/evals/schema.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 1
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/case-runner.ts",
+      "lines": 325,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/canonical-store.ts",
+        "apps/web/src/evals/research-baseline-v1/fixtures.ts",
+        "apps/web/src/evals/research-baseline-v1/schema.ts",
+        "apps/web/src/server/research/controller.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 6,
+      "test_files_reaching": 2
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/fixtures.ts",
+      "lines": 175,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/evals/research-baseline-v1/schema.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/dsh-decision.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/tool-contracts.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 2
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/grade.ts",
+      "lines": 138,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/research-baseline-v1/case-runner.ts",
+        "apps/web/src/evals/research-baseline-v1/schema.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 1
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/normalize.ts",
+      "lines": 73,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 3,
+      "test_files_reaching": 2
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/replay-worker.ts",
+      "lines": 78,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/research-baseline-v1/case-runner.ts",
+        "apps/web/src/evals/research-baseline-v1/schema.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/report.ts",
+      "lines": 380,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/evals/research-baseline-v1/case-runner.ts",
+        "apps/web/src/evals/research-baseline-v1/fixtures.ts",
+        "apps/web/src/evals/research-baseline-v1/normalize.ts",
+        "apps/web/src/evals/research-baseline-v1/schema.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 2
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/run.ts",
+      "lines": 12,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/evals/research-baseline-v1/runner.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/runner.ts",
+      "lines": 669,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/evals/research-baseline-v1/case-runner.ts",
+        "apps/web/src/evals/research-baseline-v1/grade.ts",
+        "apps/web/src/evals/research-baseline-v1/normalize.ts",
+        "apps/web/src/evals/research-baseline-v1/report.ts",
+        "apps/web/src/evals/research-baseline-v1/schema.ts",
+        "apps/web/src/evals/shared/cli.ts",
+        "apps/web/src/server/research/research-store.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 1
+    },
+    {
+      "path": "apps/web/src/evals/research-baseline-v1/schema.ts",
+      "lines": 444,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 8,
+      "test_files_reaching": 2
+    },
+    {
+      "path": "apps/web/src/evals/revocation.ts",
+      "lines": 189,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 1
+    },
+    {
+      "path": "apps/web/src/evals/run.ts",
+      "lines": 11,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/runner.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/evals/runner.ts",
+      "lines": 350,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/evals/canonical-store.ts",
+        "apps/web/src/evals/fixture-transport.ts",
+        "apps/web/src/evals/grade.ts",
+        "apps/web/src/evals/report.ts",
+        "apps/web/src/evals/revocation.ts",
+        "apps/web/src/evals/schema.ts",
+        "apps/web/src/evals/shared/cli.ts",
+        "apps/web/src/server/adapters/exa.ts",
+        "apps/web/src/server/adapters/github.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 1
+    },
+    {
+      "path": "apps/web/src/evals/schema.ts",
+      "lines": 399,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 1
+    },
+    {
+      "path": "apps/web/src/evals/shared/cli.ts",
+      "lines": 71,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 2,
+      "test_files_reaching": 2
+    },
+    {
+      "path": "apps/web/src/server/adapters/discovery.ts",
+      "lines": 437,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/http.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/platform-discovery.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 31
+    },
+    {
+      "path": "apps/web/src/server/adapters/exa.ts",
+      "lines": 343,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/adapters/http.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/url-policy.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/server/adapters/github.ts",
+      "lines": 391,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/http.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 4,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/server/adapters/http.ts",
+      "lines": 130,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/response-primitives.ts"
+      ],
+      "incoming_imports": 6,
+      "test_files_reaching": 71
+    },
+    {
+      "path": "apps/web/src/server/adapters/types.ts",
+      "lines": 84,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 35,
+      "test_files_reaching": 76
+    },
+    {
+      "path": "apps/web/src/server/app.ts",
+      "lines": 155,
+      "history_touches": 9,
+      "imports": [
+        "apps/web/src/server/auth.ts",
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/discovery-store.ts",
+        "apps/web/src/server/http/middleware.ts",
+        "apps/web/src/server/research/fetch-github-runner.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/review-store.ts",
+        "apps/web/src/server/routes/discovery.ts",
+        "apps/web/src/server/routes/fetch.ts",
+        "apps/web/src/server/routes/first-step.ts",
+        "apps/web/src/server/routes/review.ts",
+        "apps/web/src/server/routes/runs.ts",
+        "apps/web/src/server/services/discovery-runner.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/platform-discovery.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/auth.ts",
+      "lines": 102,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/shared/limits.ts"
+      ],
+      "incoming_imports": 6,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/config.ts",
+      "lines": 273,
+      "history_touches": 7,
+      "imports": [
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 11,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/server/db/index.ts",
+      "lines": 19,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/schema.ts"
+      ],
+      "incoming_imports": 40,
+      "test_files_reaching": 67
+    },
+    {
+      "path": "apps/web/src/server/db/migrate.ts",
+      "lines": 13,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/auth.ts",
+        "apps/web/src/server/db/index.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/db/row-helpers.ts",
+      "lines": 29,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 10,
+      "test_files_reaching": 65
+    },
+    {
+      "path": "apps/web/src/server/db/schema.ts",
+      "lines": 894,
+      "history_touches": 11,
+      "imports": [],
+      "incoming_imports": 1,
+      "test_files_reaching": 67
+    },
+    {
+      "path": "apps/web/src/server/discovery/account-key.ts",
+      "lines": 422,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/discovery/route-planner.ts",
+        "apps/web/src/shared/discovery-plan.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 3
+    },
+    {
+      "path": "apps/web/src/server/discovery/pinned-transport.ts",
+      "lines": 430,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/request-policy.ts"
+      ],
+      "incoming_imports": 6,
+      "test_files_reaching": 6
+    },
+    {
+      "path": "apps/web/src/server/discovery/request-policy.ts",
+      "lines": 396,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 9,
+      "test_files_reaching": 11
+    },
+    {
+      "path": "apps/web/src/server/discovery/route-planner.ts",
+      "lines": 1181,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/server/util/hash.ts",
+        "apps/web/src/shared/discovery-plan.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/public-discovery-rules.ts",
+        "apps/web/src/shared/url-policy.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 5
+    },
+    {
+      "path": "apps/web/src/server/discovery/rule-executor.ts",
+      "lines": 981,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/pinned-transport.ts",
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 5
+    },
+    {
+      "path": "apps/web/src/server/discovery-store.ts",
+      "lines": 926,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/shared/platform-discovery.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/http/errors.ts",
+      "lines": 22,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 7,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/http/middleware.ts",
+      "lines": 202,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/auth.ts",
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/http/errors.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 6,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/http/request-input.ts",
+      "lines": 44,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 6,
+      "test_files_reaching": 31
+    },
+    {
+      "path": "apps/web/src/server/index.ts",
+      "lines": 197,
+      "history_touches": 8,
+      "imports": [
+        "apps/web/src/server/adapters/exa.ts",
+        "apps/web/src/server/adapters/github.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/app.ts",
+        "apps/web/src/server/auth.ts",
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/migrate.ts",
+        "apps/web/src/server/discovery-store.ts",
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/server/platforms/registry.ts",
+        "apps/web/src/server/research/fetch-github-runner.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts",
+        "apps/web/src/server/review-store.ts",
+        "apps/web/src/server/services/discovery-runner.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/platform-discovery.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/platforms/catalog.ts",
+      "lines": 1054,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/platforms/public-rules.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/shared/discovery-plan.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/platform-discovery.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 8,
+      "test_files_reaching": 37
+    },
+    {
+      "path": "apps/web/src/server/platforms/public-rules.ts",
+      "lines": 1252,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/util/hash.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 7,
+      "test_files_reaching": 41
+    },
+    {
+      "path": "apps/web/src/server/platforms/registry.ts",
+      "lines": 368,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/platform-discovery.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/research/alias-proof.ts",
+      "lines": 48,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/case-store.ts",
+      "lines": 1330,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 7,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/completion-eval.ts",
+      "lines": 946,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/completion-store.ts",
+      "lines": 1199,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/controller.ts",
+      "lines": 552,
+      "history_touches": 6,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/metered.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/quote-genre.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/source-keys.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/server/util/hash.ts",
+        "apps/web/src/shared/research-depth.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 8,
+      "test_files_reaching": 37
+    },
+    {
+      "path": "apps/web/src/server/research/dsh-decision.ts",
+      "lines": 193,
+      "history_touches": 2,
+      "imports": [],
+      "incoming_imports": 6,
+      "test_files_reaching": 47
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-coverage-store.ts",
+      "lines": 986,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/server/research/completion-store.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts",
+        "apps/web/src/shared/research-fetch-coverage.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-github-acquisition.ts",
+      "lines": 1365,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/adapters/http.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/server/research/fetch-github-store.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-fetch-github.ts",
+        "apps/web/src/shared/response-primitives.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-github-catalog.ts",
+      "lines": 570,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/fetch-github-store.ts",
+        "apps/web/src/server/research/fetch-pipeline.ts",
+        "apps/web/src/server/research/research-runtime.ts",
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-fetch-github.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-github-runner.ts",
+      "lines": 820,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/fetch-github-acquisition.ts",
+        "apps/web/src/server/research/fetch-github-catalog.ts",
+        "apps/web/src/server/research/fetch-github-store.ts",
+        "apps/web/src/server/research/fetch-pipeline-store.ts",
+        "apps/web/src/server/research/fetch-pipeline.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts",
+        "apps/web/src/shared/research-fetch-github.ts",
+        "apps/web/src/shared/research-fetch-pipeline.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 6,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-github-store.ts",
+      "lines": 864,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-fetch-github.ts"
+      ],
+      "incoming_imports": 6,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-pipeline-plan.ts",
+      "lines": 333,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/research-fetch-pipeline.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 34
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-pipeline-store.ts",
+      "lines": 768,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-fetch-pipeline.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 34
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-pipeline-synthetic.ts",
+      "lines": 971,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/fetch-pipeline-store.ts",
+        "apps/web/src/server/research/fetch-pipeline.ts",
+        "apps/web/src/server/research/research-runtime.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts",
+        "apps/web/src/shared/research-fetch-pipeline.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 2
+    },
+    {
+      "path": "apps/web/src/server/research/fetch-pipeline.ts",
+      "lines": 2245,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/server/research/fetch-pipeline-plan.ts",
+        "apps/web/src/server/research/fetch-pipeline-store.ts",
+        "apps/web/src/server/research/research-runtime.ts",
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts",
+        "apps/web/src/shared/research-fetch-pipeline.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 34
+    },
+    {
+      "path": "apps/web/src/server/research/first-step-discovery.ts",
+      "lines": 2033,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/server/research/alias-proof.ts",
+        "apps/web/src/server/research/dsh-decision.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/metered.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/search-agent.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/server/util/hash.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/native-website.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 8,
+      "test_files_reaching": 34
+    },
+    {
+      "path": "apps/web/src/server/research/first-step-store.ts",
+      "lines": 1304,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/identity-semantic-validity.ts",
+        "apps/web/src/server/research/named-owner.ts",
+        "apps/web/src/server/research/native-account-kind.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 17,
+      "test_files_reaching": 51
+    },
+    {
+      "path": "apps/web/src/server/research/identity-semantic-validity.ts",
+      "lines": 74,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/alias-proof.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/native-account-kind.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-case.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/link-context.ts",
+      "lines": 281,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 12,
+      "test_files_reaching": 70
+    },
+    {
+      "path": "apps/web/src/server/research/metered.ts",
+      "lines": 85,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 41
+    },
+    {
+      "path": "apps/web/src/server/research/named-owner.ts",
+      "lines": 73,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 70
+    },
+    {
+      "path": "apps/web/src/server/research/native-account-kind.ts",
+      "lines": 24,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/planner.ts",
+      "lines": 182,
+      "history_touches": 5,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/dsh-decision.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-depth.ts"
+      ],
+      "incoming_imports": 15,
+      "test_files_reaching": 46
+    },
+    {
+      "path": "apps/web/src/server/research/provider-gate.ts",
+      "lines": 34,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 68
+    },
+    {
+      "path": "apps/web/src/server/research/quote-genre.ts",
+      "lines": 25,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/research-store.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/research/research-runtime.ts",
+      "lines": 143,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/research/dsh-decision.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts"
+      ],
+      "incoming_imports": 4,
+      "test_files_reaching": 35
+    },
+    {
+      "path": "apps/web/src/server/research/research-store.ts",
+      "lines": 146,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/shared/research-depth.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 19,
+      "test_files_reaching": 67
+    },
+    {
+      "path": "apps/web/src/server/research/research-tool-contracts.ts",
+      "lines": 681,
+      "history_touches": 2,
+      "imports": [],
+      "incoming_imports": 8,
+      "test_files_reaching": 43
+    },
+    {
+      "path": "apps/web/src/server/research/research-tool-dispatch.ts",
+      "lines": 1799,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-case.ts"
+      ],
+      "incoming_imports": 13,
+      "test_files_reaching": 43
+    },
+    {
+      "path": "apps/web/src/server/research/search-agent.ts",
+      "lines": 84,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/dsh-decision.ts",
+        "apps/web/src/server/research/first-step-discovery.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 34
+    },
+    {
+      "path": "apps/web/src/server/research/source-keys.ts",
+      "lines": 23,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/research-store.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 37
+    },
+    {
+      "path": "apps/web/src/server/research/tool-contracts.ts",
+      "lines": 72,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/named-owner.ts",
+        "apps/web/src/shared/native-website.ts"
+      ],
+      "incoming_imports": 28,
+      "test_files_reaching": 70
+    },
+    {
+      "path": "apps/web/src/server/research/toolkit.ts",
+      "lines": 398,
+      "history_touches": 5,
+      "imports": [
+        "apps/web/src/server/adapters/http.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/provider-gate.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/native-website.ts",
+        "apps/web/src/shared/url-policy.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 9,
+      "test_files_reaching": 67
+    },
+    {
+      "path": "apps/web/src/server/review-seed.ts",
+      "lines": 391,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 3,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/review-store.ts",
+      "lines": 941,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/review-seed.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/research-task.ts",
+        "apps/web/src/shared/review.ts"
+      ],
+      "incoming_imports": 4,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/routes/discovery.ts",
+      "lines": 614,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/discovery-store.ts",
+        "apps/web/src/server/http/errors.ts",
+        "apps/web/src/server/http/middleware.ts",
+        "apps/web/src/server/http/request-input.ts",
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/server/platforms/registry.ts",
+        "apps/web/src/server/services/discovery-runner.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/platform-discovery.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/routes/fetch.ts",
+      "lines": 212,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/http/errors.ts",
+        "apps/web/src/server/http/middleware.ts",
+        "apps/web/src/server/http/request-input.ts",
+        "apps/web/src/server/research/fetch-github-runner.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/shared/research-fetch-github.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/routes/first-step.ts",
+      "lines": 137,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/auth.ts",
+        "apps/web/src/server/http/errors.ts",
+        "apps/web/src/server/http/middleware.ts",
+        "apps/web/src/server/http/request-input.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/limits.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/routes/review.ts",
+      "lines": 633,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/server/http/errors.ts",
+        "apps/web/src/server/http/middleware.ts",
+        "apps/web/src/server/http/request-input.ts",
+        "apps/web/src/server/review-seed.ts",
+        "apps/web/src/server/review-store.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/research-task.ts",
+        "apps/web/src/shared/review.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/routes/runs.ts",
+      "lines": 525,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/auth.ts",
+        "apps/web/src/server/http/errors.ts",
+        "apps/web/src/server/http/middleware.ts",
+        "apps/web/src/server/http/request-input.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/services/pdf.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/server/util/fingerprint.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/report-html.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/services/discovery-runner.ts",
+      "lines": 671,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/adapters/discovery.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/discovery-store.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/platform-discovery.ts"
+      ],
+      "incoming_imports": 3,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/services/pdf.ts",
+      "lines": 45,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/http/errors.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/services/runner.ts",
+      "lines": 725,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/research/controller.ts",
+        "apps/web/src/server/research/first-step-discovery.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/search-agent.ts",
+        "apps/web/src/server/research/source-keys.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 11,
+      "test_files_reaching": 31
+    },
+    {
+      "path": "apps/web/src/server/store.ts",
+      "lines": 874,
+      "history_touches": 10,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/completion-store.ts",
+        "apps/web/src/server/research/fetch-coverage-store.ts",
+        "apps/web/src/server/research/identity-semantic-validity.ts",
+        "apps/web/src/server/research/native-account-kind.ts",
+        "apps/web/src/server/research/quote-genre.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-depth.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 41,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/server/util/fingerprint.ts",
+      "lines": 38,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 1,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/server/util/hash.ts",
+      "lines": 21,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 5,
+      "test_files_reaching": 50
+    },
+    {
+      "path": "apps/web/src/shared/canonical.ts",
+      "lines": 424,
+      "history_touches": 5,
+      "imports": [
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/source-text.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 14,
+      "test_files_reaching": 69
+    },
+    {
+      "path": "apps/web/src/shared/discovery-plan.ts",
+      "lines": 758,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/research-case.ts"
+      ],
+      "incoming_imports": 7,
+      "test_files_reaching": 80
+    },
+    {
+      "path": "apps/web/src/shared/first-step-discovery.ts",
+      "lines": 2152,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/discovery-plan.ts",
+        "apps/web/src/shared/native-website.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/url-policy.ts"
+      ],
+      "incoming_imports": 38,
+      "test_files_reaching": 79
+    },
+    {
+      "path": "apps/web/src/shared/limits.ts",
+      "lines": 82,
+      "history_touches": 4,
+      "imports": [],
+      "incoming_imports": 19,
+      "test_files_reaching": 80
+    },
+    {
+      "path": "apps/web/src/shared/native-website.ts",
+      "lines": 16,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 4,
+      "test_files_reaching": 79
+    },
+    {
+      "path": "apps/web/src/shared/platform-catalog.ts",
+      "lines": 535,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/shared/platform-discovery.ts",
+        "apps/web/src/shared/public-discovery-rules.ts",
+        "apps/web/src/shared/research-completion.ts"
+      ],
+      "incoming_imports": 12,
+      "test_files_reaching": 84
+    },
+    {
+      "path": "apps/web/src/shared/platform-discovery.ts",
+      "lines": 737,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/response-primitives.ts"
+      ],
+      "incoming_imports": 13,
+      "test_files_reaching": 86
+    },
+    {
+      "path": "apps/web/src/shared/public-discovery-rules.ts",
+      "lines": 358,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 17,
+      "test_files_reaching": 90
+    },
+    {
+      "path": "apps/web/src/shared/report-html.ts",
+      "lines": 22,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/source-text.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 5,
+      "test_files_reaching": 32
+    },
+    {
+      "path": "apps/web/src/shared/research-case.ts",
+      "lines": 613,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 25,
+      "test_files_reaching": 86
+    },
+    {
+      "path": "apps/web/src/shared/research-completion.ts",
+      "lines": 725,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 10,
+      "test_files_reaching": 84
+    },
+    {
+      "path": "apps/web/src/shared/research-depth.ts",
+      "lines": 143,
+      "history_touches": 2,
+      "imports": [],
+      "incoming_imports": 9,
+      "test_files_reaching": 91
+    },
+    {
+      "path": "apps/web/src/shared/research-fetch-coverage.ts",
+      "lines": 582,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 64
+    },
+    {
+      "path": "apps/web/src/shared/research-fetch-github.ts",
+      "lines": 728,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 8,
+      "test_files_reaching": 44
+    },
+    {
+      "path": "apps/web/src/shared/research-fetch-pipeline.ts",
+      "lines": 361,
+      "history_touches": 2,
+      "imports": [],
+      "incoming_imports": 8,
+      "test_files_reaching": 35
+    },
+    {
+      "path": "apps/web/src/shared/research-task.ts",
+      "lines": 291,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 6,
+      "test_files_reaching": 42
+    },
+    {
+      "path": "apps/web/src/shared/response-primitives.ts",
+      "lines": 35,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 4,
+      "test_files_reaching": 88
+    },
+    {
+      "path": "apps/web/src/shared/review.ts",
+      "lines": 441,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 7,
+      "test_files_reaching": 42
+    },
+    {
+      "path": "apps/web/src/shared/source-text.ts",
+      "lines": 7,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 3,
+      "test_files_reaching": 69
+    },
+    {
+      "path": "apps/web/src/shared/types.ts",
+      "lines": 253,
+      "history_touches": 5,
+      "imports": [
+        "apps/web/src/shared/research-depth.ts"
+      ],
+      "incoming_imports": 46,
+      "test_files_reaching": 91
+    },
+    {
+      "path": "apps/web/src/shared/url-policy.ts",
+      "lines": 81,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 6,
+      "test_files_reaching": 84
+    },
+    {
+      "path": "apps/web/src/shared/validation.ts",
+      "lines": 253,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/shared/limits.ts"
+      ],
+      "incoming_imports": 16,
+      "test_files_reaching": 79
+    },
+    {
+      "path": "apps/web/src/tests/adapters.exa.test.ts",
+      "lines": 259,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/exa.ts",
+        "apps/web/src/server/adapters/types.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/adapters.github.test.ts",
+      "lines": 321,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/github.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/auth-controller.test.ts",
+      "lines": 187,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/auth.ts",
+        "apps/web/src/tests/dom-env.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/auth.test.ts",
+      "lines": 118,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/authorization.test.ts",
+      "lines": 82,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/boot-fetch-session.test.ts",
+      "lines": 30,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/main.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/boot-session.test.ts",
+      "lines": 24,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/main.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/bundle.test.ts",
+      "lines": 28,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/cancel.test.ts",
+      "lines": 67,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/canonical.test.ts",
+      "lines": 166,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/citation-return.test.ts",
+      "lines": 185,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/citation-return.ts",
+        "apps/web/src/tests/dom-env.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/client-dom.test.ts",
+      "lines": 243,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/client/citation-return.ts",
+        "apps/web/src/client/render.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/code-maintenance.test.ts",
+      "lines": 450,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/dom.ts",
+        "apps/web/src/server/adapters/http.ts",
+        "apps/web/src/server/db/row-helpers.ts",
+        "apps/web/src/server/discovery/account-key.ts",
+        "apps/web/src/server/http/request-input.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/metered.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/util/hash.ts",
+        "apps/web/src/shared/discovery-plan.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/response-primitives.ts",
+        "apps/web/src/shared/url-policy.ts",
+        "apps/web/src/shared/validation.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/compiled-start.test.ts",
+      "lines": 80,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/concurrency.test.ts",
+      "lines": 85,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/config.test.ts",
+      "lines": 260,
+      "history_touches": 6,
+      "imports": [
+        "apps/web/src/server/config.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-account-key.test.ts",
+      "lines": 769,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/account-key.ts",
+        "apps/web/src/shared/discovery-plan.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-adapters.test.ts",
+      "lines": 370,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/discovery.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/platform-discovery.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-fixtures.ts",
+      "lines": 186,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/platform-discovery.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 2,
+      "test_files_reaching": 2
+    },
+    {
+      "path": "apps/web/src/tests/discovery-regressions.test.ts",
+      "lines": 111,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/tests/discovery-fixtures.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-route-planner.test.ts",
+      "lines": 1449,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/route-planner.ts",
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/shared/discovery-plan.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-rule-executor-policy.test.ts",
+      "lines": 454,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/pinned-transport.ts",
+        "apps/web/src/server/discovery/request-policy.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-rule-executor-repair.test.ts",
+      "lines": 530,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/pinned-transport.ts",
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/server/discovery/rule-executor.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-rule-executor-repair2.test.ts",
+      "lines": 602,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/pinned-transport.ts",
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/server/discovery/rule-executor.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-rule-executor-repair3.test.ts",
+      "lines": 402,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/pinned-transport.ts",
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/server/discovery/rule-executor.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-rule-executor-repair4.test.ts",
+      "lines": 597,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/pinned-transport.ts",
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/server/discovery/rule-executor.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-rule-executor.test.ts",
+      "lines": 484,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/request-policy.ts",
+        "apps/web/src/server/discovery/rule-executor.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/discovery-tasks.test.ts",
+      "lines": 521,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery-store.ts",
+        "apps/web/src/shared/platform-discovery.ts",
+        "apps/web/src/tests/discovery-fixtures.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/dom-env.ts",
+      "lines": 147,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 18,
+      "test_files_reaching": 18
+    },
+    {
+      "path": "apps/web/src/tests/dsh-decision.test.ts",
+      "lines": 101,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/dsh-decision.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/evals.test.ts",
+      "lines": 628,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/fixture-transport.ts",
+        "apps/web/src/evals/grade.ts",
+        "apps/web/src/evals/report.ts",
+        "apps/web/src/evals/runner.ts",
+        "apps/web/src/evals/schema.ts",
+        "apps/web/src/server/adapters/github.ts",
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/experience-polish.test.ts",
+      "lines": 619,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/main.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/dom-env.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fakes.ts",
+      "lines": 147,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 16,
+      "test_files_reaching": 16
+    },
+    {
+      "path": "apps/web/src/tests/fetch-coverage.test.ts",
+      "lines": 1976,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/fetch-coverage-store.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts",
+        "apps/web/src/shared/research-fetch-coverage.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fetch-github-acquisition.test.ts",
+      "lines": 585,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/fetch-github-acquisition.ts",
+        "apps/web/src/server/research/fetch-github-catalog.ts",
+        "apps/web/src/server/research/fetch-github-runner.ts",
+        "apps/web/src/server/research/fetch-github-store.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/tests/fakes.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fetch-github-api.test.ts",
+      "lines": 258,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fetch-github-integration.test.ts",
+      "lines": 609,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/fetch-github-catalog.ts",
+        "apps/web/src/server/research/fetch-github-runner.ts",
+        "apps/web/src/server/research/fetch-github-store.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fetch-github-recovery.test.ts",
+      "lines": 227,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/fetch-github-acquisition.ts",
+        "apps/web/src/server/research/fetch-github-runner.ts",
+        "apps/web/src/server/research/fetch-github-store.ts",
+        "apps/web/src/server/store.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fetch-pipeline-chunks.test.ts",
+      "lines": 1189,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/fetch-pipeline-plan.ts",
+        "apps/web/src/server/research/fetch-pipeline-synthetic.ts",
+        "apps/web/src/server/research/fetch-pipeline.ts",
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-fetch-pipeline.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fetch-pipeline-keys.test.ts",
+      "lines": 158,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/shared/research-fetch-pipeline.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fetch-pipeline.test.ts",
+      "lines": 890,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/fetch-pipeline-synthetic.ts",
+        "apps/web/src/server/research/fetch-pipeline.ts",
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/shared/research-fetch-pipeline.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/fetch-ui.test.ts",
+      "lines": 362,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/main.ts",
+        "apps/web/src/shared/research-fetch-github.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/fakes.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-alias-projection.test.ts",
+      "lines": 534,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/first-step-discovery.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-choice-ui.test.ts",
+      "lines": 341,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/first-step.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-discovery.test.ts",
+      "lines": 612,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/discovery/account-key.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-draft-reload.test.ts",
+      "lines": 61,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/first-step-draft-storage.ts",
+        "apps/web/src/client/first-step.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-expand-history.test.ts",
+      "lines": 18,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-fixtures.ts",
+      "lines": 317,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-case.ts"
+      ],
+      "incoming_imports": 16,
+      "test_files_reaching": 16
+    },
+    {
+      "path": "apps/web/src/tests/first-step-native-url.test.ts",
+      "lines": 58,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-query-contract.test.ts",
+      "lines": 102,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/limits.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-recovery.test.ts",
+      "lines": 68,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/first-step-discovery.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-refusal-limits.test.ts",
+      "lines": 188,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/controller.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/first-step-fixtures.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-revocation.test.ts",
+      "lines": 109,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-runner-contract.test.ts",
+      "lines": 267,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-runner-scope-refusal.test.ts",
+      "lines": 457,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/first-step-fixtures.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-runtime-limits.test.ts",
+      "lines": 63,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/first-step-discovery.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-scope.test.ts",
+      "lines": 182,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-search.test.ts",
+      "lines": 637,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/first-step-discovery.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-selection.test.ts",
+      "lines": 472,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-semantic.test.ts",
+      "lines": 1195,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/server/research/first-step-discovery.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/research-case.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-shared-host.test.ts",
+      "lines": 36,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-ui-state.test.ts",
+      "lines": 22,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/first-step.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-ui.test.ts",
+      "lines": 230,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/first-step.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/first-step-workspace-ui.test.ts",
+      "lines": 291,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/first-step.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/harness.ts",
+      "lines": 188,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/index.ts",
+        "apps/web/src/server/store.ts"
+      ],
+      "incoming_imports": 31,
+      "test_files_reaching": 30
+    },
+    {
+      "path": "apps/web/src/tests/home-motion.test.ts",
+      "lines": 183,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/home-motion.ts",
+        "apps/web/src/tests/dom-env.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/hosted-auth.test.ts",
+      "lines": 153,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/hosted-open-signup.test.ts",
+      "lines": 52,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/identity-semantic-validity.test.ts",
+      "lines": 135,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/independent-account-materials.test.ts",
+      "lines": 76,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/controller.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/report-html.ts",
+        "apps/web/src/shared/research-depth.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/local-search.test.ts",
+      "lines": 310,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/local-search.ts",
+        "apps/web/src/tests/dom-env.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/main-controller.test.ts",
+      "lines": 700,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/client/main.ts",
+        "apps/web/src/shared/review.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/fakes.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/named-owner.test.ts",
+      "lines": 92,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/named-owner.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/person-client-api.test.ts",
+      "lines": 32,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/tests/dom-env.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/platform-catalog.test.ts",
+      "lines": 1959,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/discovery/route-planner.ts",
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/server/platforms/registry.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/routes/discovery.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/platform-discovery.test.ts",
+      "lines": 265,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/platform-discovery.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/public-rules-bundle.test.ts",
+      "lines": 162,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/platforms/public-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/public-rules-repair.test.ts",
+      "lines": 609,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/server/platforms/public-rules.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/public-rules-repair2.test.ts",
+      "lines": 402,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/platforms/public-rules.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/public-rules-repair3.test.ts",
+      "lines": 233,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/platforms/public-rules.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/public-rules-source-audit.test.ts",
+      "lines": 208,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/platforms/public-rules.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/public-rules.test.ts",
+      "lines": 821,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/platforms/catalog.ts",
+        "apps/web/src/server/platforms/public-rules.ts",
+        "apps/web/src/shared/platform-catalog.ts",
+        "apps/web/src/shared/public-discovery-rules.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/release-provenance.test.ts",
+      "lines": 204,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/config.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/controller.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/source-keys.ts",
+        "apps/web/src/server/services/runner.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/report-html.ts",
+        "apps/web/src/tests/first-step-fixtures.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/report-exports.test.ts",
+      "lines": 115,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/services/pdf.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/report-html.ts",
+        "apps/web/src/shared/research-depth.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/report-usage.test.ts",
+      "lines": 90,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/evals/research-baseline-v1/case-runner.ts",
+        "apps/web/src/evals/research-baseline-v1/report.ts",
+        "apps/web/src/evals/research-baseline-v1/schema.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-api.test.ts",
+      "lines": 302,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/shared/first-step-discovery.ts",
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-baseline.test.ts",
+      "lines": 600,
+      "history_touches": 3,
+      "imports": [
+        "apps/web/src/evals/research-baseline-v1/case-runner.ts",
+        "apps/web/src/evals/research-baseline-v1/fixtures.ts",
+        "apps/web/src/evals/research-baseline-v1/grade.ts",
+        "apps/web/src/evals/research-baseline-v1/normalize.ts",
+        "apps/web/src/evals/research-baseline-v1/report.ts",
+        "apps/web/src/evals/research-baseline-v1/runner.ts",
+        "apps/web/src/evals/research-baseline-v1/schema.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-case.test.ts",
+      "lines": 1345,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/research-case.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-client.test.ts",
+      "lines": 522,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/review.ts",
+        "apps/web/src/shared/research-task.ts",
+        "apps/web/src/tests/dom-env.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-completion.test.ts",
+      "lines": 2853,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/case-store.ts",
+        "apps/web/src/server/research/completion-eval.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/research-case.ts",
+        "apps/web/src/shared/research-completion.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-controller.test.ts",
+      "lines": 689,
+      "history_touches": 5,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/controller.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/report-html.ts",
+        "apps/web/src/shared/research-depth.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-genre.test.ts",
+      "lines": 105,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/controller.ts",
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/server/research/quote-genre.ts",
+        "apps/web/src/server/research/research-store.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/store.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-link-context.test.ts",
+      "lines": 212,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/toolkit.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-planner.test.ts",
+      "lines": 132,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/research/planner.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-provider-gate.test.ts",
+      "lines": 33,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/provider-gate.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-reference-stability.test.ts",
+      "lines": 74,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/controller.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/canonical.ts",
+        "apps/web/src/shared/types.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-runtime.test.ts",
+      "lines": 147,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/server/research/research-runtime.ts",
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-tasks.test.ts",
+      "lines": 409,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/limits.ts",
+        "apps/web/src/shared/research-task.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-tool-contracts.test.ts",
+      "lines": 1889,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/research-tool-contracts.ts",
+        "apps/web/src/server/research/research-tool-dispatch.ts",
+        "apps/web/src/server/store.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/research-toolkit.test.ts",
+      "lines": 387,
+      "history_touches": 4,
+      "imports": [
+        "apps/web/src/server/adapters/types.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/restart.test.ts",
+      "lines": 56,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/store.ts",
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/review-client.test.ts",
+      "lines": 950,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/client/api.ts",
+        "apps/web/src/client/review.ts",
+        "apps/web/src/shared/review.ts",
+        "apps/web/src/tests/dom-env.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/review.test.ts",
+      "lines": 773,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/review-seed.ts",
+        "apps/web/src/server/review-store.ts",
+        "apps/web/src/shared/review.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/revisions.test.ts",
+      "lines": 90,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/runs.test.ts",
+      "lines": 186,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/shared/types.ts",
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/search-agent.test.ts",
+      "lines": 163,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/server/db/index.ts",
+        "apps/web/src/server/research/first-step-discovery.ts",
+        "apps/web/src/server/research/first-step-store.ts",
+        "apps/web/src/server/research/link-context.ts",
+        "apps/web/src/server/research/search-agent.ts",
+        "apps/web/src/server/research/tool-contracts.ts",
+        "apps/web/src/server/research/toolkit.ts",
+        "apps/web/src/server/store.ts",
+        "apps/web/src/shared/first-step-discovery.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/search-refinement-ui.test.ts",
+      "lines": 26,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/client/first-step.ts",
+        "apps/web/src/tests/dom-env.ts",
+        "apps/web/src/tests/first-step-fixtures.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/sse.test.ts",
+      "lines": 66,
+      "history_touches": 1,
+      "imports": [
+        "apps/web/src/tests/fakes.ts",
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/startup.test.ts",
+      "lines": 46,
+      "history_touches": 1,
+      "imports": [],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    },
+    {
+      "path": "apps/web/src/tests/web-shell.test.ts",
+      "lines": 61,
+      "history_touches": 2,
+      "imports": [
+        "apps/web/src/tests/harness.ts"
+      ],
+      "incoming_imports": 0,
+      "test_files_reaching": 0
+    }
+  ]
+}
