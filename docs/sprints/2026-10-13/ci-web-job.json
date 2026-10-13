@@ -1,0 +1,89 @@
+{
+  "conclusion": "success",
+  "head_sha": "1cfc92d4fe339e6bac4defe695814939abd91c89",
+  "html_url": "https://github.com/getyak/StripSearch/actions/runs/38408978238/job/115335975823",
+  "id": 115335975823,
+  "status": "completed",
+  "steps": [
+    {
+      "conclusion": "success",
+      "name": "Set up job",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Pin npm",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Install locked dependencies",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Typecheck and build",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Verify installed Chrome for PDF tests",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Runtime tests (offline providers)",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Dataset integrity (no answer grading)",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Frozen provider evaluations (no external requests)",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Synthetic adversarial contract evaluation (offline, no quality claim)",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Static design checks",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Validate deployment scripts",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "name": "Complete job",
+      "status": "completed"
+    }
+  ]
+}

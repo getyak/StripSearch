@@ -1,20 +1,18 @@
 # Burn-down sprint — 2026-10-13
 
-基线：`0017e11`（origin/main）；分支：`codex/burndown-sprint-20261013`。保留原工作区未提交 README/部署改动。用户已授权 A 后并行 B–E、持续执行与持久产物；本轮不是 Linear issue，不关闭关联任务。
+A–E 已完成；[Draft PR #43](https://github.com/getyak/StripSearch/pull/43) 已交付。实现提交 `1cfc92d` 的 10 项 CI 全部通过，独立审查无未解决 P0–P3。本机单实例已更新并核对 health / revision / 两项入口资源。Notion 同步因未登录而受阻。
 
-| 工作流 | 状态 | 产物 / 验收 |
+| 工作流 | 结果 | 证据 |
 |---|---|---|
-| A 架构与风险地图 | 完成 | [地图](docs/sprints/2026-10-13/architecture-map.md)、[清单](docs/sprints/2026-10-13/architecture-inventory.json)、`scripts/architecture_inventory.py`；234 TS / 106 production / 105 tests，静态导入可达不冒充覆盖率 |
-| B 热点测试 | 完成，独立审查通过 | 74/74 targeted pass；missing receipt URL 防御修复，已先红后绿；[说明](docs/sprints/2026-10-13/hotspot-tests.md) |
-| C 子系统重构与基准 | 完成，独立审查通过 | SELECT 260/2420→12；同数据 JSON 字节一致；[基准](docs/sprints/2026-10-13/coverage-benchmark.md) |
-| D Eval 与 fixtures | 完成，独立审查通过 | 33/33 回放、46/46 自检；[说明](docs/sprints/2026-10-13/contract-evals.md) |
-| E 变更与发布草稿 | 完成，独立审查通过 | 从 git history 生成 changelog/release draft，区分 merged/history/current sprint/unverified |
-| 集成与交付 | 代码审查完成，准备 draft PR 与CI | 当前分支完整检查、独立 review、修复、提交与 draft PR；实际部署状态独立记录 |
+| A 架构与风险 | 106 个生产模块、105 个基线测试文件；可复现静态扫描 | [地图与风险](docs/sprints/2026-10-13/architecture-map.md) |
+| B 热点测试 | 74/74，覆盖身份/authority/usage/迟到返回；修复缺URL回执 | [测试与限定coverage](docs/sprints/2026-10-13/hotspot-tests.md) |
+| C 重构与基准 | 完整JSON字节一致；SELECT260/2420→12，中位数1.78×/1.47× | [基准](docs/sprints/2026-10-13/coverage-benchmark.md) |
+| D Eval与fixtures | 33/33合成契约；46/46评测器自检，禁网守卫 | [suite](evals/sprint-contract-v1/README.md) |
+| E 历史与发布草稿 | 23项first-parent历史逐字再生成；独立复核 | [发布草稿](docs/sprints/2026-10-13/release-draft.md) |
+| 附加离线修复 | bootstrap前默认拒绝transport、清5类provider凭据；作者30/30及独立3/3 | [诊断](docs/sprints/2026-10-13/timeout-diagnosis.md) |
 
-验证记录：设计检查通过；基线 1263 pass / 1 PDF 环境 fail / 6 skip，PDF 独立复跑7/7。最终首次完整1395 pass / 2 timeout / 1 skip；串行复现发现共享测试harness未默认拒绝外部transport，先修复再重新完整验证。旧完整运行外发次数未记录；零外网声明只适用于有guard的独立eval/probe。依赖锁与已有开发安装一致，复用依赖。资源检查存在 Node/swap 警告，完整检查集中串行执行，无新增服务/模拟器/容器。
+[完整验证记录](docs/sprints/2026-10-13/verification.md)与[机器回执](docs/sprints/2026-10-13/verification.json)保留原失败。本机完整offline运行1399pass/1 SDK退出限时fail/1 maintainer skip；DSH独立7/7通过。PDF文件6/7，失败用例独立1/1通过。干净CI的完整Web/PDF、容器、兼容、设计与eval步骤均成功；没有把孤立复跑改写成单次本机完整绿灯。
 
-执行边界：代理各自拥有新增文件/明确生产文件范围，禁止写 STATUS、package manifest、shared unrelated contract；主代理负责集成与最终验证。未知费用不置零；合成/离线通过不构成人物质量、全平台或部署验收。
+本轮材料为synthetic/unreviewed，不代表真人/模型研究质量、全平台、GET-79或M1–M4验收。历史完整运行外发次数未记录；新harness回归所监测外部fetch=0。旧工作区README/部署未提交改动保留；无Linear issue变更，无PR合并。
 
-资源收尾：已核对无活动 pnpm install/add/store，再用 dev-storage-guard prune-pnpm 回收817 MB未使用缓存；磁盘恢复31.01 GiB。保留源码、数据库、当前及回滚发布版本。Notion可用浏览器停在登录页，无已连接项目会话，记录同步尚未完成。
-
-离线harness修复已通过作者30/30与独立3/3回归。最终完整本机1401测试：1399pass / 1 DSH SDK退出事件限时fail / 1 maintainer skip；DSH独立7/7复跑通过。当前PDF6/7，首个Chromium启动限时失败，正只复跑该用例。保留原失败，不把单文件复跑改写成一次完整绿灯；完整CI待创建PR后核对。
+资源：回收817 MB未使用pnpm缓存与97.37 MB未使用Docker build cache；Docker context保持原值，服务/卷/源码/数据库/回滚版本保留。部署复用锁文件一致依赖，无活动研究作业；运行记录状态计数前后相同。Notion项目记录未写入，需要已有工作区登录会话。

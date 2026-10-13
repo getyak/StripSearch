@@ -1,6 +1,6 @@
 # 发布说明草稿 — 2026-10-13
 
-**状态：本轮尚未发布。** 历史范围 `82acaf3..0017e11`；完整、可再生的 commit 清单见 [changelog](changelog-draft.md)。此草稿只汇总仓库实现，实际运行版本、外部 provider 与人物研究质量须各自验收。
+**状态：PR尚未合并；本机实现提交 `1cfc92d` 已通过单实例发布验证，公网未验收。** 历史范围 `82acaf3..0017e11`；完整、可再生的 commit 清单见 [changelog](changelog-draft.md)。此草稿只汇总仓库实现，实际运行版本、外部 provider 与人物研究质量须各自验收。
 
 ## 已合入 main 的历史变更
 
@@ -19,10 +19,10 @@
 5. 可复用 git changelog 生成脚本、验证摘要和持续 STATUS。
 6. 共享测试入口在 bootstrap 前默认拒绝 provider 请求并清除五类继承凭据；假密钥不再被当作离线隔离。
 
-具体测试计数、基准值、eval 结果与独立审查状态在完成集成后填入 [验证记录](verification.md)。这里不预填结果。
+测试、基准、eval、独立审查与CI结果见[验证记录](verification.md)。Notion同步受登录阻塞。
 
 ## 兼容性与发布边界
 
 本轮不计划 SQL/schema、报告格式、身份升级、计费或 provider 协议变更；重构以已有输出与撤回规则为约束。发布前仍需当前提交 CI、独立审查及仓库门禁。升级本机服务须走[单实例发布管理器](../../local-service.md)，核对实际 health/revision/入口资源；Notion 记录必须来自实际读回。
 
-未交付/未验收：全平台历史与评论覆盖、真人/模型研究质量对照、人工裁决 gold、GET-79 分布式租约、完整 Fetch 核验→补查→综合、CLI/MCP、本轮生产部署。Synthetic contract pass 只能支持本地确定性规则，不产生研究准确率或 provider 可用性结论。
+未交付/未验收：全平台历史与评论覆盖、真人/模型研究质量对照、人工裁决 gold、GET-79 分布式租约、完整 Fetch 核验→补查→综合、CLI/MCP、本轮公网部署。Synthetic contract pass 只能支持本地确定性规则，不产生研究准确率或 provider 可用性结论。

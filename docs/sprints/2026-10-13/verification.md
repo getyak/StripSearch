@@ -13,9 +13,11 @@
 | 完整最终 runtime tests | offline重跑1399 pass / 1 fail / 1 skip | 原两个first-step timeout已修复；新失败为既有DSH SDK关闭时1s SIGKILL退出事件限时遮盖oversized错误；独立完整DSH文件7/7复跑通过、无残留DSH worker；不改写原完整结果；不放宽timeout |
 | 原有 eval / eval:research | runtime 40/40 pass；research 11/11 structural pass | runtime model/network calls=0；research 20 planner decisions / 0 model invocations / 0 network-subprocess attempts，token/cost not_measured |
 | dataset / design / deployment unit checks | 静态通过；deploy 27/27；evidence gate 33/33 | 合成 probe 23 cases / 134 checks pass，forbidden calls=0；不证明 provider/model 质量 |
-| 独立 review / 当前提交 CI | fresh review 通过；CI 待提交 | 无可操作 P0–P3；独立22/22补验；最终审查绑定22文件 hash，见 final-review.md |
-| 实际本机发布 / Notion | 未运行 | 实际版本与项目记录单独核对；PR 不等于上线 |
+| 独立 review / 当前提交 CI | fresh review + P1复审通过；实现提交1cfc92d的10 CI全部成功 | 24文件hash绑定；独立22/22 + 新harness3/3；CI完整Web/PDF及新eval步骤实际success |
+| 实际本机发布 / Notion | 本机1cfc92d已验证；Notion blocked login | 单实例管理器成功；Tailnet health/revision/首页及2 assets字节一致，存储run状态计数未变；未验证公网与真人provider |
 
 补充：测试harness新增P1隔离修复已独立复核关闭（3/3，所监测外部fetch=0），相关四文件30/30通过；这是新回归路径计数，不能追溯覆盖历史完整运行。安全缓存清理用官方pnpm prune，仅未使用包/metadata，回收817MB；已核对无活动pnpm安装，保留所有源码/数据库/发布版本。
 
 当前PDF完整文件为6/7通过：首个真实Chromium binary PDF启动限时失败（pdf_unavailable）；其余PDF撤回与无写权限HOME用例通过。同代码基线PDF曾独立7/7通过；正在只复跑失败用例，未修改渲染器或放宽timeout。保留本机资源限制，不声称一次完整本机绿灯；干净CI将承担整套验证。
+
+交付：实现提交1cfc92d的10项CI均completed/success（push与PR各5项）；[Web job](https://github.com/getyak/StripSearch/actions/runs/38408978238/job/115335975823)的完整runtime/PDF、typecheck/build、所有eval与脚本步骤实际成功。失败PDF用例独立1/1通过。机器回执保存各本机日志hash/计数与CI元数据；保留本机失败，未声称单次完整本机绿灯。
