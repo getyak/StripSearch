@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "baselineRevision": "0017e11",
+  "node": "v22.23.2",
+  "modifiedSourceSha256": "dd3617f825617cf23cacae2871caeaf6518b0d048f2cb89387a57c29a4244954",
+  "harnessSha256": "fdac5eedec194a1f41e15c0d46523518e67d5f3554c72dc1a4d747374abc67f3",
+  "platform": "darwin",
+  "arch": "arm64",
+  "createdAt": "2026-10-13T04:27:01.410Z",
+  "scope": "Offline synthetic SQLite in-memory production getFetchCoverageView; setup, stringify and instrumentation excluded from timing; no network or production-latency claim.",
+  "warmups": 3,
+  "repetitions": 9,
+  "results": [
+    {
+      "fixture": {
+        "accounts": 12,
+        "itemsPerAccount": 20,
+        "branches": 3
+      },
+      "receipts": 1572,
+      "outputBytes": 1909156,
+      "outputSha256": "75556c29c431c2bfff44e27c89d786ea55542109af7069d88c291ef601bcbecf",
+      "byteEquivalent": true,
+      "baselineSelects": 260,
+      "modifiedSelects": 12,
+      "baselineMs": {
+        "samples": [
+          15.794666000000007,
+          34.398458000000005,
+          36.997082999999975,
+          25.271916000000033,
+          30.276583999999957,
+          17.34862499999997,
+          21.227040999999986,
+          21.304333000000042,
+          27.221208000000047
+        ],
+        "median": 25.271916000000033
+      },
+      "modifiedMs": {
+        "samples": [
+          18.643208000000016,
+          21.327042000000006,
+          18.426958000000013,
+          15.182457999999997,
+          11.971167000000037,
+          11.204916000000026,
+          14.22787500000004,
+          9.685291000000007,
+          11.474290999999994
+        ],
+        "median": 14.22787500000004
+      },
+      "speedup": 1.776225613452463
+    },
+    {
+      "fixture": {
+        "accounts": 60,
+        "itemsPerAccount": 40,
+        "branches": 3
+      },
+      "receipts": 15720,
+      "outputBytes": 18991465,
+      "outputSha256": "6c1c111267465f7c4b81d9ffb2a231c48b786d95c9b807313d67b46ceb18dea2",
+      "byteEquivalent": true,
+      "baselineSelects": 2420,
+      "modifiedSelects": 12,
+      "baselineMs": {
+        "samples": [
+          185.7054159999998,
+          289.12837500000023,
+          207.98062500000015,
+          166.94675000000007,
+          206.57983400000012,
+          227.36083299999973,
+          404.7050419999996,
+          262.75879200000054,
+          207.57645799999955
+        ],
+        "median": 207.98062500000015
+      },
+      "modifiedMs": {
+        "samples": [
+          80.18908300000021,
+          89.84500000000025,
+          104.44245799999953,
+          264.3299169999991,
+          164.53216599999996,
+          160.81554200000028,
+          101.23412500000086,
+          151.6225830000003,
+          141.32379199999923
+        ],
+        "median": 141.32379199999923
+      },
+      "speedup": 1.4716603769024346
+    }
+  ]
+}

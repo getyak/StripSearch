@@ -1,0 +1,1059 @@
+{
+  "suite": "sprint-contract-v1",
+  "track": "offline_deterministic_contract",
+  "material": "synthetic",
+  "reviewStatus": "unreviewed",
+  "qualityClaim": false,
+  "networkAccess": false,
+  "total": 33,
+  "passed": 33,
+  "failed": 0,
+  "cases": [
+    {
+      "id": "SC-001",
+      "boundary": "encoded_self_link_raw_span",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "self_account_section"
+        ],
+        "state": "supported",
+        "basis": "explicit_self_link",
+        "supportCount": 1,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": true,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "self_account_section"
+        ],
+        "state": "supported",
+        "basis": "explicit_self_link",
+        "supportCount": 1,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": true,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-002",
+      "boundary": "explicit_denial_veto",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "explicit_denial"
+        ],
+        "state": "rejected",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 1,
+        "candidateCount": 0,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "explicit_denial"
+        ],
+        "state": "rejected",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 1,
+        "candidateCount": 0,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-003",
+      "boundary": "support_and_denial_dispute",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "self_account_section",
+          "explicit_denial"
+        ],
+        "state": "disputed",
+        "basis": "explicit_self_link",
+        "supportCount": 1,
+        "counterevidenceCount": 1,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "self_account_section",
+          "explicit_denial"
+        ],
+        "state": "disputed",
+        "basis": "explicit_self_link",
+        "supportCount": 1,
+        "counterevidenceCount": 1,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-004",
+      "boundary": "ancestor_colleague_attribution",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "prose_mention"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "prose_mention"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-005",
+      "boundary": "work_authorship_not_account_ownership",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "prose_mention"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "prose_mention"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-006",
+      "boundary": "hidden_rel_me_veto",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "prose_mention"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "prose_mention"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-007",
+      "boundary": "bare_anchor_unknown_surface",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "unknown_role"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "unknown_role"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-008",
+      "boundary": "indexed_claim_not_original",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "self_account_section"
+        ],
+        "state": "proposed",
+        "basis": "search_index",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "self_account_section"
+        ],
+        "state": "proposed",
+        "basis": "search_index",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-009",
+      "boundary": "organization_not_person_default",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "self_account_section"
+        ],
+        "state": "supported",
+        "basis": "explicit_self_link",
+        "supportCount": 1,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "self_account_section"
+        ],
+        "state": "supported",
+        "basis": "explicit_self_link",
+        "supportCount": 1,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-010",
+      "boundary": "unknown_kind_not_person_default",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "self_account_section"
+        ],
+        "state": "supported",
+        "basis": "explicit_self_link",
+        "supportCount": 1,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "self_account_section"
+        ],
+        "state": "supported",
+        "basis": "explicit_self_link",
+        "supportCount": 1,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-011",
+      "boundary": "same_owner_not_independent_sources",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "self_account_section",
+          "self_account_section"
+        ],
+        "state": "supported",
+        "basis": "explicit_self_link",
+        "supportCount": 2,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": true,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "self_account_section",
+          "self_account_section"
+        ],
+        "state": "supported",
+        "basis": "explicit_self_link",
+        "supportCount": 2,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": true,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-012",
+      "boundary": "social_post_not_profile_authority",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "unknown_role"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "unknown_role"
+        ],
+        "state": "proposed",
+        "basis": "none",
+        "supportCount": 0,
+        "counterevidenceCount": 0,
+        "candidateCount": 1,
+        "independentSources": 0,
+        "suggested": false,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-013",
+      "boundary": "directory_explicit_ownership",
+      "kind": "links",
+      "status": "pass",
+      "expected": {
+        "roles": [
+          "explicit_directory"
+        ],
+        "state": "supported",
+        "basis": "explicit_directory_link",
+        "supportCount": 1,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": true,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "roles": [
+          "explicit_directory"
+        ],
+        "state": "supported",
+        "basis": "explicit_directory_link",
+        "supportCount": 1,
+        "counterevidenceCount": 0,
+        "candidateCount": 0,
+        "independentSources": 1,
+        "suggested": true,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-014",
+      "boundary": "named_intro_raw_provenance",
+      "kind": "named_owner",
+      "status": "pass",
+      "expected": {
+        "accepted": true,
+        "quote": "<p>Hello, my name is <strong>Lumen Vale</strong>. I build public tools.</p>",
+        "offset": 6,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "accepted": true,
+        "quote": "<p>Hello, my name is <strong>Lumen Vale</strong>. I build public tools.</p>",
+        "offset": 6,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-015",
+      "boundary": "name_title_not_self_declaration",
+      "kind": "named_owner",
+      "status": "pass",
+      "expected": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-016",
+      "boundary": "quoted_intro_not_owner",
+      "kind": "named_owner",
+      "status": "pass",
+      "expected": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-017",
+      "boundary": "wrong_document_binding",
+      "kind": "named_owner",
+      "status": "pass",
+      "expected": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-018",
+      "boundary": "indexed_intro_not_original",
+      "kind": "named_owner",
+      "status": "pass",
+      "expected": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-019",
+      "boundary": "source_instruction_not_identity",
+      "kind": "named_owner",
+      "status": "pass",
+      "expected": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "actual": {
+        "accepted": false,
+        "quote": null,
+        "offset": null,
+        "rawSpanExact": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-020",
+      "boundary": "verify_exact_phase_boundary",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "role/phase refused",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "role/phase refused: get_platform_capabilities is not allowed for role fetch phase verify",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-021",
+      "boundary": "search_cannot_stage_findings",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "role/phase refused",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "role/phase refused: save_findings is not allowed for role search phase search",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-022",
+      "boundary": "model_owner_injection",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "input refused",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "input refused (untrusted_privilege_field: input.ownerId: privilege, ownership and budget fields are injected by the server, never model-supplied)",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-023",
+      "boundary": "profile_only_no_history",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "profile_only cannot read history",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "scope refused: profile_only cannot read history",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-024",
+      "boundary": "fresh_scope_revocation",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "allowedScope none",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "scope refused: allowedScope none cannot read restricted content",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-025",
+      "boundary": "scope_version_drift",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "snapshot is stale",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "scope refused: trusted snapshot is stale against current store state",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-026",
+      "boundary": "missing_fresh_authority",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "not_implemented",
+        "reasonIncludes": "fresh state port unbound",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "not_implemented",
+        "reason": "fresh state port unbound: current case authority cannot be verified",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-027",
+      "boundary": "foreign_account_slice",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "unknown or foreign account",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "account refused: unknown or foreign account for this case",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-028",
+      "boundary": "unverified_capability_no_execution",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "not confirmed supported",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "capability refused: list_posts capability is unverified, not confirmed supported",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-029",
+      "boundary": "unsupported_sort_no_downgrade",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "sort old is not confirmed",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "capability refused: sort old is not confirmed for list_posts",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-030",
+      "boundary": "current_cancellation_no_execution",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "cancelled in current store state",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "cancelled in current store state",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-031",
+      "boundary": "verify_rejects_new_collection",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "only checks against existing evidence",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "verify phase refused: only checks against existing evidence may be submitted",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-032",
+      "boundary": "authorized_catalog_positive",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "success",
+        "reasonIncludes": null,
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": false
+      },
+      "actual": {
+        "status": "success",
+        "reason": null,
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": false
+      },
+      "failures": []
+    },
+    {
+      "id": "SC-033",
+      "boundary": "prototype_named_unknown_key",
+      "kind": "dispatch",
+      "status": "pass",
+      "expected": {
+        "status": "blocked",
+        "reasonIncludes": "input refused",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "actual": {
+        "status": "blocked",
+        "reason": "input refused (untrusted_privilege_field: input.constructor.prototype.role: privilege, ownership and budget fields are injected by the server, never model-supplied)",
+        "providerCalls": 0,
+        "handlerCalls": 0,
+        "submissionCalls": 0,
+        "staged": false,
+        "contentNull": true
+      },
+      "failures": []
+    }
+  ],
+  "guard": {
+    "mechanism": "process_api_guard",
+    "violations": [],
+    "guardedApis": [
+      "fetch",
+      "WebSocket",
+      "http.request",
+      "http.get",
+      "https.request",
+      "https.get",
+      "http2.connect",
+      "net.connect",
+      "net.createConnection",
+      "tls.connect",
+      "dns.lookup",
+      "dns.resolve",
+      "dns.resolve4",
+      "dns.resolve6",
+      "dgram.createSocket",
+      "child_process.spawn",
+      "child_process.spawnSync",
+      "child_process.exec",
+      "child_process.execSync",
+      "child_process.execFile",
+      "child_process.execFileSync",
+      "child_process.fork",
+      "worker_threads.Worker",
+      "dns.lookupService",
+      "dns.Resolver.resolve",
+      "dns.Resolver.resolve4",
+      "dns.Resolver.resolve6",
+      "dns.resolveAny",
+      "dns.Resolver.resolveAny",
+      "dns.resolveCaa",
+      "dns.Resolver.resolveCaa",
+      "dns.resolveCname",
+      "dns.Resolver.resolveCname",
+      "dns.resolveMx",
+      "dns.Resolver.resolveMx",
+      "dns.resolveNaptr",
+      "dns.Resolver.resolveNaptr",
+      "dns.resolveNs",
+      "dns.Resolver.resolveNs",
+      "dns.resolvePtr",
+      "dns.Resolver.resolvePtr",
+      "dns.resolveSoa",
+      "dns.Resolver.resolveSoa",
+      "dns.resolveSrv",
+      "dns.Resolver.resolveSrv",
+      "dns.resolveTlsa",
+      "dns.Resolver.resolveTlsa",
+      "dns.resolveTxt",
+      "dns.Resolver.resolveTxt",
+      "dns.reverse",
+      "dns.Resolver.reverse",
+      "dns/promises.lookup",
+      "dns/promises.lookupService",
+      "dns/promises.resolve",
+      "dns/promises.Resolver.resolve",
+      "dns/promises.resolve4",
+      "dns/promises.Resolver.resolve4",
+      "dns/promises.resolve6",
+      "dns/promises.Resolver.resolve6",
+      "dns/promises.resolveAny",
+      "dns/promises.Resolver.resolveAny",
+      "dns/promises.resolveCaa",
+      "dns/promises.Resolver.resolveCaa",
+      "dns/promises.resolveCname",
+      "dns/promises.Resolver.resolveCname",
+      "dns/promises.resolveMx",
+      "dns/promises.Resolver.resolveMx",
+      "dns/promises.resolveNaptr",
+      "dns/promises.Resolver.resolveNaptr",
+      "dns/promises.resolveNs",
+      "dns/promises.Resolver.resolveNs",
+      "dns/promises.resolvePtr",
+      "dns/promises.Resolver.resolvePtr",
+      "dns/promises.resolveSoa",
+      "dns/promises.Resolver.resolveSoa",
+      "dns/promises.resolveSrv",
+      "dns/promises.Resolver.resolveSrv",
+      "dns/promises.resolveTlsa",
+      "dns/promises.Resolver.resolveTlsa",
+      "dns/promises.resolveTxt",
+      "dns/promises.Resolver.resolveTxt",
+      "dns/promises.reverse",
+      "dns/promises.Resolver.reverse",
+      "net.Socket.prototype.connect"
+    ]
+  },
+  "provenance": {
+    "node": "v22.23.2",
+    "datasetSha256": "4dd6a31064ff3e072f585430e6b3562ecc51333abbee40b6df175935c369444c",
+    "schemaSha256": "06b7ff0e3de4dabd8070a02cd2fb76d43b1850a615d4f568265fcf7b5da939d9",
+    "lockfileSha256": "82e534f4a7d55a458e60e18321d2612418b282d3f316e4cc09c786dda83db0ee",
+    "datasetOrigin": "frozen_manifest",
+    "runtimeGraph": [
+      {
+        "path": "apps/web/src/evals/sprint-contract-v1/case-runner.ts",
+        "sourceSha256": "a4bb4c453c498a094b9eaf900f49b6f95b76bb49ef0359dfe7753bfa708c887f",
+        "emittedSha256": "a627783d9b4e9c26828cce0dcae2c6f76dbcd320f8119c0246f5c0aab3bb196b"
+      },
+      {
+        "path": "apps/web/src/evals/sprint-contract-v1/grade.ts",
+        "sourceSha256": "534f48fc234d60e693baf9a040f066e7636e9904f8c1ce28277bc4dc705571b2",
+        "emittedSha256": "044e7910673b6b5f5051c5fcc02859ebfb5cbbea29cd4c4e663072cf0680e154"
+      },
+      {
+        "path": "apps/web/src/evals/sprint-contract-v1/schema.ts",
+        "sourceSha256": "0c36c5ca373646cb0689d1d42d1e25d0f0ccdcdbd54d6019e207fc0345048f1f",
+        "emittedSha256": "f3b47a6d8dab179764ba1100350e1c685ca41ee52dd40a168160f9e8ca3a6055"
+      },
+      {
+        "path": "apps/web/src/evals/sprint-contract-v1/worker.ts",
+        "sourceSha256": "dbc1f5e0f20711f5e9b9c45cd3b00c582951b31079016881ee65586400214efb",
+        "emittedSha256": "971e8eb7ba46765188bd954793e4023934936c2520c15c4ca319eb11d845e778"
+      },
+      {
+        "path": "apps/web/src/server/research/link-context.ts",
+        "sourceSha256": "92a55e34ba574f694afa87efc2a8704f037ca24cb2b09a3a5a8b9aecb3ac70aa",
+        "emittedSha256": "cb8acf60b694f4746b4783672a6fd0f814aec33353cf6a17c0bec6260f397a17"
+      },
+      {
+        "path": "apps/web/src/server/research/named-owner.ts",
+        "sourceSha256": "65ce33074539e81aa32440a0b460c93da2ffc21b9d044c904018754f88fc2f07",
+        "emittedSha256": "c000f1034fd22423917f1f38a496e1f3308830c2314b8db786cb974cfaf09c21"
+      },
+      {
+        "path": "apps/web/src/server/research/research-tool-contracts.ts",
+        "sourceSha256": "ef862c66d305c7afd6ce8ae31f8cf7fc61db3366e07a652df2269c9964bc8e8a",
+        "emittedSha256": "73b44e39c94343c7104f123f44838b5fd139a3bbaf08ceaf9af2c3a7ef51ec5e"
+      },
+      {
+        "path": "apps/web/src/server/research/research-tool-dispatch.ts",
+        "sourceSha256": "74d55593a2ab925745caeab3be6920f8d582ba0b94fe1da6105a2fa64cd853f9",
+        "emittedSha256": "ddb6b54100727c40fb891143b2610463f3d8f9214cc74302f9f0867eaf022cc5"
+      },
+      {
+        "path": "apps/web/src/shared/discovery-plan.ts",
+        "sourceSha256": "989f204054dc23b5015aadca952ac0952877bc388e7e5b396ca287264476edbe",
+        "emittedSha256": "1bfaaa7d724b1d5b11639be445c165c9e08ee3e82903ddef6032f4533d584119"
+      },
+      {
+        "path": "apps/web/src/shared/first-step-discovery.ts",
+        "sourceSha256": "c02d719723e1e1240c616f13c7549f1fed33e80e2fddc1a88e140385b56e7585",
+        "emittedSha256": "566791ca85b362aec7bd35f393b8934c5dcfbddba92370a8c1f0ebdbf7358089"
+      },
+      {
+        "path": "apps/web/src/shared/url-policy.ts",
+        "sourceSha256": "13b02242f0d5fd29c4c2ab7411e1ebbe299f30d08572822219c4bfb82effcb6b",
+        "emittedSha256": "ebc29d3ad10060e531902f9616f9e0baaa3d8d22c0fe411cc8e999536c94d94c"
+      }
+    ],
+    "runtimeGraphSha256": "f7d944df6e709cc04142922469df668fa99b37a0ac301b072be0a660beff5157",
+    "launcherSha256": "b259ce34ef1d676a8a37182ad0ffb5dc1c795cd18bcbfc72c96f7ffab34ee43a",
+    "guardSha256": "c8405d70d6ea89adb35586ae67a267a4210b39470bc105e773042eafd4462a79"
+  },
+  "worker": {
+    "exitCode": 0,
+    "signal": null,
+    "independentGuardViolations": []
+  },
+  "evidenceNote": "Per-case raw source inputs are in evals/sprint-contract-v1/cases.json; replay regenerates quotes, locators, hashes and envelopes. This public summary omits duplicated raw evidence."
+}

@@ -58,6 +58,8 @@ jobs:
         run: python3 scripts/check_eval_datasets.py
       - name: Frozen provider evaluations (no external requests)
         run: npm --prefix apps/web run eval
+      - name: Synthetic adversarial contract evaluation (offline, no quality claim)
+        run: npm --prefix apps/web run eval:sprint
       - name: Static design checks
         run: python3 scripts/check_design.py
       - name: Validate deployment scripts

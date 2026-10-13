@@ -5,6 +5,14 @@ import path from 'node:path';
 import { bootstrap } from '../server/index.js';
 import type { BootstrappedApp, BootstrapOverrides } from '../server/index.js';
 import type { Store } from '../server/store.js';
+import type { HttpTransport } from '../server/adapters/types.js';
+
+/** Tests must explicitly supply synthetic provider responses; fake keys do not block IO. */
+export const offlineTestTransport: HttpTransport = {
+  async fetch() {
+    throw new Error('offline_test_transport: inject a synthetic provider transport');
+  }
+};
 
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -158,14 +166,15 @@ export async function startTestServer(
   const dataDir = options.dataDir ?? mkdtempSync(path.join(tmpdir(), 'stripsearch-test-'));
   const port = await freePort();
   const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: 'test' };
-  delete env.EXA_API_KEY;
-  delete env.GITHUB_TOKEN;
+  for (const key of ['GITHUB_TOKEN', 'EXA_API_KEY', 'DEEPSEEK_API_KEY', 'FIRECRAWL_API_KEY', 'TIKHUB_API_KEY']) delete env[key];
   delete env.STRIPSEARCH_PUBLIC_ORIGIN;
   Object.assign(env, envOverrides);
   env.PORT = String(port);
   env.STRIPSEARCH_DATA_DIR = dataDir;
   if (!env.STRIPSEARCH_PUBLIC_ORIGIN) env.STRIPSEARCH_PUBLIC_ORIGIN = `http://localhost:${port}`;
-  const boot = await bootstrap(env, overrides);
+  // Install the boundary before bootstrap can recover and pump persisted jobs.
+  // Explicit undefined must not restore bootstrap's production HTTP fallback.
+  const boot = await bootstrap(env, { ...overrides, transport: overrides.transport ?? offlineTestTransport });
   const server = boot.app.listen(port, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const baseUrl = `http://127.0.0.1:${port}`;

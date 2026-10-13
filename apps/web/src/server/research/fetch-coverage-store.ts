@@ -419,7 +419,7 @@ export class FetchCoverageStore {
     if (!caseRecord) return null;
     const frozen = this.completion.getCompletionScope(ownerId, caseId, scopeSpecId);
     if (!frozen) return null;
-    const report = this.cases.reportView(ownerId, caseId);
+    const caseAccounts = this.cases.listAccounts(ownerId, caseId);
     const spec: CompletionScopeSpec = frozen.spec;
     const currentScope = caseRecord.scopeVersion;
     // Frozen scope + scopeVersion used consistently: the projection is cut on
@@ -432,23 +432,27 @@ export class FetchCoverageStore {
     // evaluator. A final observation whose predecessor page or pinned
     // coverage lost its dependency is withdrawn here exactly as in GET-60.
     const snapshot = this.completion.getCurrentCompletionSnapshot(ownerId, caseId, scopeSpecId);
-    const dependencyValid = snapshot ? dependencyValidationMap(snapshot) : new Map<string, boolean>();
+    // The frozen scope was found in this same read transaction. Reuse its
+    // authoritative bulk reads rather than building an unrelated full report
+    // (including one query per source plus claims/coverage) and reading the
+    // same observations again. Nothing survives this projection call.
+    if (!snapshot) return null;
+    const dependencyValid = dependencyValidationMap(snapshot);
 
     const sliceById = new Map(frozen.accountSlice.map((entry) => [entry.accountId, entry]));
-    const accountById = new Map(report.accounts.map((account) => [account.accountId, account]));
-    const evidenceById = new Map<string, EvidenceRef>(report.evidence.map((entry) => [entry.evidenceId, entry]));
+    const accountById = new Map(caseAccounts.map((account) => [account.accountId, account]));
+    // Snapshot evidence is already restricted by case_id in CompletionStore.
+    const evidenceById = new Map(snapshot.evidence.map((entry) => [entry.evidenceId, { ...entry, caseId }]));
     const publishedByKey = new Map<string, string | null>();
     const latestRevisionBySource = new Map<string, number>();
-    for (const source of report.sources) {
-      for (const revision of source.revisions) {
-        publishedByKey.set(
-          itemKey(source.accountId, revision.sourceId, revision.sourceRevision),
-          revision.publishedAt
-        );
-        const latest = latestRevisionBySource.get(revision.sourceId) ?? 0;
-        if (revision.sourceRevision > latest) {
-          latestRevisionBySource.set(revision.sourceId, revision.sourceRevision);
-        }
+    for (const source of snapshot.sources) {
+      publishedByKey.set(
+        itemKey(source.accountId, source.sourceId, source.sourceRevision),
+        source.publishedAt
+      );
+      const latest = latestRevisionBySource.get(source.sourceId) ?? 0;
+      if (source.sourceRevision > latest) {
+        latestRevisionBySource.set(source.sourceId, source.sourceRevision);
       }
     }
 
@@ -487,7 +491,7 @@ export class FetchCoverageStore {
     });
 
     // GET-60 read side: enumeration/media metadata and selected branches.
-    const observations = this.completion.listCompletionObservations(ownerId, caseId, scopeSpecId);
+    const observations = snapshot.observations;
     const contentByKey = new Map<string, CoverageLocator>();
     const enumerated = new Map<
       string,
@@ -570,6 +574,7 @@ export class FetchCoverageStore {
 
     // Group receipts per content identity; every receipted item is content too.
     const receiptsByItem = new Map<string, ReceiptInfo[]>();
+    const receiptsByDimension = new Map<string, Map<string, ReceiptInfo[]>>();
     for (const info of receiptInfos) {
       const content = info.record.content;
       const key = itemKey(content.accountId, content.sourceId, content.sourceRevision);
@@ -577,6 +582,17 @@ export class FetchCoverageStore {
       const list = receiptsByItem.get(key) ?? [];
       list.push(info);
       receiptsByItem.set(key, list);
+      let dimensions = receiptsByDimension.get(key);
+      if (!dimensions) {
+        dimensions = new Map();
+        receiptsByDimension.set(key, dimensions);
+      }
+      const dimensionKey = fetchDimensionKey(info.record.dimension);
+      const history = dimensions.get(dimensionKey) ?? [];
+      // Rows arrive in seq order: indexing must preserve the history and
+      // supersession order, including stale or revoked receipts.
+      history.push(info);
+      dimensions.set(dimensionKey, history);
     }
 
     const allKeys = [...contentByKey.keys()];
@@ -634,9 +650,12 @@ export class FetchCoverageStore {
       }
 
       const itemReceipts = receiptsByItem.get(key) ?? [];
+      const dimensionReceipts = receiptsByDimension.get(key);
       const dimensions: FetchDimensionView[] = [];
       for (const name of ['body', 'media', 'comments'] as const) {
-        dimensions.push(this.dimensionView({ name }, itemReceipts, frozen.scopeVersion, [], false));
+        dimensions.push(this.dimensionView(
+          { name }, dimensionReceipts?.get(fetchDimensionKey({ name })) ?? [], frozen.scopeVersion, [], false
+        ));
       }
       const branchKeys = new Set<string>();
       for (const branchKey of selectedBranches.get(key) ?? []) branchKeys.add(branchKey);
@@ -646,19 +665,14 @@ export class FetchCoverageStore {
       }
       for (const branchKey of [...branchKeys].sort(compareText)) {
         const selection = (selectedBranches.get(key) ?? new Set<string>()).has(branchKey);
-        const latestReceiptParents = itemReceipts
-          .filter(
-            (info) =>
-              info.record.dimension.name === 'thread_branch' && info.record.dimension.branchKey === branchKey
-          )
-          .map((info) => info.record.parents);
+        const branchReceipts = dimensionReceipts?.get(fetchDimensionKey({ name: 'thread_branch', branchKey })) ?? [];
         const parents = mergeParentEntries([
           parentEntries.get(key)?.get(branchKey) ?? [],
-          latestReceiptParents.length > 0 ? (latestReceiptParents[latestReceiptParents.length - 1] ?? []) : []
+          branchReceipts[branchReceipts.length - 1]?.record.parents ?? []
         ]);
         const view = this.dimensionView(
           { name: 'thread_branch', branchKey },
-          itemReceipts,
+          branchReceipts,
           frozen.scopeVersion,
           parents,
           selection
@@ -698,14 +712,20 @@ export class FetchCoverageStore {
     });
 
     // Per platform/account counters over the frozen publication window.
+    const itemsByAccount = new Map<string, FetchCoverageItemView[]>();
+    for (const item of items) {
+      const accountItems = itemsByAccount.get(item.content.accountId) ?? [];
+      accountItems.push(item);
+      itemsByAccount.set(item.content.accountId, accountItems);
+    }
     const accountIds = [
-      ...new Set([...report.accounts.map((account) => account.accountId), ...items.map((item) => item.content.accountId)])
+      ...new Set([...caseAccounts.map((account) => account.accountId), ...itemsByAccount.keys()])
     ];
     accountIds.sort(compareText);
     const accounts: FetchAccountCoverage[] = accountIds.map((accountId) => {
       const account = accountById.get(accountId);
       const sliceEntry = sliceById.get(accountId);
-      const accountItems = items.filter((entry) => entry.content.accountId === accountId);
+      const accountItems = itemsByAccount.get(accountId) ?? [];
       const enumeration = enumerationStatus(enumerationByAccount.get(accountId) ?? [], spec, dependencyValid);
       const enumeratedItems = accountItems.filter((entry) => entry.enumerated).length;
       const receiptOnlyItems = accountItems.filter((entry) => !entry.enumerated).length;
@@ -831,15 +851,11 @@ export class FetchCoverageStore {
   /** One dimension instance with its append-order supersession and history. */
   private dimensionView(
     dimensionRef: FetchDimensionRef,
-    itemReceipts: ReceiptInfo[],
+    history: ReceiptInfo[],
     currentScope: ScopeVersion,
     parents: ParentContextEntry[],
     branchSelected: boolean
   ): FetchDimensionView {
-    const wantedKey = fetchDimensionKey(dimensionRef);
-    const history = itemReceipts.filter(
-      (info) => fetchDimensionKey(info.record.dimension) === wantedKey
-    );
     const currentScopeHistory = history.filter((info) => info.record.scopeVersion === currentScope);
     const pick =
       currentScopeHistory.length > 0
@@ -905,7 +921,7 @@ function inSpecAccountRange(
 }
 
 function evidenceProblem(
-  evidence: EvidenceRef | undefined,
+  evidence: Pick<EvidenceRef, 'caseId' | 'accountId' | 'role' | 'revokedAt'> | undefined,
   supportPolarity: boolean,
   caseId: string,
   accountId: string

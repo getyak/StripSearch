@@ -531,7 +531,7 @@ export function verifyFirstStepModelProposals(
       continue;
     }
     // The receipt must belong to the claimed source: same request URL.
-    if (receipt.request.url !== undefined && comparableUrl(receipt.request.url) !== comparableUrl(proposal.fromUrl)) {
+    if (typeof receipt.request.url !== 'string' || receipt.request.url.trim().length === 0 || comparableUrl(receipt.request.url) !== comparableUrl(proposal.fromUrl)) {
       reject('提议引用的请求回执属于其他来源页面。');
       continue;
     }

@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "baselineRevision": "0017e11",
+  "node": "v22.23.2",
+  "platform": "darwin",
+  "arch": "arm64",
+  "createdAt": "2026-10-13T04:22:59.832Z",
+  "scope": "Offline synthetic SQLite in-memory production getFetchCoverageView; setup, stringify and instrumentation excluded from timing; no network or production-latency claim.",
+  "warmups": 3,
+  "repetitions": 9,
+  "results": [
+    {
+      "fixture": {
+        "accounts": 12,
+        "itemsPerAccount": 20,
+        "branches": 3
+      },
+      "receipts": 1572,
+      "outputBytes": 1909156,
+      "outputSha256": "c468fc9f80c4a5011b65b6acc5a7fa96c458835eec6f117a51495ebee36db0b3",
+      "byteEquivalent": true,
+      "baselineSelects": 260,
+      "modifiedSelects": 260,
+      "baselineMs": {
+        "samples": [
+          11.798583000000008,
+          15.43591600000002,
+          15.549584000000095,
+          11.395374999999945,
+          10.486583999999993,
+          10.744791999999961,
+          14.750792000000047,
+          13.066333999999983,
+          14.390833000000043
+        ],
+        "median": 13.066333999999983
+      },
+      "modifiedMs": {
+        "samples": [
+          18.93820800000003,
+          14.05879200000004,
+          11.467833999999925,
+          11.884083000000032,
+          11.18829100000005,
+          11.332459000000085,
+          12.319082999999978,
+          11.906500000000051,
+          16.410957999999937
+        ],
+        "median": 11.906500000000051
+      },
+      "speedup": 1.0974118338722485
+    },
+    {
+      "fixture": {
+        "accounts": 60,
+        "itemsPerAccount": 40,
+        "branches": 3
+      },
+      "receipts": 15720,
+      "outputBytes": 18991465,
+      "outputSha256": "6a74770d80284f34d8e6618762b195cc819970a1efb822b0f9f0b8bd2a9445f8",
+      "byteEquivalent": true,
+      "baselineSelects": 2420,
+      "modifiedSelects": 2420,
+      "baselineMs": {
+        "samples": [
+          142.40708300000006,
+          141.12924999999996,
+          154.4895000000006,
+          236.14066600000024,
+          172.6637499999997,
+          257.1203749999995,
+          383.96379199999956,
+          132.98449999999866,
+          203.31666699999914
+        ],
+        "median": 172.6637499999997
+      },
+      "modifiedMs": {
+        "samples": [
+          118.25445800000034,
+          125.32875000000058,
+          228.23666700000012,
+          193.53562499999953,
+          226.90700000000015,
+          381.7396660000004,
+          154.85341599999992,
+          113.29645799999889,
+          131.7849580000002
+        ],
+        "median": 154.85341599999992
+      },
+      "speedup": 1.1150141498977317
+    }
+  ]
+}

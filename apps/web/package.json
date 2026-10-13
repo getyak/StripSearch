@@ -19,7 +19,9 @@
     "build": "npm run build:client && npm run build:server && npm run build:data",
     "start": "node --env-file-if-exists=.env dist/server/index.js",
     "dev": "npm run build:client && node --import tsx --env-file-if-exists=.env --watch src/server/index.ts",
-    "dev:client": "vite build --watch"
+    "dev:client": "vite build --watch",
+    "eval:sprint": "node src/evals/sprint-contract-v1/run.mjs",
+    "benchmark:coverage": "node --import tsx scripts/benchmark-coverage.ts"
   },
   "dependencies": {
     "@deepseek-ai/dsh-sdk-client": "0.1.7-rc.2",
