@@ -38,3 +38,11 @@ Fetch 只检查空值与授权范围披露，没有提交真实 GitHub 抓取；
 - 独立只读 review 检查完整客户端 diff，确认问题均已修复复核，无未解决的确认问题。对比度配对见[设计规范](../../../docs/web-design.md)。
 
 未测真实用户偏好、转化、性能 trace、外部 provider 或公网生产。没有原生客户端交付。布局改进与设计取舍不构成“超过 Ambi”的客观结论。
+
+## 交付记录
+
+实现提交 `c22806aa86116fd25d6330461e3d649e691bbfd2` 已通过单实例管理入口发布。随后独立 `verify` 读回：loopback 与 Tailnet health、release revision、首页及两份入口资源一致；唯一 loopback listener、注册模式 `open`。部署地址、持久数据路径与原始回执保存在部署方私有证据中。
+
+远程分支 `codex/ambi-design-refinement` 已推送并关联 [PR #44](https://github.com/getyak/StripSearch/pull/44)；本轮未合并 `main`、未部署公网宿主。实现提交的 push/PR 共 10 项检查成功；追加本交付文档后继续以 PR 最新提交的 checks 为准。运行源码仍为上述实现提交，交付文档不改变客户端资源。
+
+Notion 现有项目页已原位更新核验日期、main/运行版本、唯一入口与本轮边界，并刷新读回确认。连接工具本次不可调用，使用已登录 UI 完成，没有创建新工作区或改变共享权限。辅助工具按需配置未改，本轮未复核其运行状态。

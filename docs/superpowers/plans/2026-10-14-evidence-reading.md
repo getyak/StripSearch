@@ -54,4 +54,4 @@
 - [x] Codex 用浏览器复核桌面、平板、390/320、主题与减少动效，修正可见问题。
 - [x] 独立 reviewer 检查真实 diff；关闭确认的 P0/P1，复核修复。
 - [x] 运行全套适用离线检查与构建，保存确切计数和未测事项。（typecheck / build / test 1409 通过、0 失败、1 跳过 / check_design 全过；详见[体验设计实施记录](../../design/experience-2026-10-14.md)）
-- [ ] 提交并按单实例发布契约更新本机服务，核对 health/revision/assets；记录实际远端交付范围。
+- [x] 提交并按单实例发布契约更新本机服务，核对 health/revision/assets；记录实际远端交付范围。实现提交 `c22806a` 已发布，PR #44 已推送；Notion 状态与核验日期已原位更新并读回。
