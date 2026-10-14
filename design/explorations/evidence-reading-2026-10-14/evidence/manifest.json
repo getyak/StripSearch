@@ -1,0 +1,41 @@
+{
+  "baselineRevision": "20bd69c",
+  "baselineClientAssets": [
+    "index-BqbOn6hq.js",
+    "index-DuIPgvS3.css"
+  ],
+  "fixture": "Original synthetic Linzhou/Lantern; no network/provider requests",
+  "files": {
+    "after-ambiguous-desktop.jpg": "d39dfdbc0c1d8d45c9fcef46dbb3baf89d99a8322e3e36c41dff182c88a637b8",
+    "after-ambiguous-mobile.jpg": "44f25e7ec8884242636ae4dce320f1ffbae05c761a6b892e7b09f598b1640a0f",
+    "after-auth-error-mobile.jpg": "58450f410d79c54e793dccdad520ca189fcaa8f9dda90c43b3c4ec4691709c03",
+    "after-citation-visible-mobile.jpg": "9c5eb1902737aeef0faae48766ec50103fd6369cdb5301d5d4072984d45b28d1",
+    "after-fetch-desktop.jpg": "eb29bade4399a8023b72d58c4b4ef81435978107b749559390cdb73eb7ca2d9f",
+    "after-fetch-mobile.jpg": "2c0b0f4561772652f6260a633f01d1a4fc7e17c070e54ea6f45425b5f81944a0",
+    "after-home-dark-reduced.jpg": "66dcffe2411f3b3c0c5fbfb39e3e4639c1a57bcb191dded22f3ef23b405fd00e",
+    "after-home-desktop.jpg": "648e1c5c75b810b04b49280e42bbc6d6ffce3caef4aacba9636383da6de56ed9",
+    "after-home-full-desktop.jpg": "3534c01dfcd1c1a0c44606b47198233a8b4d4c764ad56a1cb6a79f4b20bb30ec",
+    "after-home-mobile.jpg": "9b01b63a61009287be3145a2f86f2ecc868fcd3631df6e6c7ba468a931c873a2",
+    "after-identity-desktop.jpg": "7f6b1126314c623d1c6f7d1dee2bfdaa39dd2302cbfcf182f321e82cc8c04a87",
+    "after-identity-mobile.jpg": "719b19b06184ac19cd9a6ae386e8ecf3499aec6e66607163c2e7c1fef3e43c07",
+    "after-review-desktop.jpg": "361fe8141113fa4b380767448aba2962489a4344d377e5c18d0dcf262d98f9f5",
+    "after-review-mobile.jpg": "9543a2f106ad3382289221c4fcfc79963505ca420fb24d8d7c0a68614c7dfd06",
+    "after-source-dark-mobile.jpg": "d36f2e6146b9379804e51a2db7c443c9182a4976a68b125a03e8e53ed05b61f9",
+    "after-source-desktop.jpg": "2b4bbe1bf8c3f61a9e2db5f2cd315768be4667558a1b377327a5430815b1b887",
+    "after-workspace-dark-mobile.jpg": "9e8381eeabce5c0dc177fa13765b3c0a28f10e35f451483c2fbdcf71057230db",
+    "after-workspace-desktop.jpg": "053eff0d073e3fd6e1d61d8255b4cbe018f6f2345225868775d82e48ce06d368",
+    "after-workspace-mobile.jpg": "6717a7acdcc56d65eb161b2a58317eb177127295753ed0580c58498fbe7a9de3",
+    "baseline-metrics.json": "a314285f7d12880070610ad78c498761e1adb610965006c73aa5728d87cdd9dc",
+    "before-home-desktop.jpg": "79f96040371645ceea354d709321a7bdd6ba07ec2cbb22a66d4b9b562a96c743",
+    "before-home-mobile.jpg": "0f2f613481e63cfa73788a0ff13c8c05eba51bd8aeb4265f483d6e9d4f0d67fe",
+    "before-identity-desktop.jpg": "1e3538e734cd0be184bf083608945befb310a1710992f2594bceb6e2a657e09d",
+    "before-identity-mobile.jpg": "d57481cdbfffb995cc08f1309f38fa8d265dbc8647580773f1afee955133676e",
+    "before-workspace-desktop.jpg": "9349482413e50369f17c233d5656e553673ad98d850a55916ff6cdf6ef5d9df9",
+    "concept-a-desktop.jpg": "7c8b73cfdfcf4481f592885ed07cae1eaf2fa8c90fd33499f303982cc3727c90",
+    "concept-a-mobile.jpg": "59c5816f7e104063b2d9d93e7f60ebc9e19e0286b20c062631d112deb9ec9037",
+    "concept-b-desktop.jpg": "f9b558d1b46ec2f2afeaa6078ba74481d42bd433f82be3ce985aa0a2cde9f0fb",
+    "concept-b-mobile.jpg": "ee83fc699295c8822b6423ff6a5cf387c4cce5163b37fe082398d4a8820d7465",
+    "final-metrics.json": "ced5908c3643f7e1213e68aaed9932c04cd056a9aac3d5f413df5faef568ff70"
+  },
+  "verificationDate": "2026-10-15"
+}

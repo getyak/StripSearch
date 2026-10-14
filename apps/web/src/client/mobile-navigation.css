@@ -1,0 +1,70 @@
+/* Keep the two-part brand mark on one optical line in every surface. */
+.brand-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  line-height: 1;
+}
+.brand-mark > span { display: inline; }
+.mobile-navigation, .account-site-navigation { display: none; }
+.mobile-navigation { position: relative; }
+.mobile-navigation > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding-inline: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+}
+.mobile-navigation > summary::-webkit-details-marker { display: none; }
+.mobile-navigation[open] > summary { background: var(--surface-2); }
+.mobile-site-links {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: 180px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.mobile-site-links a, .account-site-navigation a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 14px;
+  text-decoration: none;
+}
+.mobile-site-links a:hover, .account-site-navigation a:hover { background: var(--surface-2); }
+@media (max-width: 940px) {
+  .site-nav .brand { gap: 8px; font-size: 18px; }
+  .site-nav .user-name { display: none; }
+  .site-nav .nav-actions .button { padding-inline: 10px; font-size: 13px; white-space: nowrap; }
+  body[data-view="home"] .nav-links { display: none; }
+  body[data-view="home"] .nav-inner { grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+  body[data-view="home"] .mobile-navigation { display: block; }
+  body[data-view="home"] .nav-inner:has(.user-menu:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto; }
+  body[data-view="home"] .nav-inner:has(.user-menu:not([hidden])) .mobile-navigation { display: none; }
+  body[data-view="home"] .account-site-navigation {
+    display: grid;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+}
+@media (max-width: 360px) {
+  .site-nav .brand { font-size: 16px; }
+  .site-nav .brand-mark { width: 28px; height: 28px; }
+}
