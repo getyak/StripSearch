@@ -1,0 +1,19 @@
+{
+  "desktop": {
+    "ctaBottom": 677.46875,
+    "firstCitationTop": 492.65625,
+    "height": 900,
+    "pageHeight": 4716,
+    "scrollWidth": 1440,
+    "width": 1440
+  },
+  "mobile": {
+    "ctaBottom": 492.609375,
+    "firstCitationTop": 708.890625,
+    "height": 844,
+    "pageHeight": 6493,
+    "scrollWidth": 390,
+    "unknownBottom": 817.28125,
+    "width": 390
+  }
+}

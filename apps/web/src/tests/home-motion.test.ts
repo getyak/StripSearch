@@ -4,180 +4,143 @@ import { readFileSync } from 'node:fs';
 import { installDom } from './dom-env.js';
 import { createHomeMotion } from '../client/home-motion.js';
 
-const DESKTOP = '(min-width: 1000px) and (min-height: 720px)';
-const REDUCED = '(prefers-reduced-motion: reduce)';
-
-function fixture(t: { after(fn: () => void): void }, options: { observer?: boolean; desktop?: boolean; reduced?: boolean } = {}) {
+function fixture(t: { after(fn: () => void): void }) {
   const env = installDom();
   const win = env.window as unknown as Window & typeof globalThis;
   const doc = env.document;
-  const queries = new Map<string, { matches: boolean; listeners: Set<() => void> }>();
-  for (const [query, matches] of [[DESKTOP, options.desktop ?? true], [REDUCED, options.reduced ?? false]] as const) {
-    queries.set(query, { matches, listeners: new Set() });
-  }
-  win.matchMedia = ((query: string) => {
-    const state = queries.get(query)!;
-    return {
-      get matches() { return state.matches; }, media: query,
-      addEventListener(_type: string, listener: () => void) { state.listeners.add(listener); },
-      removeEventListener(_type: string, listener: () => void) { state.listeners.delete(listener); }
-    };
-  }) as typeof win.matchMedia;
-  let hidden = false;
-  Object.defineProperty(doc, 'hidden', { get: () => hidden, configurable: true });
-  Object.defineProperty(win, 'innerHeight', { value: 900, configurable: true });
-  let scroll = 0;
-  const chapters = [...doc.querySelectorAll<HTMLElement>('[data-journey-step]')];
-  chapters.forEach((chapter, index) => {
-    chapter.getBoundingClientRect = () => ({ top: 100 + index * 700 - scroll, bottom: 800 + index * 700 - scroll }) as DOMRect;
-  });
-  const observers: { callback: IntersectionObserverCallback; disconnected: boolean; targets: Element[] }[] = [];
-  if (options.observer !== false) {
-    (win as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-      record: typeof observers[number];
-      constructor(callback: IntersectionObserverCallback) {
-        this.record = { callback, disconnected: false, targets: [] }; observers.push(this.record);
-      }
-      observe(target: Element) { this.record.targets.push(target); }
-      disconnect() { this.record.disconnected = true; }
-    };
-  }
   const controller = createHomeMotion({ doc, win });
   t.after(() => controller.dispose());
   const el = <T extends HTMLElement = HTMLElement>(id: string): T => doc.getElementById(id)! as T;
-  const panels = () => [...doc.querySelectorAll<HTMLElement>('[data-journey-panel]')];
   return {
-    controller, doc, win, queries, observers, panels, el,
-    stage: () => Number(el('home-artifact').dataset.stage),
-    emit(y: number) {
-      scroll = y;
-      observers.at(-1)?.callback([], {} as IntersectionObserver);
-    },
-    setMedia(query: string, matches: boolean) {
-      const state = queries.get(query)!; state.matches = matches;
-      [...state.listeners].forEach((listener) => listener());
-    },
-    setHidden(value: boolean) { hidden = value; doc.dispatchEvent(new win.Event('visibilitychange')); }
+    controller, doc, win, el,
+    citation: (id: string) => el<HTMLButtonElement>(id),
+    material: (id: string) => el<HTMLDetailsElement>(id)
   };
 }
 
-test('desktop starts at the input and scroll unfolds all three stages in either direction', (t) => {
-  const f = fixture(t);
-  assert.equal(f.el('journey-visual').hidden, false);
-  assert.equal(f.stage(), 1);
-  assert.equal(f.panels().filter(panel => !panel.hidden).length, 1);
-  assert.equal(f.observers[0]!.targets.length, 3);
-  f.emit(600); assert.equal(f.stage(), 2);
-  assert.match(f.el('journey-stage-host').textContent!, /同名候选/);
-  assert.equal(f.doc.querySelector('[data-phase="2"]')?.getAttribute('aria-current'), 'step');
-  f.emit(1400); assert.equal(f.stage(), 3);
-  assert.equal(f.panels()[2]!.hidden, false);
-  assert.match(f.el('journey-context').textContent!, /作品研究/);
-  f.emit(600); assert.equal(f.stage(), 2);
-  f.emit(0); assert.equal(f.stage(), 1);
-});
-
-test('restored reading position is selected synchronously without requiring an entry order', (t) => {
-  const f = fixture(t);
-  f.controller.setActive(false);
-  f.emit(1600);
-  f.controller.setActive(true);
-  assert.equal(f.stage(), 3);
-  assert.equal(f.panels()[2]!.hidden, false);
-});
-
-for (const [name, options] of [
-  ['mobile or short viewport', { desktop: false }],
-  ['reduced motion', { reduced: true }],
-  ['missing IntersectionObserver', { observer: false }]
-] as const) {
-  test(`${name} keeps each full panel beside its chapter without a hidden result`, (t) => {
-    const f = fixture(t, options);
-    assert.equal(f.el('journey-visual').hidden, true);
-    assert.equal(f.observers.length, 0);
-    f.panels().forEach((panel, index) => {
-      assert.equal(panel.hidden, false);
-      assert.equal(panel.parentElement?.dataset.stageSlot, String(index + 1));
-    });
-    assert.match(f.panels()[2]!.textContent!, /还不能证明/);
-  });
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-test('changing media settings moves the same content and preserves inspected details and focus', (t) => {
+test('a citation reveal opens its material in place and moves focus onto the disclosure', (t) => {
   const f = fixture(t);
-  f.emit(1400);
-  f.el<HTMLButtonElement>('home-citation').click();
-  const detail = f.el<HTMLDetailsElement>('home-source');
-  const summary = detail.querySelector('summary')!;
-  assert.equal(detail.open, true);
-  assert.equal(f.doc.activeElement, summary);
-  f.setMedia(REDUCED, true);
-  assert.equal(f.el('journey-visual').hidden, true);
-  assert.equal(detail.open, true);
-  assert.equal(f.doc.activeElement, summary);
-  assert.equal(f.panels().every(panel => !panel.hidden), true);
-  f.setMedia(REDUCED, false);
-  assert.equal(f.el('journey-visual').hidden, false);
-  assert.equal(detail.open, true);
-  assert.equal(f.doc.activeElement, summary);
-  f.setMedia(DESKTOP, false);
-  assert.equal(f.el('journey-visual').hidden, true);
+  const button = f.citation('home-citation');
+  const material = f.material('home-source');
+  assert.equal(material.open, false);
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  const parent = material.parentElement;
+  button.click();
+  assert.equal(material.open, true);
+  assert.equal(material.parentElement, parent, 'the material never relocates');
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(material.dataset.revealed, 'true');
+  assert.equal(f.doc.activeElement, material.querySelector('summary'));
 });
 
-test('initial mobile source focus survives promotion into the desktop workspace', (t) => {
-  const f = fixture(t, { desktop: false });
-  f.emit(1400);
-  const summary = f.el('home-source').querySelector('summary')!;
-  summary.focus();
-  f.setMedia(DESKTOP, true);
-  assert.equal(f.stage(), 3);
-  assert.equal(f.panels()[2]!.hidden, false);
-  assert.equal(f.doc.activeElement, summary);
+test('every citation binds to its own material without touching the others', (t) => {
+  const f = fixture(t);
+  f.citation('home-citation-2').click();
+  assert.equal(f.material('home-source-2').open, true);
+  assert.equal(f.material('home-source').open, false);
+  assert.equal(f.citation('home-citation').getAttribute('aria-expanded'), 'false');
 });
 
-test('scroll does not hide or blur a focused source; leaving it resumes the narrative', async (t) => {
+test('closing the material collapses its citation and clears the reveal mark', async (t) => {
   const f = fixture(t);
-  f.emit(1400);
-  f.el<HTMLButtonElement>('home-citation').click();
-  const summary = f.el('home-source').querySelector('summary')!;
-  f.emit(0);
-  assert.equal(f.stage(), 3);
-  assert.equal(f.doc.activeElement, summary);
-  f.el<HTMLTextAreaElement>('research-question').focus();
-  await Promise.resolve();
-  assert.equal(f.stage(), 1);
-  assert.equal(f.el<HTMLDetailsElement>('home-source').open, true);
+  const button = f.citation('home-citation');
+  const material = f.material('home-source');
+  button.click();
+  material.open = false;
+  // jsdom queues details toggle events; browsers fire them directly.
+  material.dispatchEvent(new f.win.Event('toggle'));
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.equal(material.dataset.revealed, undefined);
+  material.open = true;
+  material.dispatchEvent(new f.win.Event('toggle'));
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(material.dataset.revealed, 'true');
+  await settle();
 });
 
-test('inactive, hidden, cached and disposed pages disconnect observers without late mutations', (t) => {
+test('an inactive page ignores reveals and an active page resumes them', (t) => {
   const f = fixture(t);
-  f.emit(600);
   f.controller.setActive(false);
-  assert.equal(f.observers.at(-1)!.disconnected, true);
-  f.emit(1400); assert.equal(f.stage(), 2);
-  f.controller.setActive(true); assert.equal(f.stage(), 3);
-  f.setHidden(true); assert.equal(f.observers.at(-1)!.disconnected, true);
-  f.setHidden(false); assert.equal(f.el('journey-visual').hidden, false);
-  f.win.dispatchEvent(new f.win.PageTransitionEvent('pagehide', { persisted: true }));
-  assert.equal(f.el('journey-visual').hidden, false, 'cached page preserves DOM and reading geometry');
-  assert.equal(f.observers.at(-1)!.disconnected, true);
-  f.win.dispatchEvent(new f.win.PageTransitionEvent('pageshow', { persisted: true }));
-  assert.equal(f.el('journey-visual').hidden, false);
-  f.controller.dispose();
-  assert.equal(f.observers.at(-1)!.disconnected, true);
-  assert.equal(f.panels().every(panel => !panel.hidden), true);
-  assert.equal([...f.queries.values()].every(state => state.listeners.size === 0), true);
-  f.emit(0); assert.equal(f.stage(), 3);
-  f.controller.setActive(true); assert.equal(f.el('journey-visual').hidden, true);
+  f.citation('home-citation').click();
+  assert.equal(f.material('home-source').open, false);
+  f.controller.setActive(true);
+  f.citation('home-citation').click();
+  assert.equal(f.material('home-source').open, true);
+  f.controller.setActive(false);
+  assert.equal(f.material('home-source').open, true, 'an inspected material stays readable when leaving the page');
 });
 
-test('the baseline document contains the three readable panels with synthetic truth and no playback prerequisite', () => {
+test('dispose removes listeners without mutating content, and repeated cleanup is safe', (t) => {
+  const f = fixture(t);
+  const button = f.citation('home-citation');
+  const material = f.material('home-source');
+  f.controller.dispose();
+  f.controller.dispose();
+  button.click();
+  assert.equal(material.open, false);
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  f.controller.setActive(true);
+  button.click();
+  assert.equal(material.open, false);
+  assert.match(f.doc.getElementById('home-source')!.textContent!, /不能证明由某个人独立完成/);
+});
+
+test('real navigation disposes the controller while cached pages keep their state', (t) => {
+  const f = fixture(t);
+  f.win.dispatchEvent(new f.win.PageTransitionEvent('pagehide', { persisted: true }));
+  f.citation('home-citation').click();
+  assert.equal(f.material('home-source').open, true, 'cached page keeps its listeners and DOM');
+  f.win.dispatchEvent(new f.win.PageTransitionEvent('pagehide', { persisted: false }));
+  f.material('home-source').open = false;
+  f.citation('home-citation').click();
+  assert.equal(f.material('home-source').open, false);
+});
+
+test('a citation pointing at a missing or non-material target fails quietly', (t) => {
+  const f = fixture(t);
+  const stray = f.doc.createElement('button');
+  stray.dataset.citation = 'does-not-exist';
+  stray.textContent = '出处 [S9]';
+  stray.setAttribute('aria-expanded', 'false');
+  f.doc.body.appendChild(stray);
+  const controller = createHomeMotion({ doc: f.doc, win: f.win });
+  stray.click();
+  assert.equal(stray.getAttribute('aria-expanded'), 'false');
+  controller.dispose();
+});
+
+test('the baseline document is a static evidence composition with synthetic truth and no playback', () => {
   const html = readFileSync(new URL('../client/index.html', import.meta.url), 'utf8');
-  assert.equal((html.match(/data-journey-panel=/g) ?? []).length, 3);
+  // Structural redesign: hero input + evidence object, horizontal identity lane,
+  // wide conclusion/source comparison — three different layout families.
+  assert.match(html, /class="home-hero home-band"/);
+  assert.match(html, /class="home-identity"/);
+  assert.match(html, /class="home-compare home-band"/);
+  assert.equal(html.includes('data-journey-panel'), false, 'no relocated journey panels');
+  assert.equal(html.includes('journey-visual'), false, 'no scroll-driven workspace host');
   assert.doesNotMatch(html, /demo-play|demo-toggle|demo-replay|data-stage-button/);
-  const motion = readFileSync(new URL('../client/home-motion.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(motion, /\bfetch\s*\(|setTimeout\s*\(|setInterval\s*\(|requestAnimationFrame\s*\(|addEventListener\(['"]scroll/);
+  // The hero object shows support, source, date and explicit uncertainty statically.
+  assert.match(html, /有材料支持/);
+  assert.match(html, /Lantern 更新记录<small>2025 年 6 月<\/small>/);
+  assert.match(html, /还不能证明/);
   assert.match(html, /原创合成示例 · 非实时研究/);
   assert.match(html, /尚未开放订阅或收款/);
   assert.match(html, /模型、API 与服务器费用另计/);
+  const motion = readFileSync(new URL('../client/home-motion.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(motion, /\bfetch\s*\(|setTimeout\s*\(|setInterval\s*\(|requestAnimationFrame\s*\(|addEventListener\(['"]scroll|IntersectionObserver/);
+  assert.match(motion, /export function createHomeMotion/);
+  assert.match(motion, /setActive\(active: boolean\): void/);
+  assert.match(motion, /dispose\(\): void/);
+});
+
+test('reveal works the same without IntersectionObserver or any media query support', (t) => {
+  const f = fixture(t);
+  assert.equal((f.win as unknown as { IntersectionObserver?: unknown }).IntersectionObserver, undefined);
+  f.citation('home-citation').click();
+  assert.equal(f.material('home-source').open, true);
+  assert.equal(f.doc.activeElement, f.material('home-source').querySelector('summary'));
 });

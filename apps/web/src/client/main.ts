@@ -16,6 +16,7 @@ import { clearFirstStepDrafts } from './first-step-draft-storage.js';
 import type { FirstStepPanel } from './first-step.js';
 import { createHomeMotion } from './home-motion.js';
 import { createLocalSearch } from './local-search.js';
+import { createMobileNavigation } from './mobile-navigation.js';
 import type { LocalSearchItem } from './local-search.js';
 import { createReviewWorkbench } from './review.js';
 import { sourceStatusLabel } from './render.js';
@@ -95,8 +96,9 @@ let sessionBootPending = true;
 const api = new ApiClient();
 const auth = createAuthController(api);
 // Homepage motion is isolated from the research/auth/review flows: it only
-// drives the local scroll narrative and never touches the API.
+// connects local citations to their materials and never touches the API.
 const homeMotion = createHomeMotion();
+createMobileNavigation();
 
 const FOLLOWUP_PROMPTS = [
   '还有哪些公开项目？',
