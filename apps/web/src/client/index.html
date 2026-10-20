@@ -18,7 +18,7 @@
     <header class="site-nav">
       <div class="container nav-inner">
         <a class="brand" href="#/" id="brand-home" data-nav-home aria-label="StripSearch 首页">
-          <span class="brand-mark" aria-hidden="true">S<span>S</span></span>
+          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M10 5H5v22h5M22 5h5v22h-5M12 12h8M12 17h8M12 22h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"/></svg></span>
           <span>StripSearch</span>
         </a>
         <nav class="nav-links" aria-label="主要导航"><a href="#example">产品</a><a href="#boundaries">研究方法</a><a href="#pricing">价格</a></nav>
@@ -41,141 +41,88 @@
       <main id="main">
         <!-- ============ HOME ============ -->
         <div id="view-home">
-          <!-- Hero: the real input beside a tangible synthetic evidence object. -->
-          <section class="home-hero home-band" id="example" aria-labelledby="hero-title">
+          <!-- One synthetic material, read from finding to passage to limits. -->
+          <section class="home-hero home-band" id="example" aria-labelledby="hero-title" data-reading-step="1">
             <div class="hero-entry">
               <p class="hero-kicker">公开资料，有据可查。</p>
               <h1 id="hero-title">看见名字之外。<br /><span>沿着证据理解。</span></h1>
-              <p class="hero-lead">输入姓名或公开主页链接，先确认身份，再阅读一份有出处、也保留未知的报告。</p>
+              <p class="hero-lead">输入姓名或公开主页，先确认身份，再读一份有出处、也保留未知的报告。</p>
               <div class="composer-wrap">
                 <form class="composer" id="research-form" novalidate>
                   <div class="composer-body">
                     <div class="field">
-                      <div class="field-head">
-                        <label for="research-question">姓名、主页链接，或你想了解的人</label>
-                        <button class="clear-input" id="clear-question" type="button" hidden>清空</button>
-                      </div>
-                      <textarea id="research-question" name="input" rows="2" aria-describedby="question-help question-error" placeholder="一个名字，或一条公开主页链接"></textarea>
+                      <div class="field-head"><label for="research-question">你想了解谁？</label><button class="clear-input" id="clear-question" type="button" hidden>清空</button></div>
+                      <textarea id="research-question" name="input" rows="2" aria-describedby="question-help question-error research-save-note" placeholder="输入姓名，或粘贴公开主页链接"></textarea>
                       <span class="error-text" id="question-error" role="alert"></span>
                     </div>
                     <div class="composer-actions">
-                      <span class="helper keyboard-hint" id="question-help">⌘ / Ctrl + Enter 提交</span>
-                      <button class="button primary" type="submit" id="submit-research">开始了解 <span aria-hidden="true">↗</span></button>
+                      <button class="clear-input example-entry" type="button" id="open-example">填入公开主页示例</button>
+                      <button class="button primary" type="submit" id="submit-research">开始了解</button>
                     </div>
+                    <div class="entry-help"><span class="helper keyboard-hint" id="question-help">⌘ / Ctrl + Enter 提交</span><span class="helper" id="research-save-note">提交后开始，研究资料保存到你的账号。</span></div>
                     <p class="form-status" id="form-status" role="status"></p>
                   </div>
                 </form>
-                <div class="entry-help"><button class="clear-input" type="button" id="open-example">填入公开主页示例</button><span class="helper">提交后开始，资料将保存到你的账号。</span></div>
               </div>
             </div>
-
-            <aside class="hero-object" aria-label="证据材料 · 原创合成示例">
+            <aside class="hero-object" aria-label="证据材料 · 原创合成示例" data-evidence-scope>
               <article class="paper-sheet">
-                <header class="paper-meta"><span>林舟 / 原创合成示例</span><span>作品与行动</span></header>
+                <header class="paper-meta"><span>作品与行动摘录</span><span>原创合成示例</span></header>
                 <div class="paper-person"><span class="paper-monogram" aria-hidden="true">林</span><div><strong>林舟</strong><small>公开项目 Lantern</small></div></div>
-                <h2 class="paper-question">一份材料，<br />能让我们知道多少？</h2>
-                <div class="paper-claim">
+                <h2 class="paper-question">Lantern 更新记录</h2>
+                <div class="paper-claim" data-evidence-key="lantern-update" data-evidence-role="claim">
                   <p class="claim-label">有材料支持</p>
-                  <p class="claim-text">更新记录宣布了离线阅读与本地索引。</p>
-                  <p class="claim-source">
-                    <span>Lantern 更新记录<small>2025 年 6 月</small></span>
-                    <button type="button" class="cite-chip" id="home-citation" data-citation="home-source" aria-controls="home-source" aria-expanded="false">出处 [S1] <span aria-hidden="true">↗</span></button>
-                  </p>
+                  <p class="claim-text">更新记录宣布了<br class="paper-claim-break" />离线阅读与本地索引。</p>
+                  <p class="claim-source"><span>Lantern 更新记录<small>2025 年 6 月</small></span><button type="button" class="cite-chip" id="home-citation" data-citation="home-source" aria-controls="home-source" aria-expanded="false">出处 [S1] <span class="cite-state" aria-hidden="true"></span></button></p>
                 </div>
-                <div class="paper-unknown">
-                  <p class="claim-label">还不能证明</p>
-                  <p class="claim-text">独立贡献、实际使用效果。</p>
-                </div>
-                <details class="paper-source" id="home-source">
+                <div class="paper-unknown"><p class="claim-label">还不能证明</p><p class="claim-text">独立贡献、实际使用效果。</p></div>
+                <details class="paper-source" id="home-source" data-evidence-key="lantern-update" data-evidence-role="source">
                   <summary>核查这份材料 <span aria-hidden="true">+</span></summary>
-                  <div>
-                    <p><strong>原文：</strong>“新增离线阅读与本地索引。”</p>
-                    <p><strong>来源：</strong>2025 年 6 月原创合成更新记录。</p>
-                    <p><strong>限制：</strong>不能证明由某个人独立完成，也不能说明实际使用效果。</p>
-                  </div>
+                  <div><p class="source-passage" data-source-location tabindex="-1"><strong>原文：</strong>“新增离线阅读与本地索引。”</p><p><strong>来源：</strong>2025 年 6 月原创合成更新记录，更新记录正文。</p><p><strong>支持：</strong>记录宣布了这项功能。</p><p><strong>限制：</strong>不能证明由某个人独立完成，也不能说明实际使用效果。</p><button class="citation-return" type="button" data-citation-return hidden>返回刚才的判断</button></div>
                 </details>
                 <p class="synthetic-caption">原创合成示例 · 非实时研究</p>
               </article>
-              <p class="object-caption">出处随结论同行，未知也有自己的位置。</p>
+              <div class="object-caption"><a href="#source-reading">继续读这份材料 <span aria-hidden="true">↓</span></a><button type="button" class="motion-toggle" data-motion-toggle aria-pressed="false" hidden>暂停光影</button></div>
             </aside>
           </section>
 
-          <!-- Identity: one horizontal relationship lane, not a copy/card split. -->
-          <section class="home-identity" aria-labelledby="identity-title">
-            <div class="home-band identity-inner">
-              <header class="section-head section-head-centered">
-                <p class="chapter-kicker">确认身份关系</p>
-                <h2 id="identity-title">先找到这个人，<br />再连接他的资料。</h2>
-                <p class="section-lead">公开主页、账号与作品逐渐连接。同名的人分开保留，关系不明确时，等你确认。</p>
-              </header>
-              <ol class="identity-lane">
-                <li class="lane-node">
-                  <span class="lane-tag">种子线索</span>
-                  <strong>公开项目主页</strong>
-                  <small>@linzhou</small>
-                  <span class="lane-state">已选起点</span>
-                </li>
-                <li class="lane-node">
-                  <span class="lane-tag">互链线索</span>
-                  <strong>Lantern</strong>
-                  <small>主页链接的项目</small>
-                  <span class="lane-state">互链线索</span>
-                </li>
-                <li class="lane-node lane-unresolved">
-                  <span class="lane-tag">同名候选</span>
-                  <strong>另一位「林舟」</strong>
-                  <small>保持独立，不合并不预选</small>
-                  <span class="lane-state">待确认</span>
-                </li>
-              </ol>
-              <p class="identity-aside"><strong>名字相同，不代表是同一个人。</strong>资料属于谁，与资料说得对不对，分别核查。</p>
-              <p class="synthetic-caption">原创合成示例 · 非实时研究</p>
-            </div>
-          </section>
-
-          <!-- Evidence reading: a wide conclusion vs. source comparison. -->
-          <section class="home-compare home-band" aria-labelledby="compare-title">
+          <section class="home-compare home-band" id="source-reading" aria-labelledby="compare-title" data-reading-step="2" data-evidence-scope>
             <header class="section-head">
-              <p class="chapter-kicker">沿证据形成理解</p>
-              <h2 id="compare-title">读到结论。<br />也看得见它的来处。</h2>
-              <p class="section-lead">作品、行动与公开表达进入同一份报告。有支持的事实、可能的解释与未知，各在其位；来源撤回后，依赖它的判断也需复核。</p>
+              <p class="chapter-kicker">同一份材料 · 回到原文</p>
+              <h2 id="compare-title">这项发现，<br />来自这一句话。</h2>
+              <p class="section-lead">沿着首屏的 [S1]，打开 Lantern 更新记录。先读材料实际说了什么。</p>
             </header>
             <div class="compare-grid">
-              <figure class="quote-card">
-                <blockquote>“新增离线阅读与本地索引。”</blockquote>
-                <figcaption>
-                  <span>原创合成更新记录 · 2025 年 6 月</span>
-                  <button type="button" class="cite-chip" id="home-citation-2" data-citation="home-source-2" aria-controls="home-source-2" aria-expanded="false">出处 [S1] <span aria-hidden="true">↗</span></button>
-                </figcaption>
+              <figure class="quote-card" data-evidence-key="lantern-update" data-evidence-role="source">
+                <p class="passage-location">[S1]　Lantern / 更新记录正文</p>
+                <blockquote>“新增离线阅读<br class="quote-break" />与本地索引。”</blockquote>
+                <figcaption><span>原创合成更新记录 · 2025 年 6 月</span><button type="button" class="cite-chip" id="home-citation-2" data-citation="home-source-2" aria-controls="home-source-2" aria-expanded="false">出处 [S1] <span class="cite-state" aria-hidden="true"></span></button></figcaption>
               </figure>
-              <div class="compare-ledger">
-                <div class="ledger-col">
-                  <h3>能说明</h3>
-                  <p>记录宣布了这项功能。</p>
-                  <span class="ledger-note">有材料支持的事实</span>
-                </div>
-                <div class="ledger-col">
-                  <h3>还不能说明</h3>
-                  <p>某个人的独立贡献，与实际使用效果。</p>
-                  <span class="ledger-note">未知，保留原位</span>
-                </div>
-                <div class="ledger-col">
-                  <h3>可能的解释</h3>
-                  <p>长期方向与行动动机，需要额外依据；不从一句更新记录补写。</p>
-                  <span class="ledger-note">分析推断，单独标注</span>
-                </div>
-              </div>
+              <div class="passage-context" data-evidence-key="lantern-update" data-evidence-role="claim"><p class="claim-label">它支持哪项判断？</p><h3>记录宣布了这项功能。</h3><p>这是一条关于更新记录内容的事实。它没有说明具体由谁完成，也没有提供使用效果的独立证据。</p><a class="reading-link" href="#judgment-boundary">接着看，判断到哪里为止 <span aria-hidden="true">↓</span></a></div>
             </div>
-            <details class="paper-source compare-source" id="home-source-2">
+            <details class="paper-source compare-source" id="home-source-2" data-evidence-key="lantern-update" data-evidence-role="source">
               <summary>核查这份材料 <span aria-hidden="true">+</span></summary>
-              <div>
-                <p><strong>原文：</strong>“新增离线阅读与本地索引。”</p>
-                <p><strong>来源：</strong>2025 年 6 月原创合成更新记录，位置为更新记录正文。</p>
-                <p><strong>能说明：</strong>记录宣布了这项功能。</p>
-                <p><strong>限制：</strong>不能证明由某个人独立完成，也不能说明实际使用效果；相反证据出现时应并列保留。</p>
-              </div>
+              <div><p class="source-passage" data-source-location tabindex="-1"><strong>原文：</strong>“新增离线阅读与本地索引。”</p><p><strong>来源：</strong>2025 年 6 月原创合成更新记录，位置为更新记录正文。</p><p><strong>能说明：</strong>记录宣布了这项功能。</p><p><strong>限制：</strong>不能证明由某个人独立完成，也不能说明实际使用效果；相反证据出现时应并列保留。</p><button class="citation-return" type="button" data-citation-return hidden>返回刚才的判断</button></div>
             </details>
             <p class="synthetic-caption">原创合成示例 · 非实时研究</p>
+          </section>
+
+          <section class="home-boundary home-band" id="judgment-boundary" aria-labelledby="judgment-title" data-reading-step="3">
+            <header class="section-head"><p class="chapter-kicker">同一份材料 · 判断边界</p><h2 id="judgment-title">有依据的，写清楚。<br />还不知道的，留在原位。</h2></header>
+            <div class="compare-ledger">
+              <div class="ledger-col"><h3>能说明</h3><p>更新记录宣布了离线阅读与本地索引。</p><span class="ledger-note">有材料支持的事实 · [S1]</span></div>
+              <div class="ledger-col"><h3>还不能说明</h3><p>某个人的独立贡献，与实际使用效果。</p><span class="ledger-note">未知，保留原位</span></div>
+              <div class="ledger-col"><h3>可能的解释</h3><p>长期方向与行动动机，需要额外依据；不从一句更新记录补写。</p><span class="ledger-note">分析推断，单独标注</span></div>
+            </div>
+            <p class="boundary-note">来源撤回后，依赖它的判断也需复核。相反证据出现时，与已有材料一并保留。</p>
+          </section>
+
+          <section class="home-identity" aria-labelledby="identity-title">
+            <div class="home-band identity-inner">
+              <header class="section-head section-head-centered"><p class="chapter-kicker">还有一步：核对归属</p><h2 id="identity-title">材料说了什么，<br />和材料属于谁，分别核查。</h2><p class="section-lead">公开主页、账号与作品可以提供互链线索。同名的人分开保留，关系不明确时，等你确认。</p></header>
+              <ol class="identity-lane"><li class="lane-node"><span class="lane-tag">种子线索</span><strong>公开项目主页</strong><small>@linzhou</small><span class="lane-state">已选起点</span></li><li class="lane-node"><span class="lane-tag">互链线索</span><strong>Lantern</strong><small>主页链接的项目</small><span class="lane-state">互链线索</span></li><li class="lane-node lane-unresolved"><span class="lane-tag">同名候选</span><strong>另一位「林舟」</strong><small>保持独立，不合并不预选</small><span class="lane-state">待确认</span></li></ol>
+              <p class="identity-aside"><strong>名字相同，不代表是同一个人。</strong>项目互链，也不能证明个人的独立贡献。</p><p class="synthetic-caption">原创合成示例 · 非实时研究</p>
+            </div>
           </section>
 
           <section class="home-export" aria-label="报告格式">
@@ -189,7 +136,7 @@
               <p class="section-lead">采访前、读完作品后，或整理自己的公开经历时，从材料出发。</p>
             </header>
             <div class="method-notes">
-              <article><span class="method-glyph" aria-hidden="true">↗</span><h3>从作品读懂行动</h3><p>把项目、贡献与公开表达放回时间里，分清自述与有支持的事实。</p></article>
+              <article><span class="method-glyph" aria-hidden="true">[ ]</span><h3>从作品读懂行动</h3><p>把项目、贡献与公开表达放回时间里，分清自述与有支持的事实。</p></article>
               <article><span class="method-glyph" aria-hidden="true">↔</span><h3>让相反证据也有位置</h3><p>发现冲突就保留冲突。信息不充分时，明确写下还不知道什么。</p></article>
               <article><span class="method-glyph" aria-hidden="true">↶</span><h3>理解可以被修订</h3><p>核查出处，排除不适用的材料，让依赖它的结论重新接受检验。</p></article>
             </div>
@@ -206,32 +153,14 @@
               </div>
               <div class="pricing-grid">
                 <article class="plan plan-current">
-                  <p class="plan-overline">现在可用</p>
-                  <h3>开源自托管</h3>
-                  <p class="plan-description">自己部署，使用自己的服务配置。</p>
-                  <p class="plan-price">免费<span>开源代码</span></p>
-                  <p class="plan-cost">模型、API 与服务器费用另计。</p>
-                  <a class="button primary" href="https://github.com/getyak/StripSearch#部署" target="_blank" rel="noopener noreferrer">查看部署说明 <span aria-hidden="true">↗</span></a>
+                  <div class="plan-intro"><p class="plan-overline">现在可用</p><h3>开源自托管</h3><p class="plan-description">自己部署，使用自己的服务配置。</p><p class="plan-price">免费<span>开源代码</span></p><p class="plan-cost">模型、API 与服务器费用另计。</p><a class="button primary" href="https://github.com/getyak/StripSearch#部署" target="_blank" rel="noopener noreferrer">查看部署说明 <span aria-hidden="true">↗</span></a></div>
                   <ul><li>本地 Web alpha</li><li>按账号隔离研究记录</li><li>带出处的报告与四种导出</li></ul>
                 </article>
-                <article class="plan">
-                  <p class="plan-overline">筹备中</p>
-                  <h3>个人订阅</h3>
-                  <p class="plan-description">为持续研究公开作品的人而设计。</p>
-                  <p class="plan-price pending">定价待公布</p>
-                  <p class="plan-cost">尚未开放订阅或收款。</p>
-                  <details class="plan-details"><summary>了解方案 <span aria-hidden="true">+</span></summary><p>计划提供托管研究体验。具体额度、计费方式与开放时间待确定，当前不会创建订阅。</p></details>
-                  <ul><li>托管体验为规划方向</li><li>能力与额度以正式发布为准</li><li>发布前公布价格与费用边界</li></ul>
-                </article>
-                <article class="plan">
-                  <p class="plan-overline">筹备中</p>
-                  <h3>团队订阅</h3>
-                  <p class="plan-description">为需要共同核查材料的团队探索。</p>
-                  <p class="plan-price pending">定价待公布</p>
-                  <p class="plan-cost">尚未开放订阅或收款。</p>
-                  <details class="plan-details"><summary>了解方案 <span aria-hidden="true">+</span></summary><p>团队协作与集中管理仍在规划；当前 alpha 不提供共享团队空间、团队计费或服务承诺。</p></details>
-                  <ul><li>协作与权限机制待验证</li><li>团队计费尚未接入</li><li>上线范围以验证结果为准</li></ul>
-                </article>
+                <aside class="future-plans" aria-label="未来订阅方案">
+                  <p class="plan-overline">后续计划</p><h3>托管订阅，仍在筹备。</h3><p>尚未开放订阅或收款。</p>
+                  <details class="plan-details"><summary>个人订阅 <span class="future-price">定价待公布</span><span aria-hidden="true">+</span></summary><p>托管体验、具体额度和计费方式待确定；开放前公布价格与费用边界。</p></details>
+                  <details class="plan-details"><summary>团队订阅 <span class="future-price">定价待公布</span><span aria-hidden="true">+</span></summary><p>团队协作、共享空间和集中管理仍在规划；当前 alpha 不提供团队计费或服务承诺。</p></details>
+                </aside>
               </div>
             </div>
           </section>
@@ -478,7 +407,7 @@
             <label for="auth-password">密码</label>
             <button class="clear-input" id="toggle-password" type="button" aria-pressed="false">显示</button>
           </div>
-          <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" />
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" maxlength="128" />
           <span class="error-text" id="auth-password-error" role="alert"></span>
         </div>
         <div class="form-status" id="auth-status" role="status"></div>
