@@ -1,4 +1,5 @@
 import type { SessionUser } from '../shared/types.js';
+import { LIMITS } from '../shared/limits.js';
 import { ApiClient, ApiError } from './api.js';
 import { byId, setText } from './dom.js';
 
@@ -124,8 +125,8 @@ export function createAuthController(api: ApiClient): AuthController {
       fail(emailInput, emailError, '请输入有效的邮箱地址。');
       return;
     }
-    if (password.length < 8 || password.length > 128) {
-      fail(passwordInput, passwordError, '密码需为 8–128 个字符。');
+    if (password.length < LIMITS.passwordMin || password.length > LIMITS.passwordMax) {
+      fail(passwordInput, passwordError, `密码需为 ${LIMITS.passwordMin}–${LIMITS.passwordMax} 个字符。`);
       return;
     }
     const epoch = openEpoch;

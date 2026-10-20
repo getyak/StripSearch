@@ -6,7 +6,7 @@ export const LIMITS = {
   seedUrlMax: 2048,
   displayNameMax: 60,
   emailMax: 254,
-  passwordMin: 8,
+  passwordMin: 6,
   passwordMax: 128,
 
   /** JSON bodies for application routes. */
