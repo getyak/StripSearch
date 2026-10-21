@@ -15,6 +15,7 @@ import { DiscoveryRunner } from './services/discovery-runner.js';
 import { ReviewStore } from './review-store.js';
 import { DiscoveryStore } from './discovery-store.js';
 import { FirstStepStore } from './research/first-step-store.js';
+import { PersonConfirmationStore } from './research/person-confirmation.js';
 import { BUILTIN_PLATFORM_REGISTRY } from './platforms/registry.js';
 import {
   defaultCatalogDataDir,
@@ -53,6 +54,7 @@ export interface BootstrappedApp {
   reviewStore: ReviewStore;
   discoveryStore: DiscoveryStore;
   firstStep: FirstStepStore;
+  personConfirmation: PersonConfirmationStore;
   discoveryRunner: DiscoveryRunner;
   runner: Runner;
   fetchRunner: FetchGithubRunner;
@@ -74,6 +76,7 @@ export async function bootstrap(
   const reviewStore = new ReviewStore(db);
   const discoveryStore = new DiscoveryStore(db);
   const firstStep = new FirstStepStore(db, store);
+  const personConfirmation = new PersonConfirmationStore(db, store, firstStep);
   const interrupted = store.recoverInterruptedRuns();
   const interruptedDiscovery = discoveryStore.recoverInterruptedTasks();
   const providerFactory: ProviderFactory =
@@ -90,6 +93,7 @@ export async function bootstrap(
     providerFactory,
     transport,
     firstStep,
+    personConfirmation,
     discoveryCatalog,
     researchTools: overrides.researchTools ?? createResearchTools({
       transport, exaApiKey: config.exaApiKey,
@@ -132,11 +136,12 @@ export async function bootstrap(
     runner,
     fetchRunner,
     firstStep,
+    personConfirmation,
     clientDir
   });
   void runner.pump();
   return {
-    config, db, store, reviewStore, discoveryStore, firstStep, discoveryRunner, runner, fetchRunner, app,
+    config, db, store, reviewStore, discoveryStore, firstStep, personConfirmation, discoveryRunner, runner, fetchRunner, app,
     interrupted, interruptedDiscovery, interruptedFetch
   };
 }

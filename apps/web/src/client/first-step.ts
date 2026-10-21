@@ -28,8 +28,10 @@ import {
 import type {
   FirstStepDiscoveryResponse,
   FirstStepSelectionPayload,
-  FirstStepSelectionResponse
+  FirstStepSelectionResponse,
+  PersonConfirmationPayload
 } from './api.js';
+import { renderPersonConfirmation } from './person-confirmation.js';
 import type {
   FirstStepAccountCategory,
   FirstStepAccountView,
@@ -46,6 +48,8 @@ export interface FirstStepPanelApi {
     idempotencyKey: string
   ): Promise<FirstStepSelectionResponse>;
   expandFirstStep(runId: string, body: { hint?: string; url?: string }, idempotencyKey: string): Promise<{ queued: boolean }>;
+  /** GET-213 explicit person confirmation; versions + one candidate id only. */
+  confirmPerson?(runId: string, payload: PersonConfirmationPayload, idempotencyKey: string): Promise<{ confirmation: { runRevision: number; candidateId: string; idempotent: boolean }; view?: FirstStepDiscoveryView | null }>;
 }
 
 export interface FirstStepDecisionDraft {
@@ -68,6 +72,8 @@ export interface FirstStepPanelDeps {
   ownerId?: string;
   /** Called after a successful submit so the host can refresh the run view. */
   onAfterSubmit?: (result: FirstStepSelectionResponse) => void;
+  /** GET-213: host refresh after the explicit person confirmation. */
+  onAfterPersonConfirm?: () => void;
   onAfterExpand?: () => void;
   now?: () => number;
 }
@@ -132,6 +138,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   let hintDraft = '';
   let hintStatus = '';
   let expanding = false;
+  /** GET-213 person stage: chosen candidate id; never auto-submitted. */
+  let personCandidateId: string | null = null;
   let idempotencySeq = 0;
   /** Presentation-only comparison window; never part of the draft or payload. */
   let accountFilter: FirstStepAccountFilter = 'all';
@@ -204,8 +212,52 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     }
   };
 
+  /** GET-213: NEW name attempts confirm the person BEFORE the account workspace. */
+  const personStageActive = (current: FirstStepDiscoveryView): boolean =>
+    current.personConfirmation?.required === true &&
+    current.personConfirmation.status !== 'confirmed' &&
+    !current.selection.submitted;
+
   const render = (): void => {
     if (destroyed || composingAccountSearch) return;
+    if (view && personStageActive(view)) {
+      const current = view;
+      renderPersonConfirmation(
+        deps.container,
+        deps.footerContainer ?? null,
+        { view: current, selectedCandidateId: personCandidateId, pending: saving || current.phase === 'expanding_accounts', expanding, error: errorText, hint: hintDraft },
+        {
+          onSelect: (candidateId) => {
+            if (saving || expanding || current.phase === 'expanding_accounts') return;
+            personCandidateId = candidateId;
+            render();
+          },
+          onConfirm: () => { void submit(); },
+          onHintInput: (hint) => { hintDraft = hint; persistDraft(); },
+          onHintCompositionStart: () => { composingAccountSearch = true; },
+          onHintCompositionEnd: () => { composingAccountSearch = false; render(); },
+          onExpand: () => {
+            if (expanding || saving) return;
+            expanding = true;
+            errorText = '';
+            render();
+            void deps.api
+              .expandFirstStep(deps.runId, { hint: hintDraft }, `expand-${String(now())}-${String(++idempotencySeq)}`)
+              .then(() => {
+                if (!destroyed) deps.onAfterExpand?.();
+              })
+              .catch((error) => {
+                if (!destroyed) errorText = error instanceof Error ? error.message : '重新发现失败，请重试。';
+              })
+              .finally(() => {
+                expanding = false;
+                if (!destroyed) render();
+              });
+          }
+        }
+      );
+      return;
+    }
     const root = deps.container;
     const footerHost = deps.footerContainer ?? null;
     const active = root.ownerDocument.activeElement as HTMLElement | null;
@@ -896,8 +948,54 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     return card;
   };
 
+  /** GET-213: the person confirmation is its own explicit action. */
+  const submitPersonConfirmation = async (): Promise<null> => {
+    const current = view!;
+    if (!personCandidateId) {
+      errorText = '请先选择一个人物候选，再确认。';
+      render();
+      return null;
+    }
+    if (!deps.api.confirmPerson) {
+      errorText = '当前客户端不支持人物确认，请刷新页面后重试。';
+      render();
+      return null;
+    }
+    saving = true;
+    errorText = '';
+    render();
+    const payload: PersonConfirmationPayload = {
+      expectedRunRevision: runRevision,
+      expectedScopeVersion: current.selection.scopeVersion,
+      discoveryRevision: current.discoveryRevision,
+      candidateId: personCandidateId
+    };
+    const intent = JSON.stringify(payload);
+    if (submitIntent !== intent) {
+      submitIntent = intent;
+      submitKey = `person-${deps.runId}-${String(now())}-${String(++idempotencySeq)}`;
+    }
+    try {
+      const result = await deps.api.confirmPerson(deps.runId, payload, submitKey!);
+      if (destroyed) return null;
+      saving = false;
+      status = 'ready';
+      if (result.view) applyView(result.view, result.confirmation.runRevision);
+      else if (typeof result.confirmation.runRevision === 'number') runRevision = result.confirmation.runRevision;
+      render();
+      deps.onAfterPersonConfirm?.();
+      return null;
+    } catch (error) {
+      saving = false;
+      errorText = error instanceof Error ? error.message : '确认失败，请刷新后重试。';
+      render();
+      return null;
+    }
+  };
+
   const submit = async (): Promise<FirstStepSelectionResponse | null> => {
     if (destroyed || !view || saving) return null;
+    if (personStageActive(view)) return submitPersonConfirmation();
     const count = selectedCount();
     if (count === 0) {
       errorText = '请至少选择一个账号后再提交。';
@@ -967,6 +1065,11 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         const persisted = next.selection.submitted && next.selection.selectedAccountIds.includes(account.accountId);
         draft.set(account.accountId, { selection: persisted ? (account.userSelection.state === 'only_this_account' ? 'only_this_account' : 'selected') : suggested ? 'selected' : 'unanswered', excluded: next.selection.excludedAccountIds.includes(account.accountId) });
       }
+    }
+    // A single source-backed candidate may be preselected as a VISUAL default;
+    // the explicit confirm click is still the only user intent.
+    if (personCandidateId === null && next.personOverview?.candidates.length === 1) {
+      personCandidateId = next.personOverview.candidates[0]!.candidateId;
     }
     status = 'ready';
     if (!sameView) render();

@@ -28,6 +28,7 @@ import type { ReviewStore } from './review-store.js';
 import type { DiscoveryStore } from './discovery-store.js';
 import type { FetchGithubRunner } from './research/fetch-github-runner.js';
 import type { FirstStepStore } from './research/first-step-store.js';
+import type { PersonConfirmationStore } from './research/person-confirmation.js';
 import type { Store } from './store.js';
 
 export interface AppDeps {
@@ -36,6 +37,8 @@ export interface AppDeps {
   reviewStore: ReviewStore;
   discoveryStore: DiscoveryStore;
   firstStep?: FirstStepStore;
+  /** GET-213 person-confirmation gates for staged name attempts. */
+  personConfirmation?: PersonConfirmationStore;
   discoveryRunner: DiscoveryRunner;
   discoveryRegistry: PlatformRegistry;
   /** Versioned catalog surface for /api/discovery/registry; null omits it. */
@@ -108,6 +111,7 @@ export function createApp(deps: AppDeps): Express {
     registerFirstStepRoutes(apiRouter, {
       store: deps.store,
       firstStep: deps.firstStep,
+      persons: deps.personConfirmation ?? null,
       runner: deps.runner,
       auth: deps.auth,
       researchConfigured: Boolean(deps.config.deepseekApiKey && deps.config.exaApiKey)

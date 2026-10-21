@@ -54,6 +54,7 @@ export interface SafeFetchResult {
 function classifyStatus(status: number): ProviderError | null {
   if (status === 401) return new ProviderError('provider_forbidden', '供应商拒绝了该请求凭据。', status);
   if (status === 403) return new ProviderError('provider_forbidden', '供应商拒绝了该请求。', status);
+  if (status === 402) return new ProviderError('provider_billing', '供应商计费/额度不足（HTTP 402）。', status);
   if (status === 404) return new ProviderError('provider_not_found', '供应商未找到该资源。', status);
   if (status === 429) return new ProviderError('provider_rate_limited', '供应商限流，请稍后再试。', status);
   if (status >= 500) return new ProviderError('provider_error', '供应商暂时不可用。', status);

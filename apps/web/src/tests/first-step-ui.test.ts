@@ -13,7 +13,7 @@ const env = installDom();
 const profile = (handle: string, url = `https://github.com/${handle}`): ResearchPage => ({
   url,
   title: handle,
-  text: `${handle} builds synthetic compilers. My GitHub: ${url}`,
+  text: `${handle} builds synthetic compilers. My GitHub: ${url}. Research Ada Fixture.`,
   kind: 'profile',
   publishedAt: null,
   links: [],
@@ -66,6 +66,21 @@ async function freshRun(server: TestServer, email: string): Promise<string> {
   await server.client.signUp(email);
   const made = await server.client.json<{ run: { runId: string } }>('/api/runs', { json: { input: 'Research Ada Fixture' } });
   const id = made.body.run.runId;
+  await waitFor(() => server.store.getRun(id)?.state === 'needs_input');
+  // GET-213 staged name flow: the account workspace appears AFTER the
+  // explicit person confirmation; drive the real confirmation first.
+  const overview = await server.client.json<{ view: FirstStepDiscoveryView; runRevision: number }>(`/api/runs/${id}/first-step/discovery`);
+  assert.equal(overview.body.view.personConfirmation?.required, true);
+  const confirmed = await server.client.json(`/api/runs/${id}/first-step/person-confirmation`, {
+    json: {
+      expectedRunRevision: overview.body.runRevision,
+      expectedScopeVersion: overview.body.view.selection.scopeVersion,
+      discoveryRevision: overview.body.view.discoveryRevision,
+      candidateId: overview.body.view.personOverview!.candidates[0]!.candidateId
+    },
+    headers: { 'idempotency-key': `confirm-${email}` }
+  });
+  assert.equal(confirmed.status, 200);
   await waitFor(() => server.store.getRun(id)?.state === 'needs_input');
   return id;
 }

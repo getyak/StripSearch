@@ -48,6 +48,7 @@ export type ProviderErrorCode =
   | 'provider_rate_limited'
   | 'provider_forbidden'
   | 'provider_not_found'
+  | 'provider_billing'
   | 'provider_response_too_large'
   | 'provider_redirect'
   | 'provider_bad_response'

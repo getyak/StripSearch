@@ -89,6 +89,28 @@ export interface FirstStepSelectionResponse {
   view?: import('../shared/first-step-discovery.js').FirstStepDiscoveryView;
 }
 
+/** GET-213: versions + one immutable candidate id. Never sources or text. */
+export interface PersonConfirmationPayload {
+  expectedRunRevision: number;
+  expectedScopeVersion: number;
+  discoveryRevision: number;
+  candidateId: string;
+}
+
+export interface PersonConfirmationResponse {
+  confirmation: {
+    confirmationId: string;
+    runRevision: number;
+    caseId: string;
+    discoveryRevision: number;
+    inputRevision: number;
+    candidateId: string;
+    confirmedAt: string;
+    idempotent: boolean;
+  };
+  view?: import('../shared/first-step-discovery.js').FirstStepDiscoveryView | null;
+}
+
 export interface HealthResponse {
   status: string;
   app: string;
@@ -303,6 +325,19 @@ export class ApiClient {
     idempotencyKey: string
   ): Promise<FirstStepSelectionResponse> {
     return this.request<FirstStepSelectionResponse>(`/api/runs/${encodeURIComponent(id)}/first-step/selection`, {
+      method: 'POST',
+      headers: { 'idempotency-key': idempotencyKey },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  /** GET-213 explicit person confirmation before account expansion. */
+  async confirmPerson(
+    id: string,
+    payload: PersonConfirmationPayload,
+    idempotencyKey: string
+  ): Promise<PersonConfirmationResponse> {
+    return this.request<PersonConfirmationResponse>(`/api/runs/${encodeURIComponent(id)}/first-step/person-confirmation`, {
       method: 'POST',
       headers: { 'idempotency-key': idempotencyKey },
       body: JSON.stringify(payload)

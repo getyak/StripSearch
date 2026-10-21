@@ -49,6 +49,18 @@ test('retry API preserves first-step discovery and a submitted frozen scope', as
   const retried = await server.client.json<{ run: { runId: string } }>(`/api/runs/${firstId}/retry`, { json: {} });
   assert.equal(retried.status, 201); const retryId = retried.body.run.runId;
   await waitFor(() => server.store.getRun(retryId)?.state === 'needs_input');
+  // GET-213: confirm the source-backed person before the account scope step.
+  const overview = await server.client.json<{ view: FirstStepDiscoveryView; runRevision: number }>(`/api/runs/${retryId}/first-step/discovery`);
+  assert.equal((await server.client.json(`/api/runs/${retryId}/first-step/person-confirmation`, {
+    json: {
+      expectedRunRevision: overview.body.runRevision,
+      expectedScopeVersion: overview.body.view.selection.scopeVersion,
+      discoveryRevision: overview.body.view.discoveryRevision,
+      candidateId: overview.body.view.personOverview!.candidates[0]!.candidateId
+    },
+    headers: { 'idempotency-key': 'retry-confirm-1' }
+  })).status, 200);
+  await waitFor(() => server.store.getRun(retryId)?.state === 'needs_input');
   const discovery = await server.client.json<{ mode: string; view: FirstStepDiscoveryView; runRevision: number }>(`/api/runs/${retryId}/first-step/discovery`);
   assert.equal(discovery.body.mode, 'first_step');
   assert.ok(discovery.body.view.discoveryRevision > 0);

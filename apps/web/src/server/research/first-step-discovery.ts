@@ -36,6 +36,17 @@ import { extractOriginalLinkContexts, extractOriginalLiteralLinkContexts } from 
 import { verifiedNativeAccountRequest, verifiedNativeWebsiteDeclaration, verifiedNativeFieldContext, verifiedNativeAccountKind } from './toolkit.js';
 import type { NativeWebsiteDeclaration } from '../../shared/native-website.js';
 import type { ResearchToolAction, ResearchToolResult, ResearchPage, ResearchAliasProof } from './tool-contracts.js';
+import {
+  FIRST_STEP_OVERVIEW_BUDGET,
+  FIRST_STEP_STAGED_POLICY_VERSION,
+  classifyFirstStepFailure,
+  firstStepStageQueryPlan,
+  isFirstStepOverviewIdentityUrl,
+  type FirstStepFailureView
+} from '../../shared/person-confirmation.js';
+import { buildPersonOverview, type OverviewSourceInput } from './person-overview.js';
+import { sourceDependenciesOf, validatePersonSourceDependencies, type PersonSourceDependency } from './person-confirmation.js';
+import { gatePersonCandidate } from '../../shared/person-confirmation.js';
 import type { ResearchBudgetLimits } from '../../shared/types.js';
 import { RESEARCH_LIMITS, ResearchStop, type ActionReceipt, type ActionUsage } from './research-store.js';
 import {
@@ -108,6 +119,74 @@ export interface FirstStepCheckedSearchOptions {
   budget: FirstStepBudgetPolicy;
   limits?: ResearchBudgetLimits;
   modelName?: string;
+  /**
+   * GET-213 staging gate. `overview` refuses social/account/history actions
+   * and social-constrained queries BEFORE dispatch (no receipt, no cost);
+   * `accounts`/`full` keep the existing surface. Old attempts keep `full`.
+   */
+  stage?: 'overview' | 'accounts' | 'full';
+  /** Restart-durable supplier stops (billing) recorded earlier this attempt. */
+  stoppedSuppliers?: Iterable<{ supplier: string; failure: FirstStepFailureView }>;
+}
+
+/**
+ * The supplier of one checked action. A billing failure stops further calls
+ * to the SAME supplier for this attempt; unrelated already-authorized routes
+ * stay available and unattempted obligations remain honest gaps.
+ */
+export function firstStepSupplierOf(action: ResearchToolAction): string {
+  if (action.type === 'search') return action.provider === 'bluesky' ? 'bluesky' : 'exa';
+  // Toolkit routing: `read` goes to Exa contents, `firecrawl` to Firecrawl,
+  // social actions to TikHub and `github_profile` to GitHub.
+  if (action.type === 'read') return 'exa';
+  if (action.type === 'firecrawl') return 'firecrawl';
+  if (action.type === 'github_profile') return 'github';
+  return 'tikhub';
+}
+
+/** Thrown when a stopped supplier would be re-called; never dispatched. */
+export class FirstStepSupplierStopped extends Error {
+  constructor(readonly supplier: string, readonly failure: FirstStepFailureView) {
+    super(`supplier_stopped:${supplier}`);
+    this.name = 'FirstStepSupplierStopped';
+  }
+}
+
+function failureInputOf(error: unknown): { code?: string | null; status?: number | null; message?: string | null } {
+  return {
+    code: (error as { code?: string } | null)?.code ?? null,
+    status: typeof (error as { status?: unknown } | null)?.status === 'number' ? (error as { status: number }).status : null,
+    message: error instanceof Error ? error.message : String(error)
+  };
+}
+
+/** One attempt identity shared by the runner, the checked surface and the coordinator. */
+export function firstStepAttemptId(link: { inputRevision: number }, input: FirstStepInput, hint?: string | null): string {
+  return `${String(link.inputRevision)}-${digest({ input, hint: hint ?? null })}`;
+}
+
+export type FirstStepAttemptPolicy = 'v9' | 'v10' | 'v11' | 'new';
+
+/** Frozen attempt policy from the REAL receipts: old attempts never re-stage. */
+export function firstStepAttemptPolicy(store: Store, runId: string, attemptId: string): FirstStepAttemptPolicy {
+  const prefix = `firststep:${attemptId}:`;
+  const rows = store.research.receipts(runId).filter((receipt) => receipt.key.startsWith(prefix));
+  if (rows.length === 0) return 'new';
+  if (rows.some((receipt) => receipt.key.startsWith(`${prefix}v11:`))) return 'v11';
+  if (rows.some((receipt) => receipt.key.startsWith(`${prefix}v10:`))) return 'v10';
+  return 'v9';
+}
+
+/**
+ * The ONE frozen stage decision used by the runner for both the checked
+ * surface and the coordinator, so they can never disagree about legacy
+ * attempts. Old (v9/v10) attempts always keep the full unstaged flow.
+ */
+export function resolveFirstStepFlowStage(
+  policy: FirstStepAttemptPolicy,
+  requested: 'overview' | 'accounts' | 'full' | undefined
+): 'overview' | 'accounts' | 'full' {
+  return policy === 'v9' || policy === 'v10' ? 'full' : (requested ?? 'full');
 }
 
 
@@ -124,11 +203,31 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
     toolCalls: options.budget.maxSearchQueries + options.budget.maxProfileReads,
     modelCalls: options.budget.maxModelCalls
   };
+  const stage = options.stage ?? 'full';
+  // Supplier-stop state (billing failures) plus safe structured failure facts
+  // for the receipt projection. Provider bodies/tokens never enter either.
+  const stoppedSuppliers = new Map<string, FirstStepFailureView>();
+  const failuresByKey = new Map<string, FirstStepFailureView>();
+  // Attempt-scoped restart durability from the append-only event ledger: a
+  // same-attempt restart never re-dispatches a stopped supplier and replayed
+  // failures keep their SAFE structured metadata tied to the real receipt.
+  for (const event of options.store.listEvents(options.runId)) {
+    const payload = (event.payload ?? {}) as { attemptId?: string; requestKey?: string; code?: string; supplier?: string };
+    if (payload.attemptId !== options.attemptId) continue;
+    if (event.type === 'first_step_receipt_failure' && typeof payload.requestKey === 'string' && typeof payload.code === 'string') {
+      failuresByKey.set(payload.requestKey, classifyFirstStepFailure({ code: payload.code }));
+    }
+    if (event.type === 'first_step_supplier_stop' && typeof payload.supplier === 'string') {
+      stoppedSuppliers.set(payload.supplier, classifyFirstStepFailure({ code: payload.code ?? 'provider_billing' }));
+    }
+  }
+  for (const stopped of options.stoppedSuppliers ?? []) stoppedSuppliers.set(stopped.supplier, stopped.failure);
   const log: FirstStepReceiptView[] = [];
   const namespace = (requestKey: string): string | null => requestKey.match(/^firststep:[^:]+:/)?.[0] ?? null;
   const sameRequest = (left: unknown, right: unknown): boolean => digest(left) === digest(right);
   const note = (requestKey: string, kind: FirstStepReceiptView['kind'], target: string, retrieval: FirstStepRetrieval, receipt: ActionReceipt, state: 'completed' | 'failed'): void => {
     const usage = receipt.usage ?? { estimatedUsd: null, unknownCost: true };
+    const failure = failuresByKey.get(requestKey) ?? null;
     log.push({
       requestKey,
       kind,
@@ -137,7 +236,8 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
       target,
       observedAt: receipt.createdAt,
       estimatedUsd: usage.estimatedUsd ?? null,
-      unknownCost: usage.estimatedUsd === null || usage.unknownCost === true
+      unknownCost: usage.estimatedUsd === null || usage.unknownCost === true,
+      error: state === 'failed' ? failure : null
     });
   };
   const run = async (
@@ -173,6 +273,12 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
       const ceiling = kind === 'search' ? options.budget.maxSearchQueries : options.budget.maxProfileReads;
       if (count >= ceiling) throw new ResearchStop('budget_exhausted');
     }
+    // A billing failure stopped this supplier for the attempt: no further
+    // same-supplier dispatch and NO new receipt. Real prior receipts still
+    // replay below (restart never re-bills or loses a settled request).
+    const supplier = firstStepSupplierOf(action);
+    const stopped = stoppedSuppliers.get(supplier);
+    if (!prior && stopped) throw new FirstStepSupplierStopped(supplier, stopped);
     // The shared metered scaffold carries reserve/replay/settle; the attempt
     // budget ceilings, per-URL reservations and receipt log stay above it.
     return meteredInvoke<ResearchToolResult>({
@@ -185,7 +291,29 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
       limits,
       allowSettledFailure: true,
       replayFailure: () => new ProviderError('provider_bad_response', '本次请求已有已结算失败回执，保留缺口，不自动重复调用。'),
-      execute: () => options.tools.execute(action, signal),
+      execute: () => options.tools.execute(action, signal).catch((error: unknown) => {
+        // Safe structured failure classification BEFORE the failed receipt is
+        // settled, so the projection can present it without provider bodies.
+        // The safe code is persisted bound to this REAL receipt key and the
+        // attempt, so a restart keeps the failure classification.
+        const failure = classifyFirstStepFailure(failureInputOf(error));
+        failuresByKey.set(requestKey, failure);
+        options.store.addEvent(options.runId, 'first_step_receipt_failure', {
+          attemptId: options.attemptId,
+          requestKey,
+          code: failure.code,
+          supplier: firstStepSupplierOf(action)
+        });
+        if (failure.code === 'provider_billing' && !stoppedSuppliers.has(supplier)) {
+          stoppedSuppliers.set(supplier, failure);
+          options.store.addEvent(options.runId, 'first_step_supplier_stop', {
+            attemptId: options.attemptId,
+            supplier,
+            code: failure.code
+          });
+        }
+        throw error;
+      }),
       usageOf: (result) => ({
         estimatedUsd: result.estimatedUsd,
         credits: result.credits,
@@ -211,6 +339,10 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
   return {
     async search(requestKey, query, numResults, signal, includeDomains, provider) {
       if (query.trim().length === 0 || query.length > FIRST_STEP_SEARCH_QUERY_MAX) throw new ResearchStop('invalid_decision');
+      // Overview stage: plain general-web queries only. Social-constrained or
+      // native-social account search belongs to the ACCOUNT stage after the
+      // explicit person confirmation; refused BEFORE dispatch (no cost).
+      if (stage === 'overview' && (includeDomains !== undefined || provider !== undefined)) throw new ResearchStop('invalid_decision');
       return run(requestKey, 'search', query, 'indexed', { type: 'search', query, numResults, ...(includeDomains ? { includeDomains } : {}),...(provider?{provider}:{}) }, signal);
     },
     async readIdentity(requestKey, action, signal, intent) {
@@ -221,13 +353,19 @@ export function createFirstStepCheckedSearch(options: FirstStepCheckedSearchOpti
       }
       const target = classifyFirstStepUrl(action.url);
       if (!target.ok) throw new ResearchStop('invalid_decision');
+      // Overview stage: minimal identity-source reads only. No social/account
+      // profile reads and no history reads before person confirmation.
+      if (stage === 'overview') {
+        if (action.type !== 'read' && action.type !== 'firecrawl') throw new ResearchStop('invalid_decision');
+        if (!['personal_site', 'web_page', 'rss_blog', 'linktree'].includes(target.ref.platform)) throw new ResearchStop('invalid_decision');
+      }
       if(intent?.purpose==='third_party_identity') {
         const receipt=options.store.research.receipt(options.runId,intent.searchReceiptKey);
         const prefix=namespace(requestKey);
         const pages=(receipt?.result as ResearchToolResult|undefined)?.pages;
         if(!prefix||!intent.searchReceiptKey.startsWith(prefix)||receipt?.kind!=='tool'||receipt.state!=='completed'||
           (receipt.request as ResearchToolAction)?.type!=='search'||intent.url!==action.url||action.type!=='read'||
-          !isFirstStepThirdPartyIdentityUrl(action.url)||!Array.isArray(pages)||!pages.some(page=>page.url===action.url))throw new ResearchStop('invalid_decision');
+          !(isFirstStepThirdPartyIdentityUrl(action.url)||stage==='overview'&&isFirstStepOverviewIdentityUrl(action.url))||!Array.isArray(pages)||!pages.some(page=>page.url===action.url))throw new ResearchStop('invalid_decision');
       } else if (intent) {
         const navigation = firstStepIdentityNavigation(intent.sourceUrl, action.url);
         const receipt = options.store.research.receipt(options.runId, intent.sourceReceiptKey);
@@ -645,6 +783,10 @@ export interface FirstStepDiscoverContext {
   /** Optional restricted model proposals; metered and server-verified. */
   agent?: SearchAgent;
   propose?: (signal: AbortSignal, input: FirstStepProposalModelInput) => Promise<FirstStepModelProposal[] | FirstStepProposalModelResult>;
+  /** GET-213 staged flow; `undefined` keeps the legacy full attempt. */
+  stage?: 'overview' | 'accounts' | 'full';
+  /** Active persisted person confirmation driving the account stage. */
+  confirmedPerson?: { candidateId: string; confirmedAt: string; sourceDeps?: PersonSourceDependency[] } | null;
   report?: (stage: string, label: string) => void;
   now?: () => string;
 }
@@ -689,33 +831,83 @@ void failureState;
 export {verifyAliasProjection,type FirstStepAliasProjection} from './alias-proof.js';
 
 class ProviderFailure extends Error {
-  constructor(readonly state: FirstStepRouteState, detail: string) {
+  constructor(readonly state: FirstStepRouteState, detail: string, readonly failure: FirstStepFailureView) {
     super(detail);
     this.name = 'ProviderFailure';
   }
 }
 
+/**
+ * Safe structured classification of one provider failure. Billing (HTTP 402)
+ * is a DISTINCT non-transient service error: never `unknown`, never retried
+ * automatically and never presented as "no person/no information". The safe
+ * detail never carries provider body text or credentials.
+ */
 function mapProviderFailure(error: unknown): ProviderFailure {
   const message = error instanceof Error ? error.message : String(error);
-  const code = (error as { code?: string } | null)?.code ?? '';
-  if (code === 'provider_rate_limited' || /429|rate/i.test(message)) return new ProviderFailure('rate_limited', message);
-  if (code === 'provider_forbidden' || /401|403|forbidden|login/i.test(message)) return new ProviderFailure('access_limited', message);
-  if (code === 'provider_unavailable' || /unavailable|未配置/i.test(message)) return new ProviderFailure('no_adapter', message);
-  if (/timeout|timed out|超时/i.test(message)) return new ProviderFailure('timeout', message);
-  return new ProviderFailure('unknown', message);
+  const input = failureInputOf(error);
+  const failure = classifyFirstStepFailure(input);
+  // Legacy text fallbacks keep old recorded classifications stable.
+  const code = failure.code === 'provider_unknown'
+    ? /429|rate/i.test(message) ? 'provider_rate_limited' as const
+      : /401|403|forbidden|login/i.test(message) ? 'provider_access' as const
+        : /timeout|timed out|超时/i.test(message) ? 'provider_timeout' as const
+          : /unavailable|未配置/i.test(message) ? 'provider_unavailable' as const
+            : 'provider_unknown' as const
+    : failure.code;
+  const safe = code === failure.code ? failure : classifyFirstStepFailure({ code });
+  const state: FirstStepRouteState =
+    safe.code === 'provider_billing' ? 'provider_billing'
+      : safe.code === 'provider_rate_limited' ? 'rate_limited'
+        : safe.code === 'provider_access' ? 'access_limited'
+          : safe.code === 'provider_timeout' ? 'timeout'
+            : safe.code === 'provider_network' ? 'network_failed'
+              : safe.code === 'provider_unavailable' ? 'no_adapter'
+                : 'unknown';
+  return new ProviderFailure(state, message, safe);
+}
+
+function stateOfFailure(failure: FirstStepFailureView): FirstStepRouteState {
+  return failure.code === 'provider_billing' ? 'provider_billing'
+    : failure.code === 'provider_rate_limited' ? 'rate_limited'
+      : failure.code === 'provider_access' ? 'access_limited'
+        : failure.code === 'provider_timeout' ? 'timeout'
+          : failure.code === 'provider_network' ? 'network_failed'
+            : failure.code === 'provider_unavailable' ? 'no_adapter'
+              : 'unknown';
+}
+
+/**
+ * A replayed failed receipt keeps its ORIGINAL safe classification instead of
+ * degrading to `unknown` over the generic replay error.
+ */
+function effectiveProviderFailure(error: unknown, requestKey: string, search: FirstStepCheckedSearch): ProviderFailure {
+  const recorded = search.receipts().find((receipt) => receipt.requestKey === requestKey)?.error ?? null;
+  if (recorded) return new ProviderFailure(stateOfFailure(recorded), recorded.safeDetail, recorded);
+  return mapProviderFailure(error);
 }
 
 export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<FirstStepDiscoveryView> {
   const now = ctx.now ?? (() => new Date().toISOString());
   const link = ctx.firstStep.attachRun({ id: ctx.runId, ownerId: ctx.ownerId, question: ctx.input.question ?? ctx.input.value });
   const caseId = link.caseId;
-  const attemptId = `${String(link.inputRevision)}-${digest({ input: ctx.input, hint: ctx.hint ?? null })}`;
+  const attemptId = firstStepAttemptId(link, ctx.input, ctx.hint);
   const attemptPrefix = `firststep:${attemptId}:`;
   const priorAttempt = ctx.store.research.receipts(ctx.runId).filter(receipt => receipt.key.startsWith(attemptPrefix));
-  const legacyAttempt = priorAttempt.length > 0 && !priorAttempt.some(receipt => receipt.key.startsWith(`${attemptPrefix}v10:`));
+  // Old completed/in-flight attempts (legacy and v10) keep their policy,
+  // receipt keys and behavior: updating code never re-stages or re-runs them.
+  const attemptPolicy = firstStepAttemptPolicy(ctx.store, ctx.runId, attemptId);
+  const legacyAttempt = attemptPolicy === 'v9' && priorAttempt.length > 0;
+  const flowStage: 'overview' | 'accounts' | 'full' = resolveFirstStepFlowStage(attemptPolicy, ctx.stage);
+  const stagedAttempt = flowStage !== 'full';
+  const overviewOnly = flowStage === 'overview';
   // A pending legacy attempt must not acquire new IO merely because code was
   // updated. Preserve its sequential replay and old read strategy.
-  const budget = { ...(ctx.budget ?? FIRST_STEP_DEFAULT_BUDGET), ...(legacyAttempt ? { policyVersion: 'first-step/v9' } : {}) };
+  const budget = {
+    ...(overviewOnly ? FIRST_STEP_OVERVIEW_BUDGET : ctx.budget ?? FIRST_STEP_DEFAULT_BUDGET),
+    ...(legacyAttempt ? { policyVersion: 'first-step/v9' } : {}),
+    ...(stagedAttempt ? { policyVersion: FIRST_STEP_STAGED_POLICY_VERSION } : {})
+  };
   // Frozen BEFORE any IO: catalog-bound obligations and the attempt identity.
   // A restart of this attempt reuses real receipts; an expand is a NEW attempt.
   const catalogRoutes = catalogObligations(ctx.catalog ?? null, ctx.input);
@@ -727,6 +919,10 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     extraRoutes: catalogRoutes
   });
   if (legacyAttempt) plan.policyVersion = 'first-step/v9';
+  else if (stagedAttempt) plan.policyVersion = FIRST_STEP_STAGED_POLICY_VERSION;
+  // Prior immutable overview snapshot (confirmed person context for the
+  // account stage); the client never supplies or rewrites it.
+  const priorOverview = ctx.firstStep.currentDiscovery(ctx.runId)?.view.personOverview ?? null;
   const frozenCase = ctx.store.cases.getCase(ctx.ownerId, caseId);
   const frozenScopeVersion = (frozenCase?.scopeVersion ?? 1) as ScopeVersion;
   const active = (): void => {
@@ -743,8 +939,28 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   };
 
   active();
-  const useAgent=ctx.firstStep.freezeSearchAgent(ctx.ownerId,ctx.runId,attemptId,Boolean(ctx.agent&&!legacyAttempt&&(priorAttempt.length===0||priorAttempt.some(receipt=>receipt.key.startsWith(`${attemptPrefix}v10:agent:`)))));
+  const useAgent = overviewOnly ? false : ctx.firstStep.freezeSearchAgent(ctx.ownerId,ctx.runId,attemptId,Boolean(ctx.agent&&!legacyAttempt&&(priorAttempt.length===0||priorAttempt.some(receipt=>receipt.key.startsWith(`${attemptPrefix}v10:agent:`)||receipt.key.startsWith(`${attemptPrefix}v11:agent:`)))));
   if(useAgent&&!ctx.agent)throw new ResearchStop('provider_unavailable');
+  // GET-213: the confirmed person RESOLVES from the authoritative persisted
+  // overview and its validated source dependencies — never from client input.
+  // A missing/changed/withdrawn source fails closed BEFORE any dispatch, and
+  // the chosen candidate's real source context guides the account queries so
+  // two same-name candidates never produce the same blind expansion.
+  let confirmedAliases: string[] = [];
+  if (ctx.confirmedPerson && stagedAttempt) {
+    const gate = gatePersonCandidate(priorOverview, ctx.confirmedPerson.candidateId);
+    const dependencies = ctx.confirmedPerson.sourceDeps ?? (gate.ok ? sourceDependenciesOf(gate.candidate) : []);
+    const check = gate.ok ? validatePersonSourceDependencies(ctx.store, ctx.runId, dependencies) : { ok: false as const, error: gate.error };
+    // Fail closed through the existing revocation/pause path: the frozen
+    // person research pauses and every historical record stays intact.
+    if (!check.ok) throw new FirstStepSelectionError('scope_changed', `${check.error}人物研究暂停，原记录保留。`);
+    if (gate.ok) {
+      const terms = gate.candidate.descriptors
+        .map(descriptor => descriptor.statement.replace(/^(?:来源标题|搜索索引标题)：/, '').trim())
+        .filter(term => term.length >= 2 && term.length <= 120 && !isUntrustedInstructionText(term));
+      confirmedAliases = [...new Set(terms)].slice(0, 2);
+    }
+  }
   stage('finding_home', '查找公开主页与身份线索');
 
   const observed: ObservedPage[] = [];
@@ -791,13 +1007,33 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const linkObservations: FirstStepLinkObservation[] = [];
   const observationIds = new Set<string>();
   const gaps: string[] = [];
-  const failures: Array<{ kind: 'search' | 'read'; target: string; platform: string | null; state: FirstStepRouteState; detail: string }> = [];
+  const failures: Array<{ kind: 'search' | 'read'; target: string; platform: string | null; state: FirstStepRouteState; detail: string; failure?: FirstStepFailureView }> = [];
+  /** Actual dispatch outcomes per query: coverage NEVER claims untried work. */
+  const dispatchedQueries = new Map<string, 'completed' | 'failed'>();
+  const supplierStops: Array<{ supplier: string; failure: FirstStepFailureView; note: string }> = [];
+  /** Billing failure observed this attempt: record + stop that supplier. */
+  const noteSupplierStop = (supplier: string, failure: FirstStepFailureView): void => {
+    if (supplierStops.some((stop) => stop.supplier === supplier)) return;
+    const note = `同一供应商（${supplier}）因计费失败已停止本尝试后续调用；未尝试的路线保留为缺口，不自动重试。`;
+    supplierStops.push({ supplier, failure, note });
+    gaps.push(note);
+  };
+  // Restart durability: a billing stop recorded earlier in this attempt still
+  // blocks same-supplier dispatch after a restart.
+  for (const event of ctx.store.listEvents(ctx.runId)) {
+    if (event.type !== 'first_step_supplier_stop') continue;
+    const raw = (event as unknown as { payload?: { attemptId?: string; supplier?: string } }).payload ??
+      (event as unknown as { attemptId?: string; supplier?: string });
+    if (raw.attemptId === attemptId && typeof raw.supplier === 'string') {
+      noteSupplierStop(raw.supplier, classifyFirstStepFailure({ code: 'provider_billing' }));
+    }
+  }
   const emptyConstrainedQueries = new Set<string>();
   let budgetExhausted = false;
   let requestIndex = 0;
   const requestKey = (kind: string, descriptor: unknown = 'proposal'): string => legacyAttempt
     ? `${attemptPrefix}${kind}:${String(++requestIndex)}`
-    : `${attemptPrefix}v10:${kind}:${digest(descriptor)}`;
+    : `${attemptPrefix}${stagedAttempt ? 'v11' : 'v10'}:${kind}:${digest(descriptor)}`;
 
   /** Non-account tool result links stay available as honest related leads. */
   const keepMaterialLead = (ref: FirstStepAccountRef, note?: string): void => {
@@ -935,8 +1171,11 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
 
   const searchOnce = async (query: string, includeDomains?: readonly string[], provider?: 'bluesky'): Promise<'ok' | 'failed' | 'budget'> => {
     active();
+    dispatchedQueries.set(query, 'failed');
+    const key = requestKey('search', {query,includeDomains,provider});
     try {
-      const result = await ctx.search.search(requestKey('search', {query,includeDomains,provider}), query, budget.maxSearchResults, ctx.signal, includeDomains, provider);
+      const result = await ctx.search.search(key, query, budget.maxSearchResults, ctx.signal, includeDomains, provider);
+      dispatchedQueries.set(query, 'completed');
       active();
       if (includeDomains?.length && result.pages.length === 0) emptyConstrainedQueries.add(query);
       for (const page of result.pages) {
@@ -997,20 +1236,29 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     } catch (error) {
       if (error instanceof ResearchStop && error.code === 'budget_exhausted') {
         budgetExhausted = true;
+        dispatchedQueries.delete(query);
         gaps.push('操作员总预算上限已到，剩余检索路线未请求；缺口保留，不自动重试。');
         return 'budget';
       }
       if (isLivenessFailure(error, ctx.signal)) throw error;
+      if (error instanceof FirstStepSupplierStopped) {
+        // Same-supplier stop (billing): nothing dispatched, no receipt, no cost.
+        dispatchedQueries.delete(query);
+        gaps.push(`同一供应商（${error.supplier}）已因计费失败停止，本查询未派发、未计费：${query}；保留缺口。`);
+        return 'failed';
+      }
       if (error instanceof ResearchStop && error.code === 'invalid_decision') {
         // An input decision error is an honest failure/gap, never internal_error:
+        dispatchedQueries.delete(query);
         // the checked surface rejects it before any dispatch — no request, no
         // receipt, no cost — and discovery keeps its other routes.
         failures.push({ kind: 'search', target: query, platform: null, state: 'unknown', detail: '输入决策错误（invalid_decision）：查询不符合冻结查询契约；未派发请求、无计费回执。' });
         gaps.push(`检索查询未通过冻结查询契约（invalid_decision），未派发请求、未计费：${query}；如实保留缺口，不作内部错误。`);
         return 'failed';
       }
-      const failure = mapProviderFailure(error);
-      failures.push({ kind: 'search', target: query, platform: null, state: failure.state, detail: failure.message });
+      const failure = effectiveProviderFailure(error, key, ctx.search);
+      if (failure.failure.code === 'provider_billing') noteSupplierStop(firstStepSupplierOf({ type: 'search', query, ...(provider ? { provider } : {}) }), failure.failure);
+      failures.push({ kind: 'search', target: query, platform: null, state: failure.state, detail: failure.message, failure: failure.failure });
       gaps.push(`检索路线未成功（${failure.state}）：${query}；不代表无资料。`);
       return 'failed';
     }
@@ -1026,8 +1274,9 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
           : ctx.firecrawlAvailable && ['personal_site', 'linktree'].includes(ref.platform)
             ? { type: 'firecrawl', url: concreteUrl }
             : { type: 'read', url: concreteUrl };
+    const key = requestKey('profile', {url:concreteUrl});
     try {
-      const result = await ctx.search.readIdentity(requestKey('profile', {url:concreteUrl}), action, ctx.signal, intent);
+      const result = await ctx.search.readIdentity(key, action, ctx.signal, intent);
       active();
       let ingested = 0;
       for (const page of result.pages) {
@@ -1182,14 +1431,19 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
         return 'budget';
       }
       if (isLivenessFailure(error, ctx.signal)) throw error;
+      if (error instanceof FirstStepSupplierStopped) {
+        gaps.push(`同一供应商（${error.supplier}）已因计费失败停止，本身份读取未派发、未计费：${concreteUrl}；保留缺口。`);
+        return 'failed';
+      }
       if (error instanceof ResearchStop && error.code === 'invalid_decision') {
         // Honest failure/gap for an input decision error: never internal_error.
         failures.push({ kind: 'read', target: concreteUrl, platform: ref.platform, state: 'unknown', detail: '输入决策错误（invalid_decision）：读取请求不符合冻结读取契约；未派发请求、无计费回执。' });
         gaps.push(`身份读取请求未通过冻结读取契约（invalid_decision），未派发请求、未计费：${concreteUrl}；如实保留缺口，不作内部错误。`);
         return 'failed';
       }
-      const failure = mapProviderFailure(error);
-      failures.push({ kind: 'read', target: concreteUrl, platform: ref.platform, state: failure.state, detail: failure.message });
+      const failure = effectiveProviderFailure(error, key, ctx.search);
+      if (failure.failure.code === 'provider_billing') noteSupplierStop(firstStepSupplierOf(action), failure.failure);
+      failures.push({ kind: 'read', target: concreteUrl, platform: ref.platform, state: failure.state, detail: failure.message, failure: failure.failure });
       gaps.push(`身份读取路线未成功（${failure.state}）：${concreteUrl}；不代表无此账号。`);
       return 'failed';
     }
@@ -1208,10 +1462,193 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   }
 
   // 2. Wide recall: deliberate family coverage; every query runs before reads
-  //    stop the wave and one failure never hides the other routes.
-  const queryPlan = firstStepQueryPlan(ctx.input, budget);
+  //    stop the wave and one failure never hides the other routes. The
+  //    overview stage keeps ONLY bounded general-web families: social/account
+  //    search is dispatched after the explicit person confirmation.
+  const queryPlan = overviewOnly
+    ? firstStepStageQueryPlan(firstStepQueryPlan(ctx.input, { ...budget, maxSearchQueries: FIRST_STEP_DEFAULT_BUDGET.maxSearchQueries }), 'overview').slice(0, budget.maxSearchQueries)
+    : firstStepQueryPlan(ctx.input, budget, confirmedAliases);
   for (const item of queryPlan) {
     if ((await searchOnce(item.query, item.includeDomains, item.provider)) === 'budget') break;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* GET-213 overview stage: person candidates before account expansion  */
+  /* ------------------------------------------------------------------ */
+  if (overviewOnly) {
+    // Minimal identity-source reads: ordinary third-party biographies and
+    // public personal sites only. No social/account/history reads at all.
+    const identityLeads = ctx.store.research.receipts(ctx.runId)
+      .filter(receipt => receipt.key.startsWith(attemptPrefix) && receipt.kind === 'tool' && receipt.state === 'completed' &&
+        (receipt.request as ResearchToolAction | null)?.type === 'search')
+      .flatMap(receipt => ((receipt.result as ResearchToolResult | undefined)?.pages ?? [])
+        // Bounded reads of OBSERVED public non-social biography/article/
+        // encyclopedia pages (bound to their real search receipts) plus the
+        // institutional identity pages. Social/profile/history stays deferred.
+        .filter(page => (isFirstStepThirdPartyIdentityUrl(page.url) || isFirstStepOverviewIdentityUrl(page.url)) && matchesInput(page.title))
+        .map(page => ({ url: page.url, receiptKey: receipt.key })));
+    for (const lead of [...new Map(identityLeads.map(lead => [lead.url, lead])).values()].slice(0, 3)) {
+      if (readUrls.size >= budget.maxProfileReads) break;
+      const ref = classifyFirstStepUrl(lead.url);
+      if (!ref.ok || readUrls.has(lead.url)) continue;
+      readKeys.add(resolveKey(ref.ref.accountKey));
+      readUrls.add(lead.url);
+      await readOnce(ref.ref, lead.url, { purpose: 'third_party_identity', url: lead.url, searchReceiptKey: lead.receiptKey });
+    }
+    for (const ref of [...candidateRefs.values()]
+      .filter(ref => ref.entry === 'profile' && ['personal_site', 'linktree', 'web_page', 'rss_blog'].includes(ref.platform))
+      .sort((a, b) => (a.platform === 'personal_site' || a.platform === 'linktree' ? 0 : 1) - (b.platform === 'personal_site' || b.platform === 'linktree' ? 0 : 1) || a.profileUrl.localeCompare(b.profileUrl))) {
+      if (readUrls.size >= budget.maxProfileReads) break;
+      const key = resolveKey(ref.accountKey);
+      if (readKeys.has(key)) continue;
+      readKeys.add(key);
+      readUrls.add(ref.profileUrl);
+      await readOnce(ref, ref.profileUrl);
+    }
+
+    // The overview projects REAL receipts only: indexed clues stay distinct
+    // from read originals (hash + exact quote span + locator). A page that was
+    // actually read keeps its ORIGINAL record; its index clue never replaces
+    // the read source of the same URL. Index snippets only help MATCHING; the
+    // projected indexed source never carries text, quote or hash.
+    const overviewSources: OverviewSourceInput[] = [];
+    const seenSourceUrls = new Set<string>();
+    for (const entry of observed) {
+      if (entry.retrieval !== 'read' || seenSourceUrls.has(entry.page.url)) continue;
+      seenSourceUrls.add(entry.page.url);
+      overviewSources.push({ url: entry.page.url, title: entry.page.title, text: entry.page.text, retrieval: 'read', retrievedAt: entry.page.retrievedAt ?? now() });
+    }
+    for (const receipt of ctx.store.research.receipts(ctx.runId)) {
+      if (!receipt.key.startsWith(attemptPrefix) || receipt.kind !== 'tool' || receipt.state !== 'completed') continue;
+      if ((receipt.request as ResearchToolAction | null)?.type !== 'search') continue;
+      for (const page of ((receipt.result as ResearchToolResult | undefined)?.pages ?? [])) {
+        if (seenSourceUrls.has(page.url)) continue;
+        seenSourceUrls.add(page.url);
+        overviewSources.push({ url: page.url, title: page.title, text: page.text, retrieval: 'indexed', retrievedAt: null });
+      }
+    }
+    const coverageFamilies = queryPlan.map((item) => {
+      const outcome = dispatchedQueries.get(item.query);
+      const failure = failures.find(f => f.kind === 'search' && f.target === item.query);
+      if (outcome === 'completed') {
+        return { family: item.family, state: 'completed' as const, note: '已派发普通网页检索并留下真实回执；空结果不代表无资料，覆盖未验证。' };
+      }
+      if (outcome === 'failed') {
+        return { family: item.family, state: 'failed' as const, note: failure?.failure?.safeDetail ?? failure?.detail ?? '本次检索失败；保留缺口。' };
+      }
+      // Never dispatched: honest deferred/skipped states only.
+      return {
+        family: item.family,
+        state: (budgetExhausted ? 'skipped_budget' : 'deferred') as 'skipped_budget' | 'deferred',
+        note: supplierStops.length > 0
+          ? '因供应商计费失败停止，本路线未派发、未计费；保留缺口，不自动重试。'
+          : budgetExhausted
+            ? '预算/次数上限已到，本路线未派发、未计费；保持 skipped_budget。'
+            : '本路线未派发、未计费；保留缺口，不代表没有资料。'
+      };
+    });
+    const overview = buildPersonOverview({
+      attemptId,
+      queryLabel: ctx.input.value,
+      policyVersion: plan.policyVersion,
+      now: now(),
+      sources: overviewSources,
+      coverage: {
+        queryFamilies: coverageFamilies,
+        attemptsStopped: supplierStops.map(stop => ({ supplier: stop.supplier, failure: stop.failure, note: stop.note }))
+      },
+      gaps: [...gaps],
+      serviceError: failures.find(f => f.failure?.code === 'provider_billing')?.failure ?? null
+    });
+    const overviewRoutes: FirstStepRouteStatusView[] = plan.obligations.map((obligation) => {
+      const relatedFailure = failures.find((failure) =>
+        obligation.routeId === 'web-search' ? failure.kind === 'search' : failure.kind === 'read' && failure.platform === obligation.platform
+      );
+      const receiptKeys = obligation.routeId === 'web-search'
+        ? ctx.search.receipts().filter(r => r.kind === 'search').map(r => r.requestKey)
+        : obligation.routeId === 'anchor-home'
+          ? ctx.search.receipts().filter(r => r.kind === 'profile_read').map(r => r.requestKey)
+          : [];
+      const state: FirstStepRouteState = relatedFailure !== undefined ? relatedFailure.state
+        : obligation.routeId === 'web-search' || obligation.routeId === 'anchor-home'
+          ? receiptKeys.length > 0 ? 'found' : 'no_clue'
+          : 'deferred';
+      return {
+        routeId: obligation.routeId,
+        platform: obligation.platform,
+        platformLabel: obligation.platformLabel,
+        materialUse: obligation.materialUse,
+        state,
+        note: relatedFailure !== undefined
+          ? `真实失败回执（${relatedFailure.state}）：${relatedFailure.detail}`
+          : state === 'deferred'
+            ? '人物确认前不展开账号/平台路线；当前未派发该平台请求、未计费，确认后才展开。'
+            : '人物确认前的有界普通网页检索/最小身份读取；覆盖完整性未验证。',
+        receiptKeys,
+        failure: relatedFailure?.failure ?? null
+      };
+    });
+    const receipts = ctx.search.receipts();
+    const view: FirstStepDiscoveryView = {
+      schemaVersion: FIRST_STEP_SCHEMA_VERSION,
+      runId: ctx.runId,
+      caseId,
+      discoveryRevision: 0,
+      inputRevision: link.inputRevision,
+      registryVersion: ctx.catalog?.registryVersion ?? ctx.registryVersion,
+      catalogHash: ctx.catalog?.contentHash ?? null,
+      policyVersion: plan.policyVersion,
+      phase: 'awaiting_person_confirmation',
+      stopReason: null,
+      readyForChoice: false,
+      input: ctx.input,
+      clusters: [],
+      accounts: [],
+      relatedLeads: [...relatedLeads.values()],
+      routes: overviewRoutes,
+      gaps: overview.gaps,
+      receipts,
+      budget: {
+        toolCalls: receipts.filter((receipt) => receipt.kind !== 'model').length,
+        modelCalls: receipts.filter((receipt) => receipt.kind === 'model').length,
+        estimatedUsd: receipts.reduce((sum, receipt) => sum + (receipt.estimatedUsd ?? 0), 0),
+        unknownCost: receipts.some((receipt) => receipt.unknownCost)
+      },
+      selection: {
+        scopeVersion: frozenScopeVersion,
+        frozenScopeVersion: null,
+        submitted: false,
+        submittedAt: null,
+        selectedAccountIds: [],
+        excludedAccountIds: []
+      },
+      personOverview: overview,
+      personConfirmation: {
+        required: true,
+        status: 'awaiting',
+        confirmedCandidateId: null,
+        confirmedAt: null,
+        confirmationRevision: null
+      },
+      updatedAt: now()
+    };
+    active();
+    const record = ctx.firstStep.appendDiscoveryRevision({
+      runId: ctx.runId,
+      input: ctx.input,
+      plan,
+      view,
+      phase: 'awaiting_person_confirmation',
+      readyForChoice: false,
+      stopReason: overview.status === 'service_error' ? 'service_error' : 'awaiting_person_confirmation'
+    });
+    ctx.store.addEvent(ctx.runId, 'first_step_person_overview', {
+      discoveryRevision: record.discoveryRevision,
+      candidates: overview.candidates.length,
+      status: overview.status,
+      serviceError: overview.serviceError?.code ?? null
+    });
+    return record.view;
   }
 
   // 3. Minimal identity reads BEFORE the explicit selection, prioritizing
@@ -1743,7 +2180,8 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
               : obligation.source === 'catalog'
                 ? `目录义务（${ctx.catalog?.registryVersion ?? plan.registryVersion}）：本次未观察到真实线索，保持 ${obligation.initialState === 'planned' ? 'no_clue' : obligation.initialState}。`
                 : '本次输入未观察到该路线的真实线索；不代表没有此类账号。',
-      receiptKeys
+      receiptKeys,
+      failure: relatedFailure?.failure ?? null
     };
   });
   if (budgetExhausted) {
@@ -1791,6 +2229,20 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
       selectedAccountIds: [],
       excludedAccountIds: []
     },
+    // Staged name attempts carry the immutable overview snapshot and the
+    // explicit person-confirmation state; legacy attempts keep their shape.
+    ...(stagedAttempt
+      ? {
+          personOverview: priorOverview,
+          personConfirmation: {
+            required: true,
+            status: (ctx.confirmedPerson ? 'confirmed' : 'awaiting') as 'confirmed' | 'awaiting',
+            confirmedCandidateId: ctx.confirmedPerson?.candidateId ?? null,
+            confirmedAt: ctx.confirmedPerson?.confirmedAt ?? null,
+            confirmationRevision: ctx.confirmedPerson ? 1 : null
+          }
+        }
+      : {}),
     updatedAt: now()
   };
   active();
