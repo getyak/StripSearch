@@ -537,3 +537,48 @@ test('new sources do not displace the focused material when the preview reaches 
   assert.match(surface().textContent!, /另有 1 条来源/);
   stream.close();
 });
+
+
+for (const mobile of [false, true]) {
+  test(`live material returns focus after refresh and ${mobile ? 'mobile Escape' : 'desktop close'}`, async () => {
+    await freshUser(`material-return-${mobile}`);
+    const previousMedia = env.window.matchMedia;
+    env.window.matchMedia = ((query: string) => ({ ...previousMedia(query), matches: mobile && query === '(max-width: 1220px)' })) as typeof window.matchMedia;
+    try {
+      const run = makeView(`material-return-${mobile}`, { sources: [source('S1')], research: researchMeta('reading') });
+      applySnapshot(run, [], 0);
+      const original = surface().querySelector<HTMLButtonElement>('[data-source-key="S1"]')!;
+      original.focus(); original.click();
+      const entry = main.__test.citationReturn.entry();
+      assert.equal(entry?.sourceKey, 'S1');
+      assert.equal(entry?.runId, run.runId);
+      assert.ok(entry?.returnSelector?.includes('live-material'), 'record a durable return target for the actual material entry');
+      applySnapshot({ ...run, revision: 2 }, [], 0);
+      const rebuilt = surface().querySelector<HTMLButtonElement>('[data-source-key="S1"]')!;
+      assert.notEqual(rebuilt, original, 'exercise a real DOM rebuild while inspection is open');
+      if (mobile) {
+        const drawer = el<HTMLDialogElement>('source-drawer');
+        assert.equal(drawer.open, true);
+        drawer.dispatchEvent(new env.window.Event('cancel', { cancelable: true }));
+        assert.equal(drawer.open, false);
+      } else el<HTMLButtonElement>('desktop-close-inspector').click();
+      assert.equal(env.document.activeElement, rebuilt, 'return to this run’s original material after refresh');
+    } finally { env.window.matchMedia = previousMedia; }
+  });
+}
+
+test('loading focus and process disclosure survive only within the same research', async () => {
+  await freshUser('material-run-boundary');
+  const run = makeView('material-run-a', { sources: [source('S1')], research: researchMeta('reading') });
+  const stages = [stageEvent(1, 'reading', '读取原文')];
+  applySnapshot(run, stages, 1);
+  const process = surface().querySelector<HTMLDetailsElement>('details')!;
+  process.open = true;
+  surface().querySelector<HTMLButtonElement>('[data-source-key="S1"]')!.focus();
+  applySnapshot({ ...run, revision: 2 }, stages, 1);
+  assert.equal(process.open, true, 'same-run refresh preserves deliberate disclosure state');
+  assert.equal(env.document.activeElement, surface().querySelector('[data-source-key="S1"]'), 'same-run focus survives');
+  applySnapshot({ ...run, runId: 'material-run-b' }, stages, 1);
+  assert.equal(process.open, false, 'another research starts with its own disclosure state');
+  assert.notEqual(env.document.activeElement, surface().querySelector('[data-source-key="S1"]'), 'S1 from another research is not the same focus target');
+});

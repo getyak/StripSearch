@@ -263,7 +263,7 @@ export function deriveResearchLoading(input: ResearchLoadingInput): ResearchLoad
 }
 
 export interface ResearchLoadingHandlers {
-  onInspectSource(sourceKey: string): void;
+  onInspectSource(sourceKey: string, row: HTMLElement): void;
 }
 
 export interface ResearchLoadingSurface {
@@ -274,7 +274,7 @@ export interface ResearchLoadingSurface {
 /**
  * The single live research surface. The host element is created once and
  * updated in place: process disclosure state and focus inside the surface
- * survive every update, and nothing here scrolls or moves focus on its own.
+ * survive updates within the same run; another run starts with fresh UI state.
  */
 export function createResearchLoadingSurface(handlers: ResearchLoadingHandlers): ResearchLoadingSurface {
   const element = make('section', {
@@ -309,8 +309,9 @@ export function createResearchLoadingSurface(handlers: ResearchLoadingHandlers):
 
   function update(model: ResearchLoadingModel): void {
     const active = document.activeElement as HTMLElement | null;
-    const focusKey = active && element.contains(active) ? (active.dataset.focusKey ?? null) : null;
-    const processOpen = process.open;
+    const sameRun = Boolean(model.runId) && element.dataset.runId === model.runId;
+    const focusKey = sameRun && active && element.contains(active) ? (active.dataset.focusKey ?? null) : null;
+    const processOpen = sameRun && process.open;
 
     element.hidden = model.mode !== 'active';
     element.dataset.mode = model.mode;
@@ -358,7 +359,7 @@ export function createResearchLoadingSurface(handlers: ResearchLoadingHandlers):
           'data-source-key': material.sourceKey,
           'data-focus-key': `material:${material.sourceKey}`
         },
-        on: { click: () => handlers.onInspectSource(material.sourceKey) }
+        on: { click: () => handlers.onInspectSource(material.sourceKey, row) }
       });
       row.append(
         make('span', { className: 'source-code', text: material.sourceKey }),

@@ -184,7 +184,7 @@ const els = {
  * activity shells or a busy state that needs_input already stopped.
  */
 const researchLoading = createResearchLoadingSurface({
-  onInspectSource: (sourceKey) => focusSource(sourceKey, 'list', null)
+  onInspectSource: (sourceKey, row) => focusSource(sourceKey, 'list', row)
 });
 els.statusSummary.before(researchLoading.element);
 
