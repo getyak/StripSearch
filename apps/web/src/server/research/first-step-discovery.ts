@@ -939,7 +939,12 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   };
 
   active();
-  const useAgent = overviewOnly ? false : ctx.firstStep.freezeSearchAgent(ctx.ownerId,ctx.runId,attemptId,Boolean(ctx.agent&&!legacyAttempt&&(priorAttempt.length===0||priorAttempt.some(receipt=>receipt.key.startsWith(`${attemptPrefix}v10:agent:`)||receipt.key.startsWith(`${attemptPrefix}v11:agent:`)))));
+  // Overview receipts precede a NEW accounts strategy and do not indicate
+  // that an Agent was disabled. Existing frozen strategies still win on
+  // restart; unmarked v9/v10 histories keep their original replay behavior.
+  const priorAgent = priorAttempt.some(receipt => receipt.key.startsWith(`${attemptPrefix}v10:agent:`) || receipt.key.startsWith(`${attemptPrefix}v11:agent:`));
+  const initialAgent = Boolean(ctx.agent && !legacyAttempt && (flowStage === 'accounts' || priorAttempt.length === 0 || priorAgent));
+  const useAgent = overviewOnly ? false : ctx.firstStep.freezeSearchAgent(ctx.ownerId, ctx.runId, attemptId, initialAgent);
   if(useAgent&&!ctx.agent)throw new ResearchStop('provider_unavailable');
   // GET-213: the confirmed person RESOLVES from the authoritative persisted
   // overview and its validated source dependencies — never from client input.

@@ -385,6 +385,11 @@ export function firstStepStageQueryPlan(
 
 const SENTENCE_DELIMITERS = '.。！？!?\n;；';
 
+/** Only alternatives explicitly supplied by the user, matching the query plan. */
+export function suppliedPersonLabels(label: string): string[] {
+  return [...new Set(label.split(/\s*[\/／]\s*/).map((name) => name.trim()).filter(Boolean))];
+}
+
 /**
  * Deterministic sentence-bounded excerpt around an observed name mention in a
  * RETAINED original, with a real character locator. Never a model summary and
@@ -392,10 +397,13 @@ const SENTENCE_DELIMITERS = '.。！？!?\n;；';
  */
 export function excerptAroundLabel(text: string, label: string): { quote: string; locator: string } | null {
   const haystack = text.normalize('NFKC').toLowerCase();
-  const needle = label.normalize('NFKC').toLowerCase().trim();
-  if (needle.length === 0) return null;
-  const index = haystack.indexOf(needle);
-  if (index < 0) return null;
+  const match = suppliedPersonLabels(label)
+    .map((name) => name.normalize('NFKC').toLowerCase())
+    .map((needle) => ({ needle, index: haystack.indexOf(needle) }))
+    .filter((item) => item.index >= 0)
+    .sort((a, b) => a.index - b.index || b.needle.length - a.needle.length)[0];
+  if (!match) return null;
+  const { needle, index } = match;
   // Normalization can expand ligatures or compose combining marks. Map the
   // normalized match back to original grapheme boundaries before slicing.
   let normalizedOffset = 0;

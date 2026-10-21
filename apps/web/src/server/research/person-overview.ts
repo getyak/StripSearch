@@ -12,10 +12,10 @@
  */
 
 import { createHash } from 'node:crypto';
-import { classifyFirstStepUrl } from '../../shared/first-step-discovery.js';
 import {
   PERSON_CONFIRMATION_SCHEMA_VERSION,
   excerptAroundLabel,
+  suppliedPersonLabels,
   type FirstStepFailureView,
   type PersonCandidateView,
   type PersonDescriptorAtomView,
@@ -58,28 +58,28 @@ export function personCandidateId(anchorGroupKey: string): string {
 }
 
 function groupKeyOf(url: string): string {
-  const classified = classifyFirstStepUrl(url);
-  return classified.ok ? classified.ref.accountKey : `url:${url}`;
+  // A shared website/account is not proof of a shared person referent.
+  // Only observations of the concrete same document belong together here.
+  return `url:${url}`;
 }
 
 function normalized(value: string): string {
   return value.normalize('NFKC').toLowerCase();
 }
 
-function matchesQueryLabel(source: OverviewSourceInput, needle: string): boolean {
-  if (needle.length === 0) return true;
+function matchesQueryLabel(source: OverviewSourceInput, needles: readonly string[]): boolean {
   // Matching may look at the indexed snippet text; the PROJECTION never keeps
   // that text (indexed sources stay clue-only with no quote/hash/excerpt).
   const haystack = normalized(`${source.title ?? ''}\n${source.text ?? ''}`);
-  return haystack.includes(needle);
+  return needles.some((needle) => haystack.includes(needle));
 }
 
 const MAX_CANDIDATES = 4;
 
 export function buildPersonOverview(input: BuildPersonOverviewInput): PersonOverviewView {
-  const needle = normalized(input.queryLabel.trim());
+  const needles = suppliedPersonLabels(input.queryLabel).map(normalized);
   const gaps = [...input.gaps];
-  const matching = input.sources.filter((source) => matchesQueryLabel(source, needle));
+  const matching = input.sources.filter((source) => matchesQueryLabel(source, needles));
   const nonMatching = input.sources.length - matching.length;
   if (nonMatching > 0) {
     gaps.push(`${String(nonMatching)} 个检索来源未出现查询姓名线索，未纳入人物候选；不据此断言与查询人物无关。`);
