@@ -951,7 +951,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   /** GET-213: the person confirmation is its own explicit action. */
   const submitPersonConfirmation = async (): Promise<null> => {
     const current = view!;
-    if (!personCandidateId) {
+    if (!personCandidateId || !current.personOverview?.candidates.some(candidate => candidate.candidateId === personCandidateId)) {
       errorText = '请先选择一个人物候选，再确认。';
       render();
       return null;
@@ -1049,6 +1049,9 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     }
     const initialSnapshot = view === null && saved === null;
     const sameView = view !== null && JSON.stringify(view) === JSON.stringify(next) && (nextRunRevision === undefined || nextRunRevision === runRevision);
+    const personRevisionChanged = view !== null && (view.discoveryRevision !== next.discoveryRevision ||
+      view.inputRevision !== next.inputRevision || view.personOverview?.attemptId !== next.personOverview?.attemptId);
+    if (personRevisionChanged || !next.personOverview?.candidates.some(candidate => candidate.candidateId === personCandidateId)) personCandidateId = null;
     view = next;
     if (typeof nextRunRevision === 'number') runRevision = nextRunRevision;
     if (clusterId === null && next.clusters.length === 1 && clusterFitsInput(next.clusters[0]!, next)) clusterId = next.clusters[0]!.clusterId;

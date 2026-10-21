@@ -1120,10 +1120,13 @@ export class FirstStepStore {
       }
       this.setPhase(runId, 'freezing');
       const runRevision = run.revision + 1;
+      // A clue refines a staged name search; it does not change that input
+      // into a direct account target or bypass renewed person confirmation.
+      const preservePersonInput = this.currentDiscovery(runId)?.view.personConfirmation?.required === true;
       this.store.updateRun(runId, {
         state: 'queued',
         revision: runRevision,
-        seed_url: run.seedUrl ?? (hint && /^https:\/\//i.test(hint) ? hint.trim() : run.seedUrl)
+        seed_url: preservePersonInput ? run.seedUrl : run.seedUrl ?? (hint && /^https:\/\//i.test(hint) ? hint.trim() : run.seedUrl)
       });
       this.store.addEvent(runId, 'state', {
         state: 'queued',

@@ -42,6 +42,7 @@ import {
   classifyFirstStepFailure,
   firstStepStageQueryPlan,
   isFirstStepOverviewIdentityUrl,
+  suppliedPersonLabels,
   type FirstStepFailureView
 } from '../../shared/person-confirmation.js';
 import { buildPersonOverview, type OverviewSourceInput } from './person-overview.js';
@@ -59,6 +60,7 @@ import { toCompletionRegistry } from '../platforms/catalog.js';
 import {
   FIRST_STEP_DEFAULT_BUDGET,
   FIRST_STEP_SEARCH_QUERY_MAX,
+  firstStepUrlSearchQuery,
   FIRST_STEP_BASIS_LABELS,
   FIRST_STEP_SCHEMA_VERSION,
   assessIdentityLink,
@@ -960,10 +962,18 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
     // person research pauses and every historical record stays intact.
     if (!check.ok) throw new FirstStepSelectionError('scope_changed', `${check.error}人物研究暂停，原记录保留。`);
     if (gate.ok) {
-      const terms = gate.candidate.descriptors
+      const terms = [...gate.candidate.descriptors]
+        .sort((a, b) => Number(b.kind === 'source_excerpt') - Number(a.kind === 'source_excerpt'))
         .map(descriptor => descriptor.statement.replace(/^(?:来源标题|搜索索引标题)：/, '').trim())
-        .filter(term => term.length >= 2 && term.length <= 120 && !isUntrustedInstructionText(term));
-      confirmedAliases = [...new Set(terms)].slice(0, 2);
+        .filter(term => term.length >= 2 && !isUntrustedInstructionText(term))
+        .map(term => term.slice(0, 120));
+      const anchor = gate.candidate.sources.find(source => source.sourceKey === gate.candidate.anchorSourceKey) ?? gate.candidate.sources[0];
+      const suppliedName = suppliedPersonLabels(ctx.input.value)[0] ?? ctx.input.value.trim();
+      // The concrete observed source distinguishes even identical titles or
+      // long descriptions. This is query context, never an invented name or
+      // account-ownership assertion; every dependency was checked above.
+      const sourceContext = anchor ? `${suppliedName} ${firstStepUrlSearchQuery(anchor.url)}`.slice(0, 120) : '';
+      confirmedAliases = [...new Set([sourceContext, ...terms].filter(term => term.length >= 2 && !isUntrustedInstructionText(term)))].slice(0, 2);
     }
   }
   stage('finding_home', '查找公开主页与身份线索');
@@ -1473,6 +1483,16 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   const queryPlan = overviewOnly
     ? firstStepStageQueryPlan(firstStepQueryPlan(ctx.input, { ...budget, maxSearchQueries: FIRST_STEP_DEFAULT_BUDGET.maxSearchQueries }), 'overview').slice(0, budget.maxSearchQueries)
     : firstStepQueryPlan(ctx.input, budget, confirmedAliases);
+  if (stagedAttempt && ctx.input.kind === 'name_query' && ctx.hint?.trim() && queryPlan.length > 0) {
+    const clue = ctx.hint.trim();
+    const name = suppliedPersonLabels(ctx.input.value)[0] ?? ctx.input.value.trim();
+    const available = FIRST_STEP_SEARCH_QUERY_MAX - name.length - 1;
+    if (available > 0 && clue !== ctx.input.value.trim() && !isUntrustedInstructionText(clue)) {
+      // Refine the existing first ordinary-web query, within the same frozen
+      // family/budget. No extra supplier request or invented alias is added.
+      queryPlan[0] = { ...queryPlan[0]!, query: `${name} ${clue.slice(0, available)}` };
+    }
+  }
   for (const item of queryPlan) {
     if ((await searchOnce(item.query, item.includeDomains, item.provider)) === 'budget') break;
   }

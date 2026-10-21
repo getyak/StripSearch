@@ -274,21 +274,21 @@ test('a concrete third-party article result is read as a minimal original, not l
   assert.equal(view.accounts.length, 0);
 });
 
-test('two same-name candidates drive different real account-stage context', async (t) => {
-  const compilerText = 'Mira Kepler is a compiler researcher at Example.edu leading the Lantern project.';
-  const marineText = 'Mira Kepler is a marine biologist at Ocean Lab studying coral reefs.';
+for (const longDescription of [false, true]) test(`two same-name candidates drive different real account-stage context (long=${longDescription})`, async (t) => {
+  const compilerText = 'Mira Kepler is a compiler researcher at Example.edu leading the Lantern project' + (longDescription ? ' and compiler methodology'.repeat(30) : '') + '.';
+  const marineText = 'Mira Kepler is a marine biologist at Ocean Lab studying coral reefs' + (longDescription ? ' and marine methodology'.repeat(30) : '') + '.';
   const makeTools = (calls: string[]): ResearchTools => ({
     async execute(action) {
       if (action.type === 'search') {
         calls.push(`search:${action.query}`);
         return result([
-          page('https://compiler.dev/bio/mira', 'Mira Kepler — Compiler Profile', compilerText),
-          page('https://ocean-lab.example/marine/mira', 'Mira Kepler — Marine Profile', marineText)
+          page('https://compiler.dev/bio/mira', longDescription ? 'Mira Kepler' : 'Mira Kepler — Compiler Profile', compilerText),
+          page('https://ocean-lab.example/marine/mira', longDescription ? 'Mira Kepler' : 'Mira Kepler — Marine Profile', marineText)
         ]);
       }
       calls.push(`read:${action.url}`);
       const text = action.url.includes('ocean-lab') ? marineText : compilerText;
-      return result([page(action.url, action.url.includes('ocean-lab') ? 'Mira Kepler — Marine Profile' : 'Mira Kepler — Compiler Profile', text)]);
+      return result([page(action.url, longDescription ? 'Mira Kepler' : action.url.includes('ocean-lab') ? 'Mira Kepler — Marine Profile' : 'Mira Kepler — Compiler Profile', text)]);
     }
   });
   const queriesFor = async (wanted: string): Promise<string[]> => {

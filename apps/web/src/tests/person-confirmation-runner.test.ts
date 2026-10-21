@@ -111,6 +111,74 @@ function confirmInput(f: ReturnType<typeof fixture>): Record<string, unknown> {
   };
 }
 
+test('a persisted cancel flag rejects both fresh and keyless replay confirmation without writes', async t => {
+  const f = fixture();t.after(() => f.db.close());
+  const tools: ResearchTools = { async execute(action) {
+    return result([page(action.type === 'search' ? HOME_URL : action.url, 'Mira Kepler', HOME_TEXT)]);
+  } };
+  const runner = runnerFor(f, tools);t.after(() => runner.stopAll());
+  await runToWait(f, runner);
+  const input = confirmInput(f), before = f.store.research.receipts(f.run.id);
+  f.store.updateRun(f.run.id, { cancel_requested: 1 });
+  assert.throws(() => f.persons.applyConfirmation(OWNER, f.run.id, input, 'fresh-cancel-flag'),
+    (error: unknown) => error instanceof PersonConfirmationError && error.code === 'run_not_waiting');
+  const count = f.db.prepare('SELECT COUNT(*) n FROM first_step_person_confirmations WHERE run_id=?').get(f.run.id) as { n: number };
+  assert.equal(count.n, 0);assert.equal(f.persons.active(f.run.id), null);
+  assert.equal(f.store.getRun(f.run.id)!.cancelRequested, true);
+  assert.deepEqual(f.store.research.receipts(f.run.id), before);
+  // Restore only this synthetic fixture to exercise a separate keyless replay.
+  f.store.updateRun(f.run.id, { cancel_requested: 0 });
+  f.persons.applyConfirmation(OWNER, f.run.id, input, null);
+  f.store.updateRun(f.run.id, { cancel_requested: 1, state: 'cancelled' });
+  assert.throws(() => f.persons.applyConfirmation(OWNER, f.run.id, input, null),
+    (error: unknown) => error instanceof PersonConfirmationError && error.code === 'run_not_waiting');
+});
+
+for (const hint of ['Lantern Institute', 'https://lantern.dev/people/mira']) test(`real Runner keeps the person name when expanding with ${hint}`, async t => {
+  const f = fixture();t.after(() => f.db.close());
+  const calls: ResearchToolAction[] = [];
+  const tools: ResearchTools = { async execute(action) {
+    calls.push(action);
+    assert.ok(action.type === 'search' || action.type === 'read', 'Receipt-bound overview leads use read even with Firecrawl configured');
+    return result([page(action.type === 'search' ? HOME_URL : action.url, 'Mira Kepler', HOME_TEXT)]);
+  } };
+  const runner = runnerFor(f, tools, { firecrawl: true });t.after(() => runner.stopAll());
+  await runToWait(f, runner);
+  const prior = f.store.research.receipts(f.run.id);
+  f.firstStep.applyFirstStepExpand(OWNER, f.run.id, hint, 'hint-' + hint);
+  calls.length = 0;await runToWait(f, runner);
+  const expanded = view(f);
+  assert.equal(expanded.personOverview!.queryLabel, 'Mira Kepler');
+  assert.ok(expanded.personOverview!.candidates.some(c => c.sources.some(s => s.retrieval === 'read' && s.quote?.includes('Mira Kepler'))));
+  assert.ok(calls.some(a => a.type === 'search' && a.query.includes('Mira Kepler') && a.query.includes(hint)), 'The clue actually guides bounded search without replacing the person');
+  assert.ok(calls.filter(a => a.type === 'search').length <= 4);
+  const after = f.store.research.receipts(f.run.id);
+  for (const receipt of prior) assert.deepEqual(after.find(r => r.key === receipt.key), receipt);
+  const settledCalls = calls.length;
+  f.store.updateRun(f.run.id, { state: 'queued' });await runToWait(f, runner);
+  assert.equal(calls.length, settledCalls, 'The expanded name+hint attempt replays without new IO');
+});
+
+test('a frozen v10 hint attempt keeps its original input and exact receipts on real Runner recovery', async t => {
+  const f = fixture();t.after(() => f.db.close());
+  const hint = 'Lantern Institute';f.firstStep.setHint(f.run.id, hint);
+  const tools: ResearchTools = { async execute(action) {
+    return result([page(action.type === 'search' ? HOME_URL : action.url, 'Mira Kepler — Lantern Institute', HOME_TEXT)]);
+  } };
+  const { createFirstStepCheckedSearch, discoverFirstStep, firstStepAttemptId } = await import('../server/research/first-step-discovery.js');
+  const input = { kind: 'name_query' as const, value: hint, question: f.run.question };
+  const attemptId = firstStepAttemptId(f.firstStep.link(f.run.id)!, input, hint);
+  const budget = { maxSearchQueries: 11, maxSearchResults: 12, maxProfileReads: 16, maxModelCalls: 2, policyVersion: 'first-step/v10' };
+  await discoverFirstStep({ store: f.store, firstStep: f.firstStep, ownerId: OWNER, runId: f.run.id, input, hint,
+    search: createFirstStepCheckedSearch({ tools, store: f.store, runId: f.run.id, attemptId, budget }),
+    signal: new AbortController().signal, registryVersion: 'registry-test/v1', catalog: null, budget });
+  const before = f.store.research.receipts(f.run.id);assert.ok(before.length > 0);
+  const runner = runnerFor(f, tools);t.after(() => runner.stopAll());
+  f.store.updateRun(f.run.id, { state: 'queued' });await runToWait(f, runner);
+  assert.equal(view(f).personOverview, undefined);
+  assert.deepEqual(f.store.research.receipts(f.run.id), before);
+});
+
 test('the real Runner runs overview -> persisted confirmation -> account discovery -> scope gate', async (t) => {
   const f = fixture();
   t.after(() => f.db.close());

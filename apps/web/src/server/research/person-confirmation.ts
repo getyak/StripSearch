@@ -245,6 +245,9 @@ export class PersonConfirmationStore {
       }
       const run = this.store.getRunForOwner(runId, ownerId);
       if (!run) throw new PersonConfirmationError('run_not_found', '未找到该研究。');
+      if (run.cancelRequested || run.state === 'cancelled') {
+        throw new PersonConfirmationError('run_not_waiting', '研究已取消，不能恢复人物确认授权。');
+      }
       const link = this.firstStep.link(runId);
       if (!link) throw new PersonConfirmationError('not_staged', '该研究不是第一步发现作业。');
       // Replay the SAME confirmation (double click / restart) without minting a
@@ -334,7 +337,6 @@ export class PersonConfirmationStore {
       this.store.updateRun(runId, {
         revision: result.runRevision,
         state: 'queued',
-        cancel_requested: 0,
         error_code: null,
         error_message: null,
         stop_reason: null

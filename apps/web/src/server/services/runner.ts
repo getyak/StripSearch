@@ -333,11 +333,18 @@ export class Runner {
     };
     if (!binding) {
       const link = firstStep.link(runId)!;
-      const input = {
+      const legacyInput = {
         kind: (initial.seedUrl ? 'homepage_url' : 'name_query') as 'homepage_url' | 'name_query',
         value: (link.hint ?? initial.seedUrl ?? initial.question).trim(),
         question: initial.question
       };
+      const priorPolicy = firstStepAttemptPolicy(this.deps.store, runId, firstStepAttemptId(link, legacyInput, link.hint));
+      // Preserve the exact input/receipt namespace of frozen legacy attempts.
+      // New staged name attempts keep the actual name; a clue is separate
+      // query context and must never become the person label or subject.
+      const input = legacyInput.kind === 'name_query' && this.deps.personConfirmation && priorPolicy !== 'v9' && priorPolicy !== 'v10'
+        ? { ...legacyInput, value: initial.question.trim() }
+        : legacyInput;
       // GET-213 staged name flow: bounded general-web overview first, then the
       // explicit person confirmation, then account discovery. Old attempts and
       // explicit profile input keep their existing full flow unchanged.

@@ -18,6 +18,31 @@ import type { PersonOverviewView } from '../shared/person-confirmation.js';
 
 const env = installDom();
 
+for (const keepIds of [false, true]) test(`a new discovery resets the previous multi-person choice (same source ids=${keepIds})`, async t => {
+  const fixture = seedFirstStep({ accounts: [{ url: 'https://github.com/linzhou' }] });t.after(() => fixture.close());
+  const base = fixture.firstStep.getFirstStepView(fixture.run.ownerId, fixture.run.id);
+  assert.ok(base && base.mode === 'first_step');
+  let current = withOverview(base.view, overviewFixture());let writes = 0;
+  const container = env.document.createElement('section');env.document.body.appendChild(container);
+  const panel = createFirstStepPanel({ runId: fixture.run.id, container, api: {
+    getFirstStepDiscovery: async () => ({ mode: 'first_step', view: current, runRevision: 3 }),
+    expandFirstStep: async () => { throw new Error('Unexpected expansion'); },
+    submitFirstStepSelection: async () => { throw new Error('Unexpected account scope'); },
+    confirmPerson: async () => { writes++;throw new Error('No stale confirmation should be sent'); }
+  } });
+  t.after(() => { panel.destroy();container.remove(); });await panel.refresh();
+  const radio = container.querySelector<HTMLInputElement>('input[type=radio]')!;
+  radio.checked = true;radio.dispatchEvent(new env.window.Event('change', { bubbles: true }));
+  assert.equal(container.querySelector<HTMLButtonElement>('[data-focus-key=person-confirm]')!.disabled, false);
+  current = structuredClone(current);current.discoveryRevision++;current.inputRevision++;
+  current.personOverview!.attemptId = 'a-new-synthetic-attempt';
+  if (!keepIds) current.personOverview!.candidates.forEach((c, i) => { c.candidateId = 'pcand/' + String(i + 3).repeat(32); });
+  await panel.refresh();
+  assert.equal(container.querySelectorAll('input[type=radio]:checked').length, 0);
+  assert.equal(container.querySelector<HTMLButtonElement>('[data-focus-key=person-confirm]')!.disabled, true);
+  await panel.submit();assert.equal(writes, 0);
+});
+
 function overviewFixture(serviceError: PersonOverviewView['serviceError'] = null): PersonOverviewView {
   return {
     schemaVersion: 'stripsearch/person-confirmation/v1',

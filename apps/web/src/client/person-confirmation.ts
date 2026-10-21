@@ -199,7 +199,7 @@ export function renderPersonConfirmation(
   const host = make('div', { className: 'person-confirmation-actions', attrs: { 'data-has-candidates': Boolean(overview?.candidates.length) ? 'true' : 'false' } });
   (footer ?? root).appendChild(host);
   if (state.error) host.appendChild(make('p', { className: 'error-text', text: state.error, attrs: { role: 'alert', 'data-focus-key': 'person-error' } }));
-  const canConfirm = Boolean(state.selectedCandidateId) && !state.pending && !state.expanding;
+  const canConfirm = Boolean(overview?.candidates.some(candidate => candidate.candidateId === state.selectedCandidateId)) && !state.pending && !state.expanding;
   const confirm = make('button', {
     className: 'button primary first-step-primary',
     text: state.view.phase === 'expanding_accounts' ? '正在查找公开账号…' : state.pending ? '正在确认…' : '确认这个人物，查找公开账号',
