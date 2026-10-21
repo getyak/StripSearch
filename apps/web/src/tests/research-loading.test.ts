@@ -362,8 +362,11 @@ test('stream reconnect keeps received material and updates the notice truthfully
   served = { ...served, sources: [source('S3', { title: '保留下来的来源' })] };
   await settle();
 
+  el('toast').hidden = true; el('toast').textContent = '';
   stream.fail();
   await settle();
+  assert.equal(el('toast').hidden, true, 'A transport disconnect is not a research failure');
+  assert.doesNotMatch(el('toast').textContent ?? '', /研究失败/);
   assert.match(surface().textContent ?? '', /重连/, 'the disconnect is stated truthfully');
   assert.match(surface().textContent ?? '', /保留下来的来源/, 'received material survives the reconnect');
 
@@ -581,4 +584,20 @@ test('loading focus and process disclosure survive only within the same research
   applySnapshot({ ...run, runId: 'material-run-b' }, stages, 1);
   assert.equal(process.open, false, 'another research starts with its own disclosure state');
   assert.notEqual(env.document.activeElement, surface().querySelector('[data-source-key="S1"]'), 'S1 from another research is not the same focus target');
+});
+
+
+test('a real research error message remains visible separately from transport reconnect', async () => {
+  await freshUser('research-error-message');
+  const run = makeView('run-research-error-message', { research: researchMeta('reading') });
+  route = url => url.includes('/api/runs/run-research-error-message?')
+    ? jsonResponse({ run, events: [], latestSeq: 0 }) : jsonResponse({ runs: [] });
+  await selectRun(run.runId);
+  el('toast').hidden = true; el('toast').textContent = '';
+  const stream = MockEventSource.instances.at(-1)!;
+  stream.emit('error', { code: 'synthetic_research_error', message: '合成研究操作已失败。' }, '1');
+  assert.equal(el('toast').hidden, false);
+  assert.equal(el('toast').textContent, '合成研究操作已失败。', 'A real server error is not swallowed');
+  assert.equal(state.latestSeq, 1);
+  stream.close();
 });

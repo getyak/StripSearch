@@ -677,6 +677,9 @@ function openStream(runId: string, since: number, epoch: number): void {
     source.addEventListener(type, (event) => {
       if (state.runEpoch !== epoch || state.stream !== source) return;
       const message = event as MessageEvent<string>;
+      // A native connection error has no data; onerror handles reconnection.
+      // Only a server-sent MessageEvent may report a research failure.
+      if (type === 'error' && typeof message.data !== 'string') return;
       let payload: unknown = null;
       try {
         payload = JSON.parse(message.data);

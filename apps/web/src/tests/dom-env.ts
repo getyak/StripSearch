@@ -51,6 +51,9 @@ export class MockEventSource {
   }
 
   fail(): void {
+    // Native EventSource transport errors notify registered error listeners
+    // as well as onerror, without MessageEvent.data or lastEventId.
+    for (const callback of this.listeners.get('error') ?? []) callback({});
     this.onerror?.();
   }
 }
