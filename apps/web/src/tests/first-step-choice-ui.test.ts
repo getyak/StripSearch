@@ -153,8 +153,11 @@ test('same-name candidates stay clearly selectable: choosing a cluster moves its
     const buttons = container.querySelectorAll<HTMLButtonElement>('button.first-step-cluster');
     assert.equal(buttons.length, 2, 'both same-name candidates are presented');
     buttons[1]!.click();
-    const pressed = container.querySelectorAll<HTMLButtonElement>('button.first-step-cluster');
-    assert.equal(pressed[1]!.getAttribute('aria-pressed'), 'true', 'the chosen candidate is clear');
+    const pressed = [...container.querySelectorAll<HTMLButtonElement>('button.first-step-cluster')];
+    const active = pressed.filter((button) => button.getAttribute('aria-pressed') === 'true');
+    assert.equal(active.length, 1, 'the chosen candidate is clear');
+    assert.equal(active[0]!.dataset.focusKey, 'cluster-cluster-2', 'the explicit choice moved to the clicked candidate');
+    assert.match(container.querySelector('.first-step-candidate.chosen')?.textContent ?? '', /已选择为目标/);
     const mainCards = container.querySelectorAll('.first-step-groups')[0]!.querySelectorAll('.first-step-card');
     assert.equal(mainCards.length, 1, "the chosen candidate's accounts are the main choices");
     const secondary = container.querySelector<HTMLDetailsElement>('details.first-step-related')!;
@@ -285,20 +288,25 @@ test('literal name matches lead the visible choices while unrelated page titles 
   const panel=createFirstStepPanel({api:panelApi(fixture,posted),container,runId:fixture.run.id});
   try {
     await panel.refresh();
-    const main=container.querySelector('.first-step-clusters')!;
-    const other=main.querySelector<HTMLDetailsElement>('.first-step-other-people')!;
-    assert.equal(other.open,false);
-    assert.match(other.querySelector('.first-step-cluster')!.textContent??'',/Lantern Compiler Data Services/);
-    // Candidates are compact articles (button + provenance in one card); the
-    // promoted candidate sits directly in the column, not in the collapsed others.
-    assert.equal([...main.children].filter(child=>child.matches('article.first-step-candidate')).length,1);
-    assert.match(main.querySelector(':scope > article.first-step-candidate > button.first-step-cluster')!.textContent??'',/Lin Zhou/);
+    const chooser = container.querySelector<HTMLDetailsElement>('details.first-step-other-people')!;
+    assert.ok(chooser, 'competing people live behind one explicit change-person disclosure');
+    assert.equal(chooser.open, true, 'without a chosen person the candidate chooser is open');
+    const cards = [...chooser.querySelectorAll('article.first-step-candidate')];
+    assert.equal(cards.length, 2, 'both candidates stay separate compact cards');
+    assert.match(cards[0]!.textContent ?? '', /Lin Zhou/, 'literal name matches lead the visible order');
+    assert.match(cards[1]!.textContent ?? '', /Lantern Compiler Data Services/);
+    // The page title stays literal and is never stripped into a person name.
+    assert.match(cards[0]!.textContent ?? '', /Lin Zhou \| Synthetic University/);
+    assert.match(cards[0]!.textContent ?? '', /按账号 handle 称呼|与输入姓名一致/, 'the person label is honestly labelled');
+    assert.match(container.querySelector('.first-step-row-head')?.textContent ?? '', /账号能了解什么归属依据状态选择/, 'the five comparison columns are fixed');
     assert.equal(panel.selectedCount(),0);
     assert.deepEqual(posted,[]);
-    other.open=true;
-    other.querySelector<HTMLButtonElement>('.first-step-cluster')!.click();
-    const chosenButton=container.querySelector('.first-step-clusters > article.first-step-candidate.chosen > button.first-step-cluster')!;
-    assert.match(chosenButton.textContent??'',/Lantern Compiler Data Services/);
+    [...chooser.querySelectorAll<HTMLButtonElement>('button.first-step-cluster')].find(
+      (button) => /Lantern Compiler Data Services/.test(button.textContent ?? '')
+    )!.click();
+    const chosenButton=container.querySelector('.first-step-candidate.chosen > button.first-step-cluster')!;
+    assert.match(chosenButton.textContent??'',/@morganchen/);
+    assert.match(container.querySelector('.first-step-candidate.chosen .first-step-cluster-basis')!.textContent ?? '', /页面标题：Lantern Compiler Data Services/, 'the full literal title remains available in the chosen candidate disclosure');
     assert.equal(chosenButton.getAttribute('aria-pressed'),'true');
     assert.equal(fixture.firstStep.selectionBinding(fixture.run.id),null);
   } finally {panel.destroy();fixture.db.close();container.remove();}
