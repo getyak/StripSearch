@@ -1,4 +1,4 @@
-import { isTerminalState } from '../shared/types.js';
+import { isTerminalState, isActiveState } from '../shared/types.js';
 import type { CanonicalView, RunEventRecord, RunSummary, SessionUser } from '../shared/types.js';
 import { stateLabel } from '../shared/canonical.js';
 import {
@@ -16,6 +16,7 @@ import { clearFirstStepDrafts } from './first-step-draft-storage.js';
 import type { FirstStepPanel } from './first-step.js';
 import { createHomeMotion } from './home-motion.js';
 import { createLocalSearch } from './local-search.js';
+import { createResearchLoadingSurface, deriveResearchLoading } from './research-loading.js';
 import { createMobileNavigation } from './mobile-navigation.js';
 import type { LocalSearchItem } from './local-search.js';
 import { createReviewWorkbench } from './review.js';
@@ -118,6 +119,7 @@ const els = {
   clearQuestion: byId<HTMLButtonElement>('clear-question'),
   submit: byId<HTMLButtonElement>('submit-research'),
   candidates: byId('identity-candidates'),
+  requestMessage: document.querySelector<HTMLElement>('#work-body .request-message') as HTMLElement,
   statusSummary: byId('run-status-summary'),
   researchDetails: byId('research-details'),
   historyRail: byId('history-list'),
@@ -174,6 +176,17 @@ const els = {
   fetch: byId('view-fetch'),
   openFetch: byId<HTMLButtonElement>('open-fetch')
 };
+
+/**
+ * GET-214: the single live research surface. Created once and inserted before
+ * the old status summary; every render path ends in syncResearchPresentation()
+ * so partial event updates can never resurrect the duplicate request/status/
+ * activity shells or a busy state that needs_input already stopped.
+ */
+const researchLoading = createResearchLoadingSurface({
+  onInspectSource: (sourceKey) => focusSource(sourceKey, 'list', null)
+});
+els.statusSummary.before(researchLoading.element);
 
 /** Web Fetch panel (GET-99 real GitHub public slice), integrated in-app. */
 const fetchPanel = createFetchPanel({
@@ -657,6 +670,8 @@ function openStream(runId: string, since: number, epoch: number): void {
     if (state.runEpoch !== epoch || state.stream !== source) return;
     state.streamState = 'open';
     state.reconnectAttempts = 0;
+    // Stream notices update on reconnect/open as well as on disconnect.
+    syncResearchPresentation();
   };
   for (const type of ['state', 'stage', 'source', 'observation', 'answer', 'needs_input', 'error', 'interrupted', 'revision', 'identity', 'person', 'usage', 'first_step_discovery', 'first_step_selection', 'first_step_ready']) {
     source.addEventListener(type, (event) => {
@@ -685,6 +700,7 @@ function openStream(runId: string, since: number, epoch: number): void {
     if (state.runEpoch !== epoch) return;
     state.streamState = 'reconnecting';
     updateStreamHint();
+    syncResearchPresentation();
     scheduleReconnect(runId, epoch);
   };
 }
@@ -781,6 +797,7 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       const next = (payload as { state?: CanonicalView['state'] } | null)?.state;
       if (next) state.run.state = next;
       renderHeader();
+      renderNeedsPanel();
       renderRunSummary();
       renderActivityPanel();
       renderReportView();
@@ -797,6 +814,10 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       renderHeader();
       renderRunSummary();
       renderNeedsPanel();
+      // Stale active stage events must stop looking busy the moment the run
+      // asks for a decision.
+      renderActivityPanel();
+      renderReportView();
       break;
     }
     case 'error': {
@@ -1015,13 +1036,9 @@ function renderNeedsPanel(): void {
   show(els.needsPanel, needs && !firstStep);
   show(els.firstStepPanel, firstStep);
   els.workBody.classList.toggle('choosing-target', firstStep);
-  // The whole chat dock (followups, form, hint) is inactive during the scope
-  // confirmation — hidden entirely so no blank row remains.
-  show(els.chatDock, !firstStep);
+  // The follow-up dock, report and status shells are composed once in
+  // syncResearchPresentation(); only the decision/footer hosts belong here.
   show(els.firstStepActions, firstStep);
-  show(els.chatForm, !firstStep);
-  show(els.chatHint, !firstStep);
-  show(els.report, !firstStep);
   if (firstStep && run) {
     syncFirstStep(run.runId);
   } else {
@@ -1050,6 +1067,7 @@ function renderNeedsPanel(): void {
     }
   }
   els.resumeRun.disabled = state.resumeBusy;
+  syncResearchPresentation();
 }
 
 // Optional fields keep historical reports readable while the research contract evolves.
@@ -1074,16 +1092,19 @@ function renderRunSummary(): void {
     cancelled: '研究已停止，已有资料仍可查看。'
   };
   const stopReason = research?.stopReason ?? run?.stopReason;
+  // While research is active (or waiting for a person decision) the live
+  // research surface owns the current action; this line keeps only truthful
+  // stop/outcome context for the settled states, with a generic fallback for
+  // unknown stop codes instead of inventing a specific claim.
   let message = stopReason ? messages[stopReason] ?? '' : '';
   if (!message && run?.state === 'partial') message = '已保留目前找到的资料，部分内容尚未完成。';
   if (!message && run?.state === 'failed') message = '这次研究未能完成。你的输入已保留，可以重试或补充线索。';
-  if (run?.state === 'needs_input') message = '';
-  if (!message && run?.state === 'queued') message = '研究已保存，正在等待开始。';
-  if (!message && research && run?.state === 'researching') {
-    const phases: Record<string, string> = { resolving: '正在核对人物身份。', identity: '正在核对人物身份。', identity_resolution: '正在核对人物身份。', searching: '正在发现原作、账号线索与反证。', planning: '正在按研究问题安排下一批资料。', reading: '正在读取原文与讨论上下文。', verifying: '正在独立核验断言与出处。', researching: '正在阅读公开资料，核对相关证据。', collecting: '正在阅读公开资料，核对相关证据。', synthesizing: '正在整理有出处的发现。', validating: '正在核对报告与出处。' };
-    message = phases[research.phase] ?? '正在阅读与核对公开资料。';
+  if (!message && run?.state === 'cancelled') message = '研究已停止，已有资料仍可查看。';
+  if (run?.interrupted) {
+    const note = '服务重启，这份报告被标记为中断，可以手动重试。';
+    message = message ? `${message}${note}` : note;
   }
-  if (!message && run?.state === 'researching') message = '正在查找和核对公开资料。';
+  if (run && (isActiveState(run.state) || run.state === 'needs_input')) message = '';
   setText(els.statusSummary, message);
   show(els.statusSummary, Boolean(message));
   if (research?.coverage) {
@@ -1114,24 +1135,57 @@ function renderRunSummary(): void {
     details.appendChild(list);
     els.researchDetails.appendChild(details);
   }
+  syncResearchPresentation();
 }
 
 function renderActivityPanel(): void {
   const run = state.run;
   const hasStages = state.stages.length > 0 || els.researchDetails.childElementCount > 0 || Boolean(run && (run.state === 'queued' || run.state === 'researching'));
-  show(els.activityPanel, hasStages);
-  if (!hasStages) return;
-  renderActivity(
-    els.stageList,
-    els.runProgressFill,
-    els.runProgress,
-    els.runProgressText,
-    els.activityState,
-    els.runIndicator,
-    state.stages,
-    run?.state ?? 'queued',
-    String(run?.provider) === 'research'
-  );
+  if (hasStages) {
+    renderActivity(
+      els.stageList,
+      els.runProgressFill,
+      els.runProgress,
+      els.runProgressText,
+      els.activityState,
+      els.runIndicator,
+      state.stages,
+      run?.state ?? 'queued',
+      String(run?.provider) === 'research'
+    );
+  }
+  syncResearchPresentation();
+}
+
+/**
+ * GET-214 presentation sync: one model, one layout. Owns the live surface, the
+ * old duplicate shells, the report's active composition and the follow-up dock
+ * visibility, so every render path (full or partial) lands on the same UI.
+ */
+function syncResearchPresentation(): void {
+  const run = state.run;
+  const model = deriveResearchLoading({ run, stages: state.stages, streamState: state.streamState });
+  researchLoading.update(model);
+  const firstStep = Boolean(run && run.state === 'needs_input' && run.provider === 'research');
+  const live = model.mode === 'active';
+  const deciding = model.mode === 'needs_input';
+  els.workBody.classList.toggle('live-research', live);
+  els.workBody.classList.toggle('awaiting-decision', deciding);
+  // While the live surface owns the composition, the old request/status/
+  // activity shells and any empty report stay hidden.
+  show(els.requestMessage, !live && !firstStep);
+  const processShell = state.stages.length > 0
+    || els.researchDetails.childElementCount > 0
+    || Boolean(run && isActiveState(run.state));
+  show(els.activityPanel, !live && !deciding && processShell);
+  show(els.report, !firstStep && (!live || model.compact));
+  // Irrelevant disabled follow-up controls stay hidden until a report (or an
+  // actual conversation) supports them.
+  const hasAnswer = Boolean(run && run.answer.some((section) => section.body.trim() || section.bullets.length > 0));
+  const dockVisible = Boolean(run && !firstStep && (state.messages.length > 0 || (isTerminalState(run.state) && hasAnswer)));
+  show(els.chatDock, dockVisible);
+  show(els.chatForm, dockVisible && chatSupported(run));
+  show(els.chatHint, dockVisible);
 }
 
 function renderReportView(): void {
@@ -1157,6 +1211,7 @@ function renderReportView(): void {
   renderReport(els.report, state.run, {
     onCitation: (sourceKey, button) => focusSource(sourceKey, 'citation', button)
   });
+  syncResearchPresentation();
 }
 
 function renderSourcePanels(): void {
@@ -1191,6 +1246,7 @@ function renderSourcePanels(): void {
   renderSourceList(els.drawerSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect);
   renderSourceDetail(els.inspectorDetail, run, state.selectedSourceKey, handlers);
   renderSourceDetail(els.drawerSourceDetail, run, state.selectedSourceKey, handlers);
+  syncResearchPresentation();
   restoreFocusAnchor(anchor);
 }
 
