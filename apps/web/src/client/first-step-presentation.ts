@@ -49,6 +49,7 @@ export type PersonLabelKind =
   | 'owner_supported'
   | 'query_match'
   | 'query_only'
+  | 'entry_only'
   | 'handle_only';
 
 export interface PersonLabelView {
@@ -138,8 +139,8 @@ export function personLabelFor(cluster: FirstStepPersonClusterView, view: FirstS
   }
   return {
     label: anchor?.handle ? `@${anchor.handle}` : cluster.anchorLabel || shortUrl(cluster.anchorUrl) || view.input.value.trim(),
-    kind: 'handle_only',
-    kindLabel: '按账号 handle 称呼 · 未确认姓名',
+    kind: anchor?.handle ? 'handle_only' : 'entry_only',
+    kindLabel: anchor?.handle ? '按账号 handle 称呼 · 未确认姓名' : '按公开入口称呼 · 未确认姓名',
     pageTitle: title || null
   };
 }

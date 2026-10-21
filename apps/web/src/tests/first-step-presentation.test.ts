@@ -249,6 +249,14 @@ test('handle, host and page title occupy separate slots', () => {
   assert.equal(row.handleLabel, '@fixture-linzhou');
   assert.equal(row.hostLabel, 'github.com');
   assert.equal(row.pageTitle, 'Lin Zhou | Synthetic University', 'the literal title is its own slot');
+  const entry = personLabelFor(cluster({anchorUrl:'https://lantern.dev/',anchorLabel:'个人公开主页'}), discoveryView({
+    input:{kind:'homepage_url',value:'https://lantern.dev/',question:null},
+    accounts:[accountView({platform:'personal_site',handle:null,profileUrl:'https://lantern.dev/'})]
+  }));
+  assert.equal(entry.label,'个人公开主页');
+  assert.equal(entry.kind,'entry_only');
+  assert.match(entry.kindLabel,/按公开入口称呼/);
+  assert.doesNotMatch(entry.kindLabel,/handle/,'a site label must not claim to be an account handle');
 });
 
 test('account-specific clues outrank the repetitive generic research summary', () => {
