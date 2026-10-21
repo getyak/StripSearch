@@ -223,12 +223,18 @@ export function createCitationReturn(options: CitationReturnOptions): CitationRe
     },
     enterViaList(sourceKey, row) {
       const listId = row?.closest('.source-list')?.id ?? '';
+      const live = row?.closest<HTMLElement>('.research-live');
+      // Live materials rebuild on new events too. Bind their return target to
+      // the run that rendered the entry, rather than a reused source number.
+      const liveSelector = live?.id && live.dataset.runId === options.runId()
+        ? `[id="${quote(live.id)}"][data-run-id="${quote(live.dataset.runId!)}"][data-mode="active"] button.live-material[data-source-key="${quote(sourceKey)}"]`
+        : null;
       enter(
         'list',
         sourceKey,
         null,
         row,
-        listId ? `#${listId} button.source-row[data-source-key="${quote(sourceKey)}"]` : null
+        listId ? `#${listId} button.source-row[data-source-key="${quote(sourceKey)}"]` : liveSelector
       );
     },
     enterViaSearch(sourceKey, fallback) {

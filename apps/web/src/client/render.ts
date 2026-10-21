@@ -3,6 +3,7 @@ import {
   SOURCE_KIND_LABELS,
   stateLabel
 } from '../shared/canonical.js';
+import { isTerminalState } from '../shared/types.js';
 import type {
   CanonicalSource,
   CanonicalView,
@@ -124,29 +125,32 @@ export function renderReport(
   // The rendered run id is the authority for focus/scroll restoration: polling
   // re-renders must never chase focus into a different report.
   container.dataset.runId = view.runId;
-  const header = make('header', { className: 'report-header enter' });
-  header.appendChild(
-    make('h2', { text: view.identity.displayName || (view.identity.handle ? `@${view.identity.handle}` : view.question) })
-  );
-  header.appendChild(
-    make('p', {
-      className: 'report-meta',
-      text: `${stateLabel(view.state)} · 更新于 ${formatDateTime(view.updatedAt)} · v${view.revision}`
-    })
-  );
-  if (view.interrupted) {
+  // While research is running (or waiting for a person decision) the live
+  // research surface owns the query, the current action and the status; the
+  // report below carries only the material received so far, so partial content
+  // stays readable without repeating the same title/status heading.
+  if (isTerminalState(view.state)) {
+    const header = make('header', { className: 'report-header enter' });
     header.appendChild(
-      make('p', { className: 'review-flag', text: '服务重启，这份报告被标记为中断，可以手动重试。' })
+      make('h2', { text: view.identity.displayName || (view.identity.handle ? `@${view.identity.handle}` : view.question) })
     );
-  }
-  if (view.identity.status !== 'resolved' && view.identity.note && !['queued','researching'].includes(view.state)) {
-    header.appendChild(make('p', { className: 'identity-note', text: view.identity.note }));
-  } else if (view.identity.profileUrl) {
-    header.appendChild(make('p', { className: 'identity-note', text: '基于本次选定范围内已读取的公开资料。' }));
-  }
-  container.appendChild(header);
-  if (view.answer.length === 0 && (view.state === 'queued' || view.state === 'researching')) {
-    container.appendChild(make('p', { className: 'reading-arrival', text: view.state==='queued'?'研究已排队。开始后，找到的资料会逐步出现在这里。':'正在核对人物线索。找到的资料会逐步出现在这里。' }));
+    header.appendChild(
+      make('p', {
+        className: 'report-meta',
+        text: `${stateLabel(view.state)} · 更新于 ${formatDateTime(view.updatedAt)} · v${view.revision}`
+      })
+    );
+    if (view.interrupted) {
+      header.appendChild(
+        make('p', { className: 'review-flag', text: '服务重启，这份报告被标记为中断，可以手动重试。' })
+      );
+    }
+    if (view.identity.status !== 'resolved' && view.identity.note) {
+      header.appendChild(make('p', { className: 'identity-note', text: view.identity.note }));
+    } else if (view.identity.profileUrl) {
+      header.appendChild(make('p', { className: 'identity-note', text: '基于本次选定范围内已读取的公开资料。' }));
+    }
+    container.appendChild(header);
   }
 
   const hasAnswer = view.answer.some(section => section.body.trim() || section.bullets.length > 0);
@@ -475,7 +479,10 @@ export function renderActivity(
   } else {
     for (const stage of stages) {
       const item = make('div', { className: 'stage-item enter' });
-      const isRecord = openEnded && stage.status === 'active' && stage !== currentStage;
+      // Stale active stage records must never keep reading as busy once the
+      // run stopped or is waiting for a decision: without a running current
+      // stage they render as history ("过程记录").
+      const isRecord = (!running || openEnded) && stage.status === 'active' && stage !== currentStage;
       item.dataset.status = isRecord ? 'record' : stage.status;
       item.appendChild(make('span', { className: 'stage-index', text: String(stage.index + 1).padStart(2, '0') }));
       item.appendChild(make('span', { className: 'stage-label', text: stage.label }));
