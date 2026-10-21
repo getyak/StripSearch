@@ -1482,7 +1482,7 @@ export async function discoverFirstStep(ctx: FirstStepDiscoverContext): Promise<
   //    search is dispatched after the explicit person confirmation.
   const queryPlan = overviewOnly
     ? firstStepStageQueryPlan(firstStepQueryPlan(ctx.input, { ...budget, maxSearchQueries: FIRST_STEP_DEFAULT_BUDGET.maxSearchQueries }), 'overview').slice(0, budget.maxSearchQueries)
-    : firstStepQueryPlan(ctx.input, budget, confirmedAliases);
+    : firstStepQueryPlan(ctx.input, budget, confirmedAliases, flowStage === 'accounts' && Boolean(ctx.confirmedPerson));
   if (stagedAttempt && ctx.input.kind === 'name_query' && ctx.hint?.trim() && queryPlan.length > 0) {
     const clue = ctx.hint.trim();
     const name = suppliedPersonLabels(ctx.input.value)[0] ?? ctx.input.value.trim();

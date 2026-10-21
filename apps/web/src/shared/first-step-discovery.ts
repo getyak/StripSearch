@@ -1762,7 +1762,8 @@ export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: string; build: (
 export function firstStepQueryPlan(
   input: FirstStepInput,
   budget: FirstStepBudgetPolicy,
-  observedAliases: readonly string[] = []
+  observedAliases: readonly string[] = [],
+  preferConfirmedContext = false
 ): Array<{ query: string; family: string; includeDomains?: readonly string[]; provider?: 'bluesky' }> {
   const value = input.value.trim();
   if (value.length === 0) return [];
@@ -1791,7 +1792,12 @@ export function firstStepQueryPlan(
   }
   let aliasSlots = 0;
   const providedAliases = input.kind === 'name_query' ? value.split(/\s*[\/／]\s*/).slice(1) : [];
-  for (const alias of [...providedAliases, ...observedAliases]) {
+  // New staged account attempts reserve the first alias slot for the selected
+  // source context. Legacy callers retain their exact supplied-alias ordering.
+  const aliases = preferConfirmedContext && observedAliases.length > 0
+    ? [observedAliases[0]!, ...providedAliases, ...observedAliases.slice(1)]
+    : [...providedAliases, ...observedAliases];
+  for (const alias of aliases) {
     if (plan.length >= max || aliasSlots >= 2) break;
     const trimmed = alias.trim();
     if (trimmed.length < 2 || trimmed.length > 120) continue;

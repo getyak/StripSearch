@@ -37,7 +37,7 @@ const OWNER = 'runner-gate-owner';
 const HOME_URL = 'https://lantern.dev/';
 const HOME_TEXT = 'Mira Kepler maintains the Lantern compiler. My X: https://x.com/mkepler.';
 
-function fixture() {
+function fixture(question = 'Mira Kepler') {
   const db: DB = openDatabase(':memory:');
   applyCoreSchema(db);
   const store = new Store(db);
@@ -45,7 +45,7 @@ function fixture() {
   const persons = new PersonConfirmationStore(db, store, firstStep);
   const run = store.insertRun({
     ownerId: OWNER,
-    question: 'Mira Kepler',
+    question,
     seedUrl: null,
     provider: 'research',
     parentRunId: null,
@@ -110,6 +110,47 @@ function confirmInput(f: ReturnType<typeof fixture>): Record<string, unknown> {
     candidateId: current.personOverview!.candidates[0]!.candidateId
   };
 }
+
+test('three supplied names preserve selected source context in actual account dispatch and replay', async () => {
+  const documents = [
+    page('https://compiler.lantern.dev/bio/mira', 'Mira Kepler', 'Mira Kepler is a compiler researcher.'),
+    page('https://marine.lantern.dev/bio/mira', 'Mira Kepler', 'Mira Kepler is a marine researcher.')
+  ];
+  async function queriesFor(chosenUrl: string): Promise<string[]> {
+    const f = fixture('Mira Kepler / 米拉·开普勒 / Mira K.');
+    const calls: ResearchToolAction[] = [];
+    const runner = runnerFor(f, { async execute(action) {
+      calls.push(action);
+      return result(action.type === 'search' ? documents : documents.filter(d => d.url === action.url));
+    } });
+    try {
+      await runToWait(f, runner);
+      const overview = view(f);
+      assert.equal(overview.personOverview!.candidates.length, 2);
+      const candidate = overview.personOverview!.candidates.find(c => c.sources.some(s => s.url === chosenUrl))!;
+      assert.ok(candidate);
+      f.persons.applyConfirmation(OWNER, f.run.id, { ...confirmInput(f), candidateId: candidate.candidateId }, 'three-names');
+      calls.length = 0;
+      await runToWait(f, runner);
+      const queries = calls.flatMap(a => a.type === 'search' ? [a.query] : []);
+      assert.ok(queries.length <= 11, 'The existing query budget remains bounded');
+      const receipts = f.store.research.receipts(f.run.id);
+      const settled = calls.length;
+      f.store.updateRun(f.run.id, { state: 'queued' });
+      await runToWait(f, runner);
+      assert.equal(calls.length, settled, 'The confirmed account attempt replays without new IO');
+      assert.deepEqual(f.store.research.receipts(f.run.id), receipts);
+      return queries;
+    } finally { runner.stopAll(); f.db.close(); }
+  }
+  const compiler = await queriesFor(documents[0]!.url);
+  const marine = await queriesFor(documents[1]!.url);
+  assert.notDeepEqual(compiler, marine, 'Selection must affect actual dispatched queries even with two supplied aliases');
+  assert.ok(compiler.some(q => q.includes('compiler.lantern.dev')));
+  assert.ok(marine.some(q => q.includes('marine.lantern.dev')));
+  assert.ok(!compiler.some(q => q.includes('marine.lantern.dev')));
+  assert.ok(!marine.some(q => q.includes('compiler.lantern.dev')));
+});
 
 test('a persisted cancel flag rejects both fresh and keyless replay confirmation without writes', async t => {
   const f = fixture();t.after(() => f.db.close());
