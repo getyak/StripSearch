@@ -9,7 +9,7 @@ import type { FirstStepDiscoveryView } from '../shared/first-step-discovery.js';
 const profile = (handle: string, url = `https://github.com/${handle}`): ResearchPage => ({
   url,
   title: handle,
-  text: `${handle} builds synthetic compilers.`,
+  text: `${handle} builds synthetic compilers. Research Ada Fixture.`,
   kind: 'profile',
   publishedAt: null,
   links: [],
@@ -58,10 +58,29 @@ test('fresh name runs use the first step: discovery, one atomic selection, then 
   const id = made.body.run.runId;
   await waitFor(() => server.store.getRun(id)?.state === 'needs_input');
 
+  // GET-213 staged name flow: the bounded overview first, then the explicit
+  // person confirmation, then the account scope confirmation.
+  const overview = await server.client.json<{ mode: string; view: FirstStepDiscoveryView; runRevision: number }>(`/api/runs/${id}/first-step/discovery`);
+  assert.equal(overview.body.mode, 'first_step');
+  assert.equal(overview.body.view.personConfirmation?.required, true);
+  assert.equal(overview.body.view.accounts.length, 0, 'no account expansion before person confirmation');
+  const personConfirmation = await server.client.json(`/api/runs/${id}/first-step/person-confirmation`, {
+    json: {
+      expectedRunRevision: overview.body.runRevision,
+      expectedScopeVersion: overview.body.view.selection.scopeVersion,
+      discoveryRevision: overview.body.view.discoveryRevision,
+      candidateId: overview.body.view.personOverview!.candidates[0]!.candidateId
+    },
+    headers: { 'idempotency-key': 'confirm-person-1' }
+  });
+  assert.equal(personConfirmation.status, 200);
+  await waitFor(() => server.store.getRun(id)?.state === 'needs_input');
+
   const discovery = await server.client.json<{ mode: string; view: FirstStepDiscoveryView }>(`/api/runs/${id}/first-step/discovery`);
   assert.equal(discovery.status, 200);
   assert.equal(discovery.body.mode, 'first_step');
   const view = discovery.body.view;
+  assert.equal(view.personConfirmation?.status, 'confirmed', 'the confirmed person guides the account stage');
   assert.ok(view.accounts.length >= 2, 'multi-platform candidates are projected');
   assert.equal(view.selection.submitted, false);
   assert.ok(view.selection.scopeVersion >= 1, 'the authoritative live scope version is exposed');
@@ -246,6 +265,18 @@ test('followups require a frozen parent scope and inherit it instead of bypassin
 
   const made = await server.client.json<{ run: CanonicalView }>('/api/runs', { json: { input: 'Research Ada Fixture' } });
   const parentId = made.body.run.runId;
+  await waitFor(() => server.store.getRun(parentId)?.state === 'needs_input');
+  // GET-213: confirm the source-backed person before the account scope step.
+  const parentOverview = await server.client.json<{ view: FirstStepDiscoveryView; runRevision: number }>(`/api/runs/${parentId}/first-step/discovery`);
+  assert.equal((await server.client.json(`/api/runs/${parentId}/first-step/person-confirmation`, {
+    json: {
+      expectedRunRevision: parentOverview.body.runRevision,
+      expectedScopeVersion: parentOverview.body.view.selection.scopeVersion,
+      discoveryRevision: parentOverview.body.view.discoveryRevision,
+      candidateId: parentOverview.body.view.personOverview!.candidates[0]!.candidateId
+    },
+    headers: { 'idempotency-key': 'confirm-followup-parent' }
+  })).status, 200);
   await waitFor(() => server.store.getRun(parentId)?.state === 'needs_input');
   const ownerId = server.store.getRun(parentId)!.ownerId;
   const wrongProviderParent = server.store.insertRun({ ownerId, question: 'Legacy GitHub metadata', seedUrl: null, provider: 'github',

@@ -51,6 +51,7 @@ import {
 import type { IdentityCandidate } from '../../shared/types.js';
 import type { FirstStepBinding, ResearchCheckpoint } from './research-store.js';
 import type { Store } from '../store.js';
+import { activePersonConfirmation, revokePersonConfirmations } from './person-confirmation.js';
 import {namedOwnerQuote,normalizedPersonName} from './named-owner.js';
 import type {ResearchToolAction,ResearchToolResult} from './tool-contracts.js';
 
@@ -58,6 +59,7 @@ export type FirstStepErrorCode =
   | 'run_not_found'
   | 'not_first_step'
   | 'run_not_waiting'
+  | 'person_confirmation_required'
   | 'stale_run_revision'
   | 'stale_scope_version'
   | 'stale_discovery_revision'
@@ -735,6 +737,15 @@ export class FirstStepStore {
       if (!record || record.discoveryRevision !== input.discoveryRevision) {
         throw new FirstStepSelectionError('stale_discovery_revision', '发现结果已更新，请刷新后重新提交。');
       }
+      // Staged name attempts: the explicit person confirmation is a SEPARATE
+      // action that must precede any account scope submission. Legacy
+      // projections and explicit profile-input runs keep their existing gate.
+      if (record.view.personConfirmation?.required === true) {
+        const confirmed = activePersonConfirmation(this.db, runId, link.inputRevision);
+        if (!confirmed) {
+          throw new FirstStepSelectionError('person_confirmation_required', '请先确认人物候选，再提交账号范围。');
+        }
+      }
       const caseRecord = this.cases.getCase(ownerId, link.caseId);
       if (!caseRecord) throw new FirstStepSelectionError('run_not_found', '未找到该研究的案例。');
       if (caseRecord.scopeVersion !== input.expectedScopeVersion) {
@@ -1098,6 +1109,9 @@ export class FirstStepStore {
         );
       }
       const link = this.attachRun(run, run.question);
+      // A NEW discovery attempt supersedes any earlier person confirmation:
+      // the next overview must be confirmed again. Old receipts stay intact.
+      revokePersonConfirmations(this.db, runId, '新的发现修订已取代原人物确认。');
       if (hint && hint.trim().length > 0) this.setHint(runId, hint.trim());
       else if (existingLink) {
         // An explicit new discovery without a new clue still owns a fresh
@@ -1106,10 +1120,13 @@ export class FirstStepStore {
       }
       this.setPhase(runId, 'freezing');
       const runRevision = run.revision + 1;
+      // A clue refines a staged name search; it does not change that input
+      // into a direct account target or bypass renewed person confirmation.
+      const preservePersonInput = this.currentDiscovery(runId)?.view.personConfirmation?.required === true;
       this.store.updateRun(runId, {
         state: 'queued',
         revision: runRevision,
-        seed_url: run.seedUrl ?? (hint && /^https:\/\//i.test(hint) ? hint.trim() : run.seedUrl)
+        seed_url: preservePersonInput ? run.seedUrl : run.seedUrl ?? (hint && /^https:\/\//i.test(hint) ? hint.trim() : run.seedUrl)
       });
       this.store.addEvent(runId, 'state', {
         state: 'queued',

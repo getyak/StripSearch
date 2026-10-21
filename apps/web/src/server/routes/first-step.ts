@@ -18,10 +18,13 @@ import type { Auth } from '../auth.js';
 import type { Runner } from '../services/runner.js';
 import type { Store } from '../store.js';
 import { FirstStepSelectionError, type FirstStepStore } from '../research/first-step-store.js';
+import { PersonConfirmationError, type PersonConfirmationStore } from '../research/person-confirmation.js';
 
 export interface FirstStepRouteDeps {
   store: Store;
   firstStep: FirstStepStore;
+  /** GET-213 person-confirmation gates; null keeps the legacy routes only. */
+  persons: PersonConfirmationStore | null;
   runner: Runner;
   auth: Auth;
   researchConfigured: boolean;
@@ -37,6 +40,7 @@ function errorStatus(code: FirstStepSelectionError['code']): number {
     case 'idempotency_conflict':
     case 'run_not_waiting':
     case 'not_first_step':
+    case 'person_confirmation_required':
     case 'expand_not_allowed':
     case 'scope_changed':
       return 409;
@@ -47,9 +51,32 @@ function errorStatus(code: FirstStepSelectionError['code']): number {
   }
 }
 
+function personErrorStatus(code: PersonConfirmationError['code']): number {
+  switch (code) {
+    case 'run_not_found':
+      return 404;
+    case 'not_staged':
+    case 'run_not_waiting':
+    case 'stale_run_revision':
+    case 'stale_scope_version':
+    case 'stale_discovery_revision':
+    case 'idempotency_conflict':
+    case 'confirmation_conflict':
+    case 'revoked_candidate':
+      return 409;
+    case 'unknown_candidate':
+      return 422;
+    default:
+      return 400;
+  }
+}
+
 function mapSelectionError(error: unknown): never {
   if (error instanceof FirstStepSelectionError) {
     throw new HttpError(errorStatus(error.code), error.code, error.detail);
+  }
+  if (error instanceof PersonConfirmationError) {
+    throw new HttpError(personErrorStatus(error.code), error.code, error.detail);
   }
   throw error;
 }
@@ -69,6 +96,40 @@ export function registerFirstStepRoutes(router: Router, deps: FirstStepRouteDeps
       mode: 'first_step',
       view: result.view,
       runRevision: deps.store.getRun(String(req.params.id))?.revision ?? 0
+    });
+  });
+
+  /**
+   * GET-213 person confirmation: owner-checked, same-origin POST binding run,
+   * scope, input and discovery revisions plus one immutable candidate id from
+   * the persisted authoritative overview. Idempotent: a double submit or a
+   * restart replays the receipt and never duplicates downstream requests.
+   * The client can never submit arbitrary sources or bypass this gate.
+   */
+  router.post('/runs/:id/first-step/person-confirmation', (req: Request, res: Response) => {
+    const user = requireUser(res);
+    if (!deps.persons) throw new HttpError(409, 'provider_unavailable', '人物确认服务未启用。');
+    const runId = String(req.params.id);
+    // No active-job race: the store refuses a FRESH confirmation unless the
+    // run truly awaits it (state `needs_input`), while a repeated idempotency
+    // key or an identical double submit replays the receipt WITHOUT any new
+    // downstream request — even while queued work is still running.
+    const body = readBody(req);
+    let result;
+    try {
+      result = deps.persons.applyConfirmation(user.id, runId, body, readIdempotencyKey(req));
+    } catch (error) {
+      mapSelectionError(error);
+    }
+    if (!result.idempotent) {
+      // Confirmed person: enqueue the account-discovery stage (new receipts
+      // only; the overview receipts replay with their original timestamps).
+      deps.runner.enqueue(runId);
+    }
+    const view = deps.firstStep.getFirstStepView(user.id, runId);
+    res.json({
+      confirmation: result,
+      view: view && view.mode === 'first_step' ? view.view : null
     });
   });
 

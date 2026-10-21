@@ -985,6 +985,7 @@ function syncFirstStep(runId: string): void {
       runId,
       ownerId: state.user?.id,
       onAfterExpand: () => { void selectRun(runId); },
+      onAfterPersonConfirm: () => { void selectRun(runId); },
       onAfterSubmit: () => {
         void selectRun(runId);
       }

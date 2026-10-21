@@ -13,8 +13,16 @@ import type { AppConfig } from '../config.js';
 import { RunTerminalError, Store, nowIso } from '../store.js';
 import type { RunRecord } from '../store.js';
 import { FirstStepStore, FirstStepSelectionError } from '../research/first-step-store.js';
-import { createFirstStepCheckedSearch, createFirstStepProposalModel, discoverFirstStep } from '../research/first-step-discovery.js';
+import {
+  createFirstStepCheckedSearch,
+  createFirstStepProposalModel,
+  discoverFirstStep,
+  firstStepAttemptId,
+  firstStepAttemptPolicy,
+  resolveFirstStepFlowStage
+} from '../research/first-step-discovery.js';
 import type { FirstStepCheckedSearch } from '../research/first-step-discovery.js';
+import type { PersonConfirmationStore } from '../research/person-confirmation.js';
 import { classifyFirstStepUrl, FIRST_STEP_DEFAULT_BUDGET } from '../../shared/first-step-discovery.js';
 import type { PlatformCatalogSnapshot } from '../../shared/platform-catalog.js';
 
@@ -34,6 +42,8 @@ export interface RunnerDeps {
   researchPlanner?: ResearchPlanner;
   /** First-step persistence; runs with a link use the new first-step flow. */
   firstStep?: FirstStepStore;
+  /** GET-213 staged person confirmation; its presence enables the staged name flow. */
+  personConfirmation?: PersonConfirmationStore;
   /** Bound platform catalog for first-step obligation freezing. */
   discoveryCatalog?: PlatformCatalogSnapshot | null;
 }
@@ -323,22 +333,41 @@ export class Runner {
     };
     if (!binding) {
       const link = firstStep.link(runId)!;
-      const input = {
+      const legacyInput = {
         kind: (initial.seedUrl ? 'homepage_url' : 'name_query') as 'homepage_url' | 'name_query',
         value: (link.hint ?? initial.seedUrl ?? initial.question).trim(),
         question: initial.question
       };
+      const priorPolicy = firstStepAttemptPolicy(this.deps.store, runId, firstStepAttemptId(link, legacyInput, link.hint));
+      // Preserve the exact input/receipt namespace of frozen legacy attempts.
+      // New staged name attempts keep the actual name; a clue is separate
+      // query context and must never become the person label or subject.
+      const input = legacyInput.kind === 'name_query' && this.deps.personConfirmation && priorPolicy !== 'v9' && priorPolicy !== 'v10'
+        ? { ...legacyInput, value: initial.question.trim() }
+        : legacyInput;
+      // GET-213 staged name flow: bounded general-web overview first, then the
+      // explicit person confirmation, then account discovery. Old attempts and
+      // explicit profile input keep their existing full flow unchanged.
+      const confirmation = this.deps.personConfirmation?.active(runId) ?? null;
+      const staged = input.kind === 'name_query' && this.deps.personConfirmation !== undefined;
+      const requestedStage = staged ? (confirmation ? 'accounts' : 'overview') : undefined;
+      // ONE frozen attempt identity and stage decision BEFORE constructing the
+      // checked surface AND the coordinator — they can never disagree, and a
+      // prefrozen v9/v10 attempt keeps its full legacy flow everywhere.
+      const attemptId = firstStepAttemptId(link, input, link.hint);
+      const flowStage = resolveFirstStepFlowStage(firstStepAttemptPolicy(this.deps.store, runId, attemptId), requestedStage);
       const search: FirstStepCheckedSearch = createFirstStepCheckedSearch({
         tools,
         store: this.deps.store,
         runId,
-        attemptId: `input-${String(link.inputRevision)}`,
+        attemptId,
         budget: FIRST_STEP_DEFAULT_BUDGET,
         // The OPERATOR's real ceilings: discovery never raises configured caps.
         limits: this.deps.store.research.checkpoint(runId)?.limits ?? this.deps.config.researchLimits,
-        modelName: this.deps.config.deepseekModel
+        modelName: this.deps.config.deepseekModel,
+        stage: flowStage
       });
-      await discoverFirstStep({
+      const discovered = await discoverFirstStep({
         store: this.deps.store,
         firstStep,
         ownerId: initial.ownerId,
@@ -350,6 +379,10 @@ export class Runner {
         catalog: this.deps.discoveryCatalog ?? null,
         hint: link.hint,
         firecrawlAvailable: Boolean(this.deps.config.firecrawlApiKey),
+        stage: flowStage,
+        confirmedPerson: confirmation
+          ? { candidateId: confirmation.candidateId, confirmedAt: confirmation.confirmedAt, sourceDeps: confirmation.sourceDeps }
+          : null,
         // The restricted first-step model role runs on the PRODUCT model
         // provider (same configured DeepSeek credential as research); metered
         // through the checked ledger and fully server-verified.
@@ -364,7 +397,10 @@ export class Runner {
               })
             : undefined
       });
-      // Wait for the one scope confirmation; the projection carries the rest.
+      // Wait for the one confirmation step the projection reports: person
+      // confirmation first, then the one account scope confirmation.
+      const awaitingPerson = discovered.phase === 'awaiting_person_confirmation';
+      const prompt = awaitingPerson ? '请确认人物候选，再展开公开账号。' : '请确认人物与研究账号范围。';
       this.deps.store.updateRunIfActive(runId, {
         state: 'needs_input',
         revision: (this.deps.store.getRun(runId)?.revision ?? initial.revision) + 1,
@@ -373,13 +409,13 @@ export class Runner {
           handle: null,
           profileUrl: null,
           status: 'needs_input',
-          note: '请在第一步确认人物与研究账号范围。',
+          note: awaitingPerson ? '请先确认人物候选，再选择研究账号范围。' : '请在第一步确认人物与研究账号范围。',
           candidates: []
         }),
         error_code: null,
         error_message: null
       });
-      this.deps.store.addEvent(runId, 'needs_input', { prompt: '请确认人物与研究账号范围。', firstStep: true });
+      this.deps.store.addEvent(runId, 'needs_input', { prompt, firstStep: true, personConfirmation: awaitingPerson });
       this.deps.store.addEvent(runId, 'state', { state: 'needs_input' satisfies RunState });
       return;
     }

@@ -35,6 +35,20 @@ async function startDiscovery(server: TestServer) {
   // This regression includes the real isolated DSH worker startup. Existing
   // workflow waitFor deadlines remain unchanged; this test bounds that worker.
   await waitFor(() => server.store.getRun(runId)?.state === 'needs_input' && server.boot.runner.activeCount() === 0, 30_000);
+  // GET-213 staged name flow: the real first-step model role runs in the
+  // account stage, so confirm the source-backed person first.
+  const overview = await server.client.json<{ view: { personOverview: { candidates: Array<{ candidateId: string }> } | null; personConfirmation: { required: boolean } | null; selection: { scopeVersion: number }; discoveryRevision: number }; runRevision: number }>(`/api/runs/${runId}/first-step/discovery`);
+  assert.equal(overview.body.view.personConfirmation?.required, true);
+  assert.equal((await server.client.json(`/api/runs/${runId}/first-step/person-confirmation`, {
+    json: {
+      expectedRunRevision: overview.body.runRevision,
+      expectedScopeVersion: overview.body.view.selection.scopeVersion,
+      discoveryRevision: overview.body.view.discoveryRevision,
+      candidateId: overview.body.view.personOverview!.candidates[0]!.candidateId
+    },
+    headers: { 'idempotency-key': 'offline-harness-confirm' }
+  })).status, 200);
+  await waitFor(() => server.store.getRun(runId)?.state === 'needs_input' && server.boot.runner.activeCount() === 0, 30_000);
   return runId;
 }
 function credentials(server: TestServer) {
