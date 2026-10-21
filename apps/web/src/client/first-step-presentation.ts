@@ -304,7 +304,9 @@ export function isSettledSupport(account: FirstStepAccountView): boolean {
     account.identity.nativeIdConflict !== true &&
     account.identity.conflicts.length === 0 &&
     account.identity.counterevidence.length === 0 &&
+    !hasInvalidBasis(account) &&
     account.identity.ownerValidity !== 'review' &&
+    account.identity.ownerAnchor?.state !== 'unbound' &&
     account.identity.ownerAnchor?.state !== 'disputed' &&
     account.identity.ownerAnchor?.state !== 'contradicted'
   );
@@ -315,7 +317,8 @@ export function hasInvalidBasis(account: FirstStepAccountView): boolean {
   return (
     account.identity.validity === 'review' ||
     account.identity.state === 'revoked' ||
-    account.identity.ownerValidity === 'review'
+    account.identity.ownerValidity === 'review' ||
+    Boolean(account.identity.ownerEvidence?.length && account.identity.ownerEvidence.every(item => item.revoked))
   );
 }
 

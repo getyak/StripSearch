@@ -439,6 +439,38 @@ test('filter and search are presentation-only windows that keep drafts and the s
   }
 });
 
+test('search keeps the editing range and completes IME composition before replacing its input', async () => {
+  const fixture = eightAccounts();
+  const container = env.document.createElement('div');
+  env.document.body.appendChild(container);
+  const panel = createFirstStepPanel({api:panelApi(fixture),container,runId:fixture.run.id});
+  try {
+    await panel.refresh();
+    const draft = JSON.stringify([...panel.draft()]);
+    const input = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+    input.focus();
+    input.value = 'github';
+    input.setSelectionRange(1,3,'backward');
+    input.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    const replacement = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+    assert.equal(env.document.activeElement,replacement);
+    assert.deepEqual([replacement.selectionStart,replacement.selectionEnd,replacement.selectionDirection],[1,3,'backward']);
+    replacement.dispatchEvent(new env.window.Event('compositionstart',{bubbles:true}));
+    replacement.value = '林';
+    replacement.dispatchEvent(new env.window.Event('input',{bubbles:true}));
+    await panel.refresh();
+    assert.equal(container.querySelector('input[type="search"]'),replacement,'SSE/refresh cannot interrupt an active IME composition');
+    replacement.value = '林舟';
+    replacement.setSelectionRange(2,2);
+    replacement.dispatchEvent(new env.window.Event('compositionend',{bubbles:true}));
+    const completed = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+    assert.notEqual(completed,replacement);
+    assert.equal(completed.value,'林舟');
+    assert.equal(completed.selectionStart,2);
+    assert.equal(JSON.stringify([...panel.draft()]),draft);
+  } finally {panel.destroy();fixture.close();container.remove();}
+});
+
 test('SSE/refresh keeps drafts, filter/search state and never auto-selects newcomers', async () => {
   const fixture = eightAccounts();
   try {
@@ -480,7 +512,8 @@ test('exclusion undo is not a selection and a submitted scope becomes read-only'
   try {
     fixture.republish((view) => ({
       ...view,
-      clusters: [cluster('person-a', 'Lin Zhou', view.accounts[0]!.accountId, view.accounts.map((a) => a.accountId), { linkage: 'linked' })]
+      clusters: [cluster('person-a', 'Lin Zhou', view.accounts[0]!.accountId, view.accounts.map((a) => a.accountId), { linkage: 'linked' }),
+        cluster('person-b','Other person',view.accounts[1]!.accountId,[view.accounts[1]!.accountId])]
     }));
     const container = env.document.createElement('div');
     env.document.body.appendChild(container);
@@ -520,6 +553,12 @@ test('exclusion undo is not a selection and a submitted scope becomes read-only'
     };
     await panel.submit();
     const submittedDraft = JSON.stringify([...panel.draft()]);
+    const chosenBefore = container.querySelector('.first-step-candidate.chosen strong')!.textContent;
+    for (const candidate of container.querySelectorAll<HTMLButtonElement>('button.first-step-cluster')) {
+      assert.equal(candidate.disabled,true);
+      candidate.dispatchEvent(new env.window.Event('click',{bubbles:true}));
+    }
+    assert.equal(container.querySelector('.first-step-candidate.chosen strong')!.textContent,chosenBefore);
     container.querySelector<HTMLElement>('.first-step-card .first-step-cell-content')!.click();
     assert.equal(JSON.stringify([...panel.draft()]), submittedDraft, 'clicking a submitted row cannot change the frozen draft');
     for (const box of container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {

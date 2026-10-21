@@ -136,6 +136,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   /** Presentation-only comparison window; never part of the draft or payload. */
   let accountFilter: FirstStepAccountFilter = 'all';
   let accountSearch = '';
+  let composingAccountSearch = false;
   const now = deps.now ?? ((): number => Date.now());
   let openEvidence: { close: () => void } | null = null;
 
@@ -204,12 +205,16 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   };
 
   const render = (): void => {
-    if (destroyed) return;
+    if (destroyed || composingAccountSearch) return;
     const root = deps.container;
     const footerHost = deps.footerContainer ?? null;
     const active = root.ownerDocument.activeElement as HTMLElement | null;
     const inPanel = (node: Node | null): boolean => Boolean(node && (root.contains(node) || footerHost?.contains(node)));
     const focusKey = active && inPanel(active) ? active.dataset.focusKey : null;
+    const editControl = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')
+      ? active as HTMLInputElement | HTMLTextAreaElement : null;
+    const caret = editControl && typeof editControl.selectionStart === 'number' && typeof editControl.selectionEnd === 'number'
+      ? {start: editControl.selectionStart, end: editControl.selectionEnd, direction: editControl.selectionDirection ?? 'none'} : null;
     const focusables = (): HTMLElement[] => [
       ...root.querySelectorAll<HTMLElement>('[data-focus-key]'),
       ...(footerHost ? [...footerHost.querySelectorAll<HTMLElement>('[data-focus-key]')] : [])
@@ -254,6 +259,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     // Literal input matches lead the visible order; this never upgrades identity.
     const orderedCompeting = [...competing].sort((a, b) => Number(clusterFitsInput(b, view!)) - Number(clusterFitsInput(a, view!)));
     const chooseCandidate = (cluster: FirstStepPersonClusterView): void => {
+      if (view?.selection.submitted) return;
       clusterId = cluster.clusterId;
       // Changing the person cannot grant reading a different person's accounts.
       let removed = 0;
@@ -277,6 +283,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         on: { click: () => chooseCandidate(cluster) }
       });
       const titles = make('div', { className: 'first-step-cluster-titles' });
+      if (view?.selection.submitted) button.setAttribute('disabled', '');
       titles.appendChild(make('strong', { text: label.label }));
       titles.appendChild(make('span', { className: 'first-step-choice-tag', text: isChosen ? '已选择为目标' : '选择此候选' }));
       titles.appendChild(make('span', { className: 'first-step-cluster-label-kind', text: label.kindLabel }));
@@ -442,6 +449,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       attrs: { type: 'search', placeholder: '按平台或 handle 搜索', 'aria-label': '按平台或 handle 搜索账号', 'data-focus-key': 'account-search' }
     }) as HTMLInputElement;
     searchInput.value = accountSearch;
+    searchInput.addEventListener('compositionstart', () => { composingAccountSearch = true; });
+    searchInput.addEventListener('compositionend', () => { composingAccountSearch = false; accountSearch = searchInput.value; render(); });
     searchInput.addEventListener('input', () => { accountSearch = searchInput.value; render(); });
     tools.append(filters, searchInput);
     cardsBox.appendChild(tools);
@@ -617,6 +626,9 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     if (focusKey) {
       const replacement = focusables().find(el => el.dataset.focusKey === focusKey);
       replacement?.focus({preventScroll:true});
+      if (caret && replacement && (replacement.tagName === 'INPUT' || replacement.tagName === 'TEXTAREA')) {
+        (replacement as HTMLInputElement | HTMLTextAreaElement).setSelectionRange(caret.start, caret.end, caret.direction);
+      }
     }
     if (scroller && scrollTop !== undefined) scroller.scrollTop = scrollTop;
   };

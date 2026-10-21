@@ -293,6 +293,11 @@ test('filter and search predicates match only what the row displays', () => {
   });
   assert.equal(accountMatchesFilter(uncertain, unchecked, 'needs_check'), true);
   assert.equal(accountMatchesFilter(settled, unchecked, 'needs_check'), false);
+  const unbound = accountView({identity:{...settled.identity,ownerAnchor:owner('unbound','Lin Zhou')}});
+  assert.equal(accountMatchesFilter(unbound, unchecked, 'needs_check'), true, 'supported account links do not settle an unbound person name');
+  const withdrawnOwner = accountView({identity:{...settled.identity,ownerEvidence:[{evidenceId:'oe',quote:'我叫林舟',sourceUrl:'https://lantern.dev/about',sourceTitle:'合成 About',revoked:true}]}});
+  assert.equal(accountMatchesFilter(withdrawnOwner, unchecked, 'needs_check'), true);
+  assert.equal(accountMatchesFilter(withdrawnOwner, unchecked, 'invalid_basis'), true);
   const revoked = accountView({
     identity: { state: 'revoked', basis: 'explicit_self_link', basisLabel: '公开原文明确链接', evidence: [], counterevidence: [], conflicts: [] }
   });

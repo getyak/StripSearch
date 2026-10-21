@@ -569,7 +569,7 @@ body[data-view="app"] .history-item[aria-current="true"] { box-shadow: none; bac
 .first-step-other-people > .first-step-candidate { margin: 8px 10px 10px; }
 
 /* Aligned account rows: fixed account/content/basis/status/selection tracks. */
-.first-step-accounts { display: grid; gap: 8px; min-width: 0; }
+.first-step-accounts { display: grid; gap: 8px; min-width: 0; container: first-step-comparison / inline-size; }
 .first-step-scope-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 20px; }
 .first-step-account-tools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 .first-step-filters { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1186,7 +1186,7 @@ body[data-view="home"] .footer-return { font-size: 13px; }
   .review-candidate-summary { grid-template-columns: 1fr; }
   .review-editor-bar { position: static; }
 }
-@media (max-width: 1000px) {
+@container first-step-comparison (max-width: 1030px) {
   .first-step-row-head { display: none; }
   .first-step-card { grid-template-columns: minmax(0, 1fr); row-gap: 6px; padding: 12px 0 14px; }
   .first-step-cell::before {
@@ -1252,6 +1252,7 @@ body[data-view="home"] .footer-return { font-size: 13px; }
   .first-step-progress { overflow: hidden; white-space: nowrap; }
   .first-step-progress span + span::before { width: 12px; margin-inline: 6px; }
   .first-step .text-button, .first-step-select, .first-step-evidence summary, .first-step-filter { min-height: 44px; }
+  .first-step-evidence:not([open]) > summary, .first-step-evidence[open] > summary { min-height: 44px; }
   .first-step-search { min-width: 0; flex-basis: 100%; }
   .first-step-cluster-titles { flex-wrap: wrap; gap: 2px 8px; overflow: visible; }
   .first-step-cluster-titles strong, .first-step-choice-tag { flex-shrink: 0; white-space: nowrap; }
