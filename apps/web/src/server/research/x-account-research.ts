@@ -91,6 +91,8 @@ function setup(options:XAccountResearchOptions){
   cp.phase=key;save();store.addEvent(run.id,'stage',{index:cp.steps,total:0,key,label,status:'active'});
  };
  const read=async(request:XReadRequest):Promise<XReadResult>=>{
+  // Cached receipts resolve as microtasks; yield to HTTP/cancel handlers before dispatch.
+  await new Promise<void>(resolve=>setImmediate(resolve));
   active();const key='x-account:tool:v1:'+digest({accountId:state.accountId,scopeVersion:options.binding.scopeVersion,request});
   const ancestor=ancestors.find(a=>a.receipts.has(key));const cached=ancestor?.receipts.get(key);
   if(cached?.state==='inflight')throw new ResearchStop('unknown_inflight');

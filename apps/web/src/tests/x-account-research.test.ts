@@ -112,3 +112,10 @@ test('three foreign-only replies pages are filtered-empty, not raw-empty, and st
  const provider:XAccountProvider={async execute(request){if(request.type==='profile')return{...result(),account:profile};if(request.type==='timeline')return result([post('101')]);if(request.type==='replies'){replies++;return replies<=3?result([post(String(800+replies),{authorId:'99',authorHandle:'other'})],`r${replies}`):result([post('102')]);}throw Error('unexpected context');}};
  try{const {state}=await collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{}});assert.equal(state.history.replies.pages,4);assert.equal(state.history.replies.done,true);assert.ok(state.posts.some(p=>p.id==='102'));assert.ok(!state.gaps.some(g=>g.code==='empty_history_pages'));}finally{f.close();}
 });
+
+test('queued cancellation gets an event-loop turn before synchronous cached-style reads can dispatch',async()=>{
+ const{f,binding}=setup();const controller=new AbortController();let calls=0;
+ const provider:XAccountProvider={async execute(request){calls++;return request.type==='profile'?{...result(),account:profile}:result();}};
+ const cancel=setImmediate(()=>controller.abort(new Error('queued cancellation')));
+ try{await assert.rejects(collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:controller.signal,limits:unlimited,assertScope:()=>{}}),/queued cancellation/);assert.equal(calls,0,'queued cancel must precede even the first provider dispatch');}finally{clearImmediate(cancel);f.close();}
+});
