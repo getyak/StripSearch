@@ -36,11 +36,11 @@
 - [x] Keep secondary actions in an explicit native menu; test Escape and selection isolation.
 - [x] Keep shared boundary boilerplate out of the content column, without hiding conflict or provenance.
 - [x] Apply readable type, platform tiles, aligned tracks, neutral workspace surfaces and compact history labels.
-- [ ] Verify desktop, medium and narrow viewports using the real renderer.
+- [x] Verify desktop, medium and narrow viewports using the real renderer.
 
 ## Task 3: Verification and delivery
 
 - [x] Run typecheck, full offline tests, production build and design check.
-- [ ] Review the scoped diff and commit only this task's files.
-- [ ] Update the existing managed service, read back health/revision/assets, and test selection and disclosure in the actual workspace.
-- [ ] Record verified state in the existing Notion workspace; report any remaining gates separately.
+- [x] Review the scoped diff and commit only this task's files.
+- [x] Update the existing managed service, read back health/revision/assets, and test selection and disclosure in the actual workspace.
+- [x] Record verified state in the existing Notion workspace; report any remaining gates separately.
