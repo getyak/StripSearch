@@ -225,7 +225,11 @@ export function contentClueFor(account: FirstStepAccountView): { text: string; k
   if (account.identity.counterevidence.length > 0) {
     return { text: `存在反证：${account.identity.counterevidence[0]!.label}`, kind: 'counterevidence' };
   }
-  if (account.attribution) {
+  // These shared guardrails explain identity policy, not this account's
+  // content. Their complete originals remain in the provenance disclosure.
+  const sharedBoundary = account.attribution?.reason === '本人账号关联有目标绑定的原文依据；人物身份与作品作者仍分别核对。'
+    || account.attribution?.reason === '归属未定；同名、资料提及或链接本身不能证明本人拥有。';
+  if (account.attribution && !sharedBoundary) {
     return { text: account.attribution.reason, kind: 'linkage' };
   }
   return { text: account.researchSummary, kind: 'summary' };

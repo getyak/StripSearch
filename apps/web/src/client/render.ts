@@ -515,21 +515,34 @@ export function renderHistory(
     return;
   }
   for (const run of runs) {
+    let title = run.question;
+    try {
+      const url = new URL(run.question);
+      if (url.protocol === 'https:' || url.protocol === 'http:') {
+        title = url.hostname.replace(/^www\./, '') + (url.pathname === '/' ? '' : url.pathname);
+      }
+    } catch { /* A research question remains exactly as entered. */ }
+    const metadata = `${stateLabel(run.state)}${run.sourceCount > 0 ? ` · ${run.sourceCount} 个来源` : ''}${run.reviewCount > 0 ? ` · ${run.reviewCount} 处待复核` : ''}`;
     const button = make('button', {
       className: 'history-item',
       attrs: {
         type: 'button',
         'aria-current': run.runId === currentRunId ? 'true' : 'false',
-        'data-run-id': run.runId
+        'data-run-id': run.runId,
+        'aria-label': `${run.question}，${metadata}`,
+        title: run.question
       },
       on: { click: () => onSelect(run.runId) }
     });
-    button.appendChild(make('strong', { text: run.question }));
-    button.appendChild(
+    button.appendChild(make('span',{className:'history-item-icon',attrs:{'aria-hidden':'true'}}));
+    const copy = make('span',{className:'history-item-copy'});
+    copy.appendChild(make('strong', { text: title }));
+    copy.appendChild(
       make('small', {
-        text: `${stateLabel(run.state)} · ${run.sourceCount} 个来源${run.reviewCount > 0 ? ` · ${run.reviewCount} 处待复核` : ''}`
+        text: metadata
       })
     );
+    button.appendChild(copy);
     container.appendChild(button);
   }
 }

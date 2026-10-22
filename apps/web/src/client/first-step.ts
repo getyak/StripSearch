@@ -147,6 +147,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
   let composingAccountSearch = false;
   const now = deps.now ?? ((): number => Date.now());
   let openEvidence: { close: () => void } | null = null;
+  // Closed is a deliberate state, not an absence of a previous open state.
+  const disclosureState = new Map<string, boolean>();
 
   const selectedCount = (): number =>
     (view?.accounts ?? []).filter(account => {
@@ -273,10 +275,12 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     ];
     const scroller = root.closest<HTMLElement>('.work-body');
     const scrollTop = scroller?.scrollTop;
-    const openKeys = new Set([
-      ...[...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map(el => el.dataset.detailKey),
-      ...[...root.querySelectorAll<HTMLElement>('.first-step-sources[data-open="true"]')].map(el => el.dataset.detailKey)
-    ]);
+    for (const details of root.querySelectorAll<HTMLDetailsElement>('details[data-detail-key]')) {
+      disclosureState.set(details.dataset.detailKey!, details.open);
+    }
+    for (const sources of root.querySelectorAll<HTMLElement>('.first-step-sources[data-detail-key]')) {
+      disclosureState.set(sources.dataset.detailKey!, sources.dataset.open === 'true');
+    }
     const previousHint = root.querySelector<HTMLInputElement>('[data-focus-key="hint"]');
     if (previousHint) hintDraft = previousHint.value;
     // The search box is owned by `accountSearch` (its input listener); never
@@ -297,14 +301,14 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       make('span', { text: '整理报告' })
     );
     intro.append(progress,
-      make('h2', {text: clusterId === null && view.clusters.length > 1 ? '先确认目标人物' : '选择要了解的公开账号'}));
+      make('h2', {text:'选择本轮账号'}));
     root.appendChild(intro);
 
     // ---- Person summary ABOVE the account rows (comparison workspace) ----
     const personBox = make('section', { className: 'first-step-clusters', attrs: { 'aria-label': '目标人物候选', 'data-single': view.clusters.length <= 1 ? 'true' : 'false' } });
     const chosen = clusterId === null ? null : (view.clusters.find((item) => item.clusterId === clusterId) ?? null);
     personBox.dataset.compact = chosen !== null ? 'true' : 'false';
-    personBox.appendChild(make('h3', { text: chosen ? '目标人物' : '确认目标人物' }));
+    personBox.appendChild(make('h3', { className:'sr-only',text: chosen ? '目标人物' : '确认目标人物' }));
     const linkedChoices = view.clusters.filter(cluster => cluster.linkage === 'linked' && cluster.conflicts.length === 0 && clusterFitsInput(cluster, view!));
     const recommendedOnly = linkedChoices.length === 1 && clusterId === linkedChoices[0]!.clusterId;
     const competing = view.clusters.filter(cluster => cluster.clusterId !== clusterId);
@@ -422,7 +426,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         others.appendChild(renderCandidate(cluster, false));
       }
       // Without a chosen person the decision IS the person choice: show it.
-      if (chosen === null && !openKeys.has('other-people')) others.open = true;
+      if (chosen === null && !disclosureState.has('other-people')) others.open = true;
       personBox.appendChild(others);
     }
     root.appendChild(personBox);
@@ -468,12 +472,12 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     };
 
     const cardsBox = make('section', { className: 'first-step-accounts', attrs: { 'aria-label': '选择研究账号' } });
-    cardsBox.appendChild(make('h3', { className: chosen ? 'sr-only' : '', text: '选择研究账号' }));
+    cardsBox.appendChild(make('h3', { className:'sr-only', text: '选择研究账号' }));
     // Selection semantics are explained ONCE here; rows only state their own
     // boundary. The checkbox is a reading scope, never an ownership claim.
     cardsBox.appendChild(make('p', {
       className: 'first-step-scope-note',
-      text: '勾选只决定本轮读取范围，不代表归属已确认；未确认、冲突或他人分组的账号勾选后仅作独立账号范围研究，不并入人物结论。'
+      text: '勾选只决定本轮读取范围，不代表归属已确认；待核对或不属于目标分组的账号将单独研究。'
     }));
     if (mainAccounts.length === 0 && view.clusters.length > 0) {
       cardsBox.appendChild(make('p', { className: 'muted', text: '请先确认目标人物；这个人的公开账号会显示在这里。' }));
@@ -664,10 +668,11 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     }
     (footerHost ?? root).appendChild(footer);
     for (const details of root.querySelectorAll<HTMLDetailsElement>('details')) {
-      if (openKeys.has(details.dataset.detailKey)) details.open = true;
+      const key = details.dataset.detailKey;
+      if (key && disclosureState.has(key)) details.open = disclosureState.get(key)!;
     }
     for (const sources of root.querySelectorAll<HTMLElement>('.first-step-sources')) {
-      if (openKeys.has(sources.dataset.detailKey)) {
+      if (disclosureState.get(sources.dataset.detailKey!)) {
         const list = sources.querySelector<HTMLElement>(':scope > .first-step-sources-list');
         const toggle = sources.querySelector<HTMLElement>(':scope > .first-step-sources-toggle');
         if (list) list.hidden = false;
@@ -676,7 +681,11 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       }
     }
     if (focusKey) {
-      const replacement = focusables().find(el => el.dataset.focusKey === focusKey);
+      let replacement = focusables().find(el => el.dataset.focusKey === focusKey);
+      // An action can close its own menu before re-rendering. Restore focus
+      // to the visible trigger instead of an unreachable hidden action.
+      const closed = replacement?.closest<HTMLDetailsElement>('details:not([open])');
+      if (closed) replacement = closed.querySelector<HTMLElement>(':scope > summary') ?? replacement;
       replacement?.focus({preventScroll:true});
       if (caret && replacement && (replacement.tagName === 'INPUT' || replacement.tagName === 'TEXTAREA')) {
         (replacement as HTMLInputElement | HTMLTextAreaElement).setSelectionRange(caret.start, caret.end, caret.direction);
@@ -716,23 +725,23 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
       }
       render();
     };
-    const toggle = (): void => applyChecked(!checked);
 
     // Column 1 — account: the literal handle leads; platform, site host and a
     // source-backed person label share one quiet meta line. Full literal page
     // titles stay inspectable in the row's evidence disclosure.
     const cellAccount = make('div', { className: 'first-step-cell first-step-cell-account', attrs: { 'data-col': '账号' } });
-    cellAccount.appendChild(make('p', { className: 'first-step-handle', text: row.handleLabel }));
+    const emblem = make('span', {className:`first-step-platform-tile platform-${account.platform}`,attrs:{'aria-hidden':'true'}});
+    if (iconKey) emblem.appendChild(make('span',{className:`first-step-platform-icon icon-${iconKey}`}));
+    else if (account.platform === 'personal_site') emblem.appendChild(make('span',{className:'first-step-platform-icon icon-website'}));
+    else emblem.appendChild(make('span',{className:'first-step-platform-initial',text:account.platformLabel.slice(0,2)}));
+    const accountLabels = make('div',{className:'first-step-account-labels'});
+    accountLabels.appendChild(make('p', { className: 'first-step-handle', text: row.handleLabel,attrs:{title:row.handleLabel} }));
     const metaLine = make('p', { className: 'first-step-platform' });
-    if (iconKey) {
-      metaLine.appendChild(make('span', { className: `first-step-platform-icon icon-${iconKey}`, attrs: { 'aria-hidden': 'true' } }));
-    } else if (account.platform === 'personal_site') {
-      metaLine.appendChild(make('span', { className: 'first-step-platform-icon icon-link', text: '↗', attrs: { 'aria-hidden': 'true' } }));
-    }
     metaLine.appendChild(make('span', { text: account.platformLabel }));
-    if (row.hostLabel) metaLine.appendChild(make('span', { className: 'first-step-host', text: ` · ${row.hostLabel}` }));
+    if (row.hostLabel && row.handleLabel !== row.hostLabel) metaLine.appendChild(make('span', { className: 'first-step-host', text: ` · ${row.hostLabel}` }));
     if (row.personLabel) metaLine.appendChild(make('span', { className: 'first-step-person-tag', text: ` · ${row.personLabel.kindLabel}：${row.personLabel.text}` }));
-    cellAccount.appendChild(metaLine);
+    accountLabels.appendChild(metaLine);
+    cellAccount.append(emblem,accountLabels);
     card.appendChild(cellAccount);
 
     // Column 2 — content: the account-specific clue/conflict/invalidity first,
@@ -834,8 +843,16 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
         })
       );
     }
-    if (actions.children.length > 0) cellSelect.appendChild(actions);
     card.appendChild(cellSelect);
+    if (actions.children.length > 0) {
+      const menu = make('details',{className:'first-step-row-menu',attrs:{'data-detail-key':`actions-${account.accountId}`}});
+      const menuTrigger = make('summary',{text:'⋯',attrs:{'aria-label':`更多操作：${account.platformLabel} ${row.handleLabel}`,'data-focus-key':`actions-${account.accountId}`}});
+      menu.append(menuTrigger,actions);
+      wireDisclosure(menu,menuTrigger);
+      // An explicit menu choice completes the menu interaction.
+      actions.addEventListener('click',()=>{menu.open=false;},{capture:true});
+      card.appendChild(menu);
+    }
 
     // Inline evidence disclosure: opens UNDER its own row; the exact original
     // stays inspectable and the selection is never touched.
@@ -940,11 +957,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     evidence.appendChild(evidenceList);
     card.appendChild(evidence);
 
-    // Row-level click toggles the checkbox, but never on interactive parts.
-    card.addEventListener('click', (event) => {
-      if (selectionBlocked(event.target)) return;
-      toggle();
-    });
+    // Rows are readable/selectable text. Only the dedicated checkbox changes
+    // scope; opening evidence and reading/copying a row never select it.
     return card;
   };
 

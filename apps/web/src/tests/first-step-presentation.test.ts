@@ -287,6 +287,11 @@ test('account-specific clues outrank the repetitive generic research summary', (
   assert.equal(contentClueFor(nativeConflict).kind, 'conflict');
 });
 
+test('shared attribution boilerplate is not repeated as public-content information', () => {
+  const account = accountView({researchSummary:'公开视频与讲解',attribution:{relation:'person_owned',reason:'本人账号关联有目标绑定的原文依据；人物身份与作品作者仍分别核对。',sources:[],sourceGroups:1}});
+  assert.deepEqual(contentClueFor(account),{text:'公开视频与讲解',kind:'summary'});
+});
+
 test('filter and search predicates match only what the row displays', () => {
   const settled = accountView();
   assert.equal(isSettledSupport(settled), true);

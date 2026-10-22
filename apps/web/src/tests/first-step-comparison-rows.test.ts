@@ -18,6 +18,74 @@ import type { FirstStepAccountView, FirstStepDiscoveryView, FirstStepPersonClust
 
 const env = installDom();
 
+test('closing person choices stays closed through account selection, filters and refreshed data', async () => {
+  const fixture = eightAccounts();
+  try {
+    fixture.republish(view => ({ ...view, clusters: [
+      cluster('person-a', 'Lin Zhou', view.accounts[0]!.accountId, [view.accounts[0]!.accountId]),
+      cluster('person-b', 'Morgan Chen', view.accounts[1]!.accountId, [view.accounts[1]!.accountId])
+    ] }));
+    const container = env.document.createElement('div');
+    env.document.body.appendChild(container);
+    const panel = createFirstStepPanel({api: panelApi(fixture), container, runId: fixture.run.id});
+    await panel.refresh();
+    container.querySelector<HTMLDetailsElement>('details.first-step-other-people')!.open = false;
+    const checkbox = container.querySelector<HTMLInputElement>('.first-step-accounts input[type="checkbox"]')!;
+    checkbox.focus();
+    const focusKey = checkbox.dataset.focusKey;
+    checkbox.click();
+    assert.equal(container.querySelector<HTMLDetailsElement>('details.first-step-other-people')!.open, false, 'selection must respect explicitly closed person choices');
+    assert.equal((env.document.activeElement as HTMLElement).dataset.focusKey, focusKey);
+    container.querySelector<HTMLButtonElement>('[data-filter="selected"]')!.click();
+    assert.equal(container.querySelector<HTMLDetailsElement>('details.first-step-other-people')!.open, false);
+    const response = fixture.firstStep.getFirstStepView(fixture.run.ownerId, fixture.run.id);
+    assert.ok(response?.mode === 'first_step');
+    panel.applyView({...response.view, updatedAt:'2026-10-22T02:00:00.000Z'}, 2);
+    assert.equal(container.querySelector<HTMLDetailsElement>('details.first-step-other-people')!.open, false, 'fresh data must not reopen a closed disclosure');
+    panel.destroy();
+  } finally { fixture.close(); env.document.body.replaceChildren(); }
+});
+
+test('reading an account row does not change its checkbox and secondary actions require an explicit menu', async () => {
+  const fixture = eightAccounts();
+  try {
+    const container = env.document.createElement('div');
+    env.document.body.appendChild(container);
+    const panel = createFirstStepPanel({api:panelApi(fixture),container,runId:fixture.run.id});
+    await panel.refresh();
+    const row = container.querySelector<HTMLElement>('.first-step-card')!;
+    const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    const checked = checkbox.checked;
+    row.querySelector<HTMLElement>('.first-step-cell-content')!.click();
+    assert.equal(container.querySelector<HTMLInputElement>('.first-step-card input[type="checkbox"]')!.checked, checked, 'reading and selecting are separate actions');
+    const menu = container.querySelector<HTMLDetailsElement>('.first-step-row-menu')!;
+    assert.ok(menu, 'exceptional actions have their own menu');
+    assert.equal(menu.open, false);
+    assert.ok(menu.querySelector('button[aria-label^="声明"]'));
+    menu.open = true;
+    menu.querySelector('button')!.dispatchEvent(new env.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    assert.equal(menu.open,false);
+    assert.equal(env.document.activeElement,menu.querySelector('summary'));
+    panel.destroy();
+  } finally { fixture.close(); env.document.body.replaceChildren(); }
+});
+
+test('completing a secondary action returns keyboard focus to the visible row menu trigger', async () => {
+  const fixture=eightAccounts();
+  try {
+    const container=env.document.createElement('div');env.document.body.appendChild(container);
+    const panel=createFirstStepPanel({api:panelApi(fixture),container,runId:fixture.run.id});await panel.refresh();
+    const menu=container.querySelector<HTMLDetailsElement>('.first-step-row-menu')!;
+    menu.open=true;
+    const action=menu.querySelector<HTMLButtonElement>('button[aria-label^="声明"]')!;
+    action.focus();action.click();
+    const next=container.querySelector<HTMLDetailsElement>('.first-step-row-menu')!;
+    assert.equal(next.open,false,'the completed action closes its menu');
+    assert.equal(env.document.activeElement,next.querySelector('summary'),'focus returns to a visible control rather than a hidden action');
+    panel.destroy();
+  } finally {fixture.close();env.document.body.replaceChildren();}
+});
+
 function panelApi(fixture: ReturnType<typeof seedFirstStep>, posted: FirstStepSelectionPayload[] = []): FirstStepPanelApi {
   return {
     async getFirstStepDiscovery(): Promise<FirstStepDiscoveryResponse> {
