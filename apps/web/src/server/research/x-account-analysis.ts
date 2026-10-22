@@ -82,14 +82,38 @@ async function model(input:XAccountAnalysisInput,purpose:string,instruction:stri
 }
 
 interface RejectedFinding {statement:string;reason:string}
+interface VerificationVerdict {id:string;supported:boolean;reason:string}
+interface PartitionFeedback {missingIds:string[];inventedIds:string[];duplicateIds:string[];malformedIndexes:number[];responseMalformed:boolean}
+function inspectPartition(value:unknown,expectedIds:string[]):{verdicts:VerificationVerdict[]|null;feedback:PartitionFeedback}{
+ const feedback:PartitionFeedback={missingIds:[],inventedIds:[],duplicateIds:[],malformedIndexes:[],responseMalformed:false};
+ const expected=new Set(expectedIds);const seen=new Set<string>();const valid:VerificationVerdict[]=[];
+ if(!record(value)||!Array.isArray(value.verdicts)){feedback.responseMalformed=true;feedback.missingIds=[...expectedIds];return {verdicts:null,feedback};}
+ for(const [index,verdict] of value.verdicts.entries()){
+  if(record(verdict)&&typeof verdict.id==='string'){
+   if(seen.has(verdict.id))feedback.duplicateIds.push(verdict.id);seen.add(verdict.id);
+   if(!expected.has(verdict.id))feedback.inventedIds.push(verdict.id);
+  }
+  if(!record(verdict)||typeof verdict.id!=='string'||typeof verdict.supported!=='boolean'||typeof verdict.reason!=='string'||!verdict.reason.trim())feedback.malformedIndexes.push(index);
+  else valid.push({id:verdict.id,supported:verdict.supported,reason:verdict.reason});
+ }
+ feedback.missingIds=expectedIds.filter(id=>!seen.has(id));
+ const exact=value.verdicts.length===expectedIds.length&&!feedback.missingIds.length&&!feedback.inventedIds.length&&!feedback.duplicateIds.length&&!feedback.malformedIndexes.length;
+ return {verdicts:exact?valid:null,feedback};
+}
 async function verify(findings:XAccountFinding[],input:XAccountAnalysisInput,stage:string,rejections:RejectedFinding[]=[]):Promise<XAccountFinding[]>{
  const accepted:XAccountFinding[]=[];
  // Verification is a separate semantic decision and sees original text, never a generator's verified flag.
  for(const chunk of pack(findings.map(f=>({finding:f,materials:originals([f],input)})),MAX_BATCH,10)){
-  const selected=chunk.map(c=>c.finding);const value=await model(input,`x-account-verify-${stage}`,`${RULES}\n你是独立核验者。逐条核对陈述的每一部分是否被所引原文直接支持，检查范围、时间、作者、转帖、第三方关系、自述与推断、商业合作限定、反例。不要因为中文流畅或先前已核验而放行；泛泛总结、额外结论与语义不一致一律拒绝。必须对 findings 中每个 id 恰好返回一次 verdict；supported 为布尔值，并说明理由。`,{subject:input.subject,findings:selected,materials:chunk.flatMap(c=>c.materials)},verifySchema);
-  if(!record(value)||!Array.isArray(value.verdicts)||value.verdicts.length!==selected.length)throw Error('X account verifier partition mismatch');const remaining=new Set(selected.map(f=>f.id));const verdicts=new Map<string,boolean>();
-  for(const v of value.verdicts){if(!record(v)||typeof v.id!=='string'||!remaining.delete(v.id)||typeof v.supported!=='boolean'||typeof v.reason!=='string'||!v.reason.trim())throw Error('X account verifier partition mismatch');verdicts.set(v.id,v.supported);if(!v.supported)rejections.push({statement:selected.find(f=>f.id===v.id)!.statement,reason:v.reason});}
-  if(remaining.size)throw Error('X account verifier partition mismatch');for(const f of selected)if(verdicts.get(f.id))accepted.push({...f,verified:true});
+  const selected=chunk.map(c=>c.finding);const expectedIds=selected.map(f=>f.id);const materials=chunk.flatMap(c=>c.materials);
+  const chunkSchema={...verifySchema,properties:{verdicts:{...verifySchema.properties.verdicts,items:{...verifySchema.properties.verdicts.items,properties:{...verifySchema.properties.verdicts.items.properties,id:{type:'string',enum:expectedIds}}}}}};
+  let verdicts:VerificationVerdict[]|null=null;let partitionFeedback:PartitionFeedback|null=null;
+  // Only known returned protocol defects are repairable. Transport errors/unknown inflight still escape.
+  for(let protocolAttempt=0;protocolAttempt<=2;protocolAttempt++){
+   const value=await model(input,`x-account-verify-${stage}`,`${RULES}\n你是独立核验者。逐条核对陈述的每一部分是否被所引原文直接支持，检查范围、时间、作者、转帖、第三方关系、自述与推断、商业合作限定、反例。不要因为中文流畅或先前已核验而放行；泛泛总结、额外结论与语义不一致一律拒绝。必须对 expectedIds 中每个 id 恰好返回一次 verdict，逐字复制 id，不能缩写、改写或新增；supported 为布尔值，并说明理由。若 partitionFeedback 非空，只说明先前响应的格式问题；仍须对本次完整 findings 和相同原文重新独立核验。不得沿用不完整判决、修改陈述或为了修复格式而放宽判断。`,{subject:input.subject,findings:selected,materials,expectedIds,protocolAttempt,partitionFeedback},chunkSchema);
+   const checked=inspectPartition(value,expectedIds);verdicts=checked.verdicts;if(verdicts)break;partitionFeedback=checked.feedback;
+  }
+  if(!verdicts)throw Error('X account verifier partition mismatch after 3 responses');
+  for(const verdict of verdicts){const finding=selected.find(f=>f.id===verdict.id)!;if(verdict.supported)accepted.push({...finding,verified:true});else rejections.push({statement:finding.statement,reason:verdict.reason});}
  }
  return accepted;
 }
