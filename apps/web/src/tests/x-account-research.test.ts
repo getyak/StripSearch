@@ -70,7 +70,7 @@ test('an independent X account publishes a verified Chinese account report and s
    return{findings:material?[{section:'work',statement:'该账号在这条原帖中自述制作了一个合成阅读工具。',kind:'attributed_statement',evidence:[{sourceKey:material.sourceKey,quote:'I built a synthetic reading tool.'}]}]:[]};
   }});
   assert.equal(output.state,'completed');assert.ok(output.answer.some(s=>s.bullets.some(b=>b.text.includes('阅读工具'))));
-  assert.ok(purposes.includes('x-account-analyze')&&!purposes.includes('x-account-verify-batch')&&purposes.includes('x-account-synthesize')&&purposes.includes('x-account-verify-synthesis'));
+  assert.ok(purposes.includes('x-account-analyze')&&!purposes.includes('x-account-verify-batch')&&purposes.includes('x-account-synthesize')&&purposes.includes('x-account-write')&&purposes.includes('x-account-verify-synthesis'));
   f.store.updateRun(f.run.id,{state:output.state,identity_json:JSON.stringify(output.identity),answer_json:JSON.stringify(output.answer),limitations_json:JSON.stringify(output.limitations),stop_reason:output.stopReason});
   output.observations.forEach((o,index)=>f.store.addObservation(f.run.id,o,index));
   const view=()=>f.store.buildCanonicalView(f.store.getRun(f.run.id)!);const current=view();
@@ -214,7 +214,7 @@ test('context billing refusal preserves pending work, drains an issued parent an
   assert.ok(state.contextQueue.some(t=>t.type==='detail'&&t.tweetId==='901'&&t.rootId==='102'),'the newly discovered deeper parent remains queued');
   assert.ok(!state.contextDone.includes('comments:101:101:reply_context'));
   assert.ok(state.contextDone.includes('detail:900:102:parent_context'));assert.ok(state.posts.some(p=>p.id==='900'));
-  for(const purpose of ['x-account-analyze','x-account-synthesize','x-account-verify-synthesis'])assert.ok(purposes.includes(purpose));
+  for(const purpose of ['x-account-analyze','x-account-synthesize','x-account-write','x-account-verify-synthesis'])assert.ok(purposes.includes(purpose));
   assert.ok(f.store.research.receipts(f.run.id).every(r=>r.state!=='inflight'));
   const count=calls.length;await runXAccountResearch(options);assert.equal(calls.length,count,'a saved billing boundary remains blocked during recovery');
  }finally{releaseParent();f.close();}

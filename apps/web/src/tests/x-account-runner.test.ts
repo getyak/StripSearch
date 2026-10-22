@@ -81,7 +81,7 @@ test('Runner publishes independently verified Chinese findings for the selected 
   const run=await terminal(f,runner);
   assert.equal(run.state,'completed');assert.equal(run.stopReason,'x_account_research_complete');assert.equal(run.errorCode,null);
   assert.deepEqual(p.calls.map(r=>r.type),['profile','timeline','replies']);
-  assert.deepEqual(m.purposes,['x-account-analyze','x-account-synthesize','x-account-synthesize','x-account-synthesize','x-account-verify-synthesis']);
+  assert.deepEqual(m.purposes,['x-account-analyze','x-account-synthesize','x-account-synthesize','x-account-write','x-account-verify-synthesis']);
   const view=f.store.buildCanonicalView(run);
   assert.equal(view.personObject,undefined,'an independent account is never promoted into a person object');
   assert.equal(view.accountObject!.account.nativeId,'42');assert.equal(view.accountObject!.claims.length,1);
@@ -338,7 +338,7 @@ test('X verification and synthesis use reasoning while old off receipts remain s
   const oldKey=legacyModelKey(input);p.f.store.research.reserve(p.f.run.id,oldKey,'model',{purpose},{inputTokens:0,outputTokens:0},UNLIMITED);p.f.store.research.settle(p.f.run.id,oldKey,{legacyOff:true},{inputTokens:0,outputTokens:0,estimatedUsd:0,unknownCost:false});
   assert.deepEqual(await p.model()(input,new AbortController().signal),{fresh:true});assert.equal(p.calls(),1,'old off verification cannot satisfy a high-reasoning request');
   assert.deepEqual(p.requests[0]!.thinking,{type:'enabled'});assert.deepEqual(p.requests[0]!.output_config,{effort:'high'});assert.equal(p.requests[0]!.max_tokens,16384);
-  assert.equal(p.f.store.research.receipts(p.f.run.id).length,2);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,oldKey)!.result,{legacyOff:true});
+  assert.equal(p.f.store.research.receipts(p.f.run.id).length,2);assert.ok(p.f.store.research.receipt(p.f.run.id,recoveryFailedKey(input)),'historical high plan and verification keys stay exact');assert.deepEqual(p.f.store.research.receipt(p.f.run.id,oldKey)!.result,{legacyOff:true});
  }
 });
 
@@ -434,4 +434,22 @@ test('an explicit recovery plan cannot force a completed original or alter a dif
 test('one explicit plan recovers exactly its three synthesis actions once each',async t=>{
  const p=productionPort(t,()=>modelStream({findings:[]}));const inputs=[RECOVERY_INPUT,{...RECOVERY_INPUT,purpose:'x-account-synthesize'},{...RECOVERY_INPUT,purpose:'x-account-synthesize',prompt:'A second independent synthetic topic'}];const entries=inputs.map(input=>authorizeModelRecovery(p,input).plan.entries[0]!);p.cp.xAccountResearch!.modelRecovery!.entries=entries;const originals=entries.map(entry=>p.f.store.research.receipt(p.f.run.id,entry.failedKey));
  for(const input of inputs)await p.model()(input,new AbortController().signal);assert.equal(p.calls(),3);for(const input of inputs)await p.model()(input,new AbortController().signal);assert.equal(p.calls(),3);assert.deepEqual(entries.map(entry=>p.f.store.research.receipt(p.f.run.id,entry.failedKey)),originals);
+});
+
+test('bounded structured writer disables thinking, forces one decision and keeps the same model',async t=>{
+ const p=productionPort(t,()=>modelStream({findings:[]}));const input={...PORT_INPUT,purpose:'x-account-write',maxTokens:6500};
+ assert.deepEqual(await p.model()(input,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);const body=p.requests[0]!;
+ assert.equal(body.model,'deepseek-flash');assert.deepEqual(body.thinking,{type:'disabled'});assert.deepEqual(body.tool_choice,{type:'tool',name:'submit_decision'});assert.equal(body.max_tokens,6500);assert.equal(body.output_config,undefined);
+ const receipt=p.f.store.research.receipts(p.f.run.id)[0]!;const route={generationMode:'bounded-structured/v1',toolChoice:'submit_decision',outputCap:6500,timeoutMs:150000,decisionTimeoutMs:180000};assert.equal(receipt.key,'x-account:model:v1:'+createHash('sha256').update(JSON.stringify({input,model:'deepseek-flash',...route})).digest('hex'));for(const [key,value]of Object.entries(route))assert.equal((receipt.request as Record<string,unknown>)[key],value);
+ assert.deepEqual(await p.model()(input,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);
+ const verification={...PORT_INPUT,purpose:'x-account-verify-synthesis'};await p.model()(verification,new AbortController().signal);assert.deepEqual(p.requests[1]!.thinking,{type:'enabled'});assert.deepEqual(p.requests[1]!.tool_choice,{type:'auto'});assert.deepEqual(p.requests[1]!.output_config,{effort:'high'});
+ assert.ok(p.f.store.research.receipt(p.f.run.id,recoveryFailedKey(verification)),'existing high verification identity is unchanged');
+});
+test('bounded writer respects caller output and shared budget instead of raising either ceiling',async t=>{
+ for(const [maxTokens,budget,expected]of [[6500,40,40],[1000,0,1000],[9000,0,6500]]as const){const p=productionPort(t,()=>modelStream({findings:[]}),{...UNLIMITED,outputTokens:budget});await p.model()({...PORT_INPUT,purpose:'x-account-write',maxTokens},new AbortController().signal);assert.equal(p.requests[0]!.max_tokens,expected);}
+});
+test('new writer leaves the old synthesis failure and its failed recovery child untouched',async t=>{
+ const p=productionPort(t,()=>modelStream({findings:[]}));const prior={...RECOVERY_INPUT,purpose:'x-account-synthesize'};const {key,plan}=authorizeModelRecovery(p,prior);const childKey='x-account:model-recovery:v1:'+createHash('sha256').update(JSON.stringify({recoveryPlanId:plan.id,retryOf:key,settledAt:plan.entries[0]!.settledAt})).digest('hex');p.f.store.research.reserve(p.f.run.id,childKey,'model',{retryOf:key,recoveryPlanId:plan.id},{inputTokens:0,outputTokens:0},UNLIMITED);p.f.store.research.settle(p.f.run.id,childKey,null,{estimatedUsd:null,unknownCost:true},'failed');const old=[key,childKey].map(k=>p.f.store.research.receipt(p.f.run.id,k));
+ const input={...prior,purpose:'x-account-write',maxTokens:6500};await p.model()(input,new AbortController().signal);assert.equal(p.calls(),1);assert.deepEqual([key,childKey].map(k=>p.f.store.research.receipt(p.f.run.id,k)),old);const written=p.f.store.research.receipts(p.f.run.id).find(r=>r.key!==key&&r.key!==childKey)!;assert.equal((written.request as {generationMode:string}).generationMode,'bounded-structured/v1');assert.equal((written.request as {recoveryPlanId?:string}).recoveryPlanId,undefined);
+ await assert.rejects(p.model()(prior,new AbortController().signal),/model_request_failed/);assert.equal(p.calls(),1,'failed old recovery is never resubmitted');
 });

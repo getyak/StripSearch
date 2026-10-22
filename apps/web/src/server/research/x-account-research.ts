@@ -252,10 +252,12 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
  if(!options.transport||!options.apiKey)throw new ResearchStop('model_unavailable');
  const limits=cp.limits??options.limits??unlimited;
  return async(input,signal)=>{
+  const boundedWriter=input.purpose==='x-account-write';
   const highReasoning=input.purpose.startsWith('x-account-verify-')||input.purpose==='x-account-synthesize';
-  const outputCap=highReasoning?16384:Math.min(input.maxTokens,16384);
-  const upstreamTimeoutMs=highReasoning?210000:45000;
-  const decisionTimeoutMs=highReasoning?240000:120000;
+  const outputCap=highReasoning?16384:Math.min(input.maxTokens,boundedWriter?6500:16384);
+  const upstreamTimeoutMs=highReasoning?210000:boundedWriter?150000:45000;
+  const decisionTimeoutMs=highReasoning?240000:boundedWriter?180000:120000;
+  const route=highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:boundedWriter?{generationMode:'bounded-structured/v1',toolChoice:'submit_decision',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{};
   let feedback:DshProtocolCode|null=null;
   for(let attempt=0;attempt<=2;attempt++){
    signal.throwIfAborted();active();
@@ -265,7 +267,7 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
    const attemptInput={...input,prompt};
    // Preserve generation's historical key. Thinking is a substantively new
    // verification plan and must never reuse an old non-thinking verdict.
-   const originalKey='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...(highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})});
+   const originalKey='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...route});
    const recovery=modelRecovery(options,cp,originalKey,input.purpose),key=recovery?.key??originalKey;
    const existing=options.store.research.receipt(options.run.id,key);
    const budget=options.store.research.budget(options.run.id,limits);
@@ -281,7 +283,7 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
     return{inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedUsd,unknownCost:dispatched&&estimatedUsd===null};
    };
    try{
-    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens,...(highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{}),...(recovery?{retryOf:recovery.retryOf,recoveryPlanId:recovery.recoveryPlanId}:{})},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
+    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens,...route,...(recovery?{retryOf:recovery.retryOf,recoveryPlanId:recovery.recoveryPlanId}:{})},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
      replayFailure:receipt=>{
       observed=readDshFailure(receipt.result)??emptyDshFailure();
       return !recovery&&repairableDshFailure(observed)?new DshProtocolError(observed.code as DshProtocolCode):new ResearchStop('model_request_failed');
@@ -338,7 +340,7 @@ export async function runXAccountResearch(options:XAccountResearchOptions):Promi
   const {state,active,save}=collected;collected.assertModelReady();
   const invoke=options.model??productionModel(options,cp,active);
   const model:XAccountModel=async(input,signal)=>{
-   active();const phases:Record<string,[string,string]>={'x-account-analyze':['x_analysis','分批分析账号原文'],'x-account-verify-batch':['x_verify','逐条核验本批分析'],'x-account-synthesize':['x_synthesis','整理中文专题报告'],'x-account-verify-synthesis':['x_verify_synthesis','核验专题报告与引用']};
+   active();const phases:Record<string,[string,string]>={'x-account-analyze':['x_analysis','分批分析账号原文'],'x-account-verify-batch':['x_verify','逐条核验本批分析'],'x-account-synthesize':['x_synthesis','整理中文专题报告'],'x-account-write':['x_synthesis','撰写中文专题正文'],'x-account-verify-synthesis':['x_verify_synthesis','核验专题报告与引用']};
    const [key,label]=phases[input.purpose]??['x_analysis','分析账号原文'];cp!.phase=key;save();options.store.addEvent(options.run.id,'stage',{index:cp!.steps,total:0,key,label,status:'active'});return invoke(input,signal);
   };
   await analyzeXAccount({subject:state.profile!,question:options.run.question,pages:cp.pages,posts:state.posts,state,model,signal:options.signal,save,active});

@@ -9,6 +9,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const MAX_BATCH=30000;
 const MAX_REPORT_MERGE_ROUNDS=12;
+const REPORT_REASONING_RULES='通用反例约束：双方都要求人批准时，不能写成人类审批原则发生变化；少而短的 skills 与按需调用可以兼容，不能据此硬造分歧；two sections 表示两个章节或部分，不等于两份文档。先赞赏再询问 benchmark 方法，不足以推出否定排名，必须保留赞赏这一反证。这些仅为核对规则，不是本账号事实；具体判断仍须逐项引用真实材料。';
 interface Material {sourceKey:string;url:string;authorId:string;authorHandle:string;role:XAccountPost['role'];kind:XAccountPost['kind'];publishedAt:string|null;parentId:string|null;quotedId:string|null;rootIds:string[];offset:number;text:string;truncated:boolean}
 const findingSchema={type:'object',additionalProperties:false,required:['findings'],properties:{findings:{type:'array',items:{type:'object',additionalProperties:false,required:['section','statement','kind','evidence'],properties:{section:{type:'string',enum:SECTIONS},statement:{type:'string'},kind:{type:'string',enum:['attributed_statement','page_statement','inference']},evidence:{type:'array',minItems:1,maxItems:8,items:{type:'object',additionalProperties:false,required:['sourceKey','quote'],properties:{sourceKey:{type:'string'},quote:{type:'string'},quoteOffset:{type:'integer',minimum:0}}}}}}}}};
 const verifySchema={type:'object',additionalProperties:false,required:['verdicts'],properties:{verdicts:{type:'array',items:{type:'object',additionalProperties:false,required:['id','supported','reason'],properties:{id:{type:'string'},supported:{type:'boolean'},reason:{type:'string'}}}}}};
@@ -180,7 +181,7 @@ async function verify(findings:XAccountFinding[],input:XAccountAnalysisInput,sta
   let verdicts:VerificationVerdict[]|null=null;let partitionFeedback:PartitionFeedback|null=null;
   // Only known returned protocol defects are repairable. Transport errors/unknown inflight still escape.
   for(let protocolAttempt=0;protocolAttempt<=2;protocolAttempt++){
-   const value=await model(input,`x-account-verify-${stage}`,`${RULES}\n核验规则版本：x-account-verification/report-v2。你是独立核验者。逐条核对陈述的每一部分是否被所引原文直接支持，检查范围、时间、作者、转帖、第三方关系、自述与推断、商业合作限定、反例。对每项读者问题或他人观点，逐项确认谁说的、问了什么对象与条件、是否改变了比较范围；本人回答不能替代提问者原文，更不能把本人的评价写成网友评价。必须核对赞助、广告、自述限定、行为方向与计划/实现状态、行业术语原义及语气不确定；发出不能改成收讫，意向不能改成实绩，说明一个原因不能改成排除其它原因。findingChecks 按 findingId 对应本条陈述。relationships.available反映全语料中的实际原生父帖/引用可用状态，不能因为当前所引窗口没带上就声称原帖缺失。中文时间范围起止必须各由该段实际引用的UTC日期或原文明示日期支持，不能用未引材料补足起点。relationshipContext 是其所引帖子实际父帖或引用原文的辅助窗口，仅用于检查关系、限制或反证；citedPosts 明示每个所引来源的实际作者、角色、原始日期及解析后的 UTC 日期；elapsedBetweenPosts 是这些帖子的精确发帖间隔（小时/天），只能验算相对时间，不能据此证明帖子所述动作实际发生。同处一个材料批次或主题组不证明同批发布，发布时间仍逐项看UTC。约48小时不能写成约1天，日期无效时不得补算。本人说“已发送”仍只是本人自述，不等于动作已获独立证实。逐字核对每个命题的说话者、限定强度与比较对象：“最容易理解”不能升级为“最佳形态”，第三方转述不能写成本人观点。判断矛盾或转向时，两边必须针对同一对象、同一条件的相互排斥命题；“工具加快工作且可保留品味”和“质疑别人是否使用工具”不是相反命题，不得硬造冲突；未列在该 finding.evidence 中的内容不能成为肯定判决的支持，缺少正式引用必须拒绝。不要因为中文流畅或先前已核验而放行；泛泛总结、额外结论与语义不一致一律拒绝。必须对 expectedIds 中每个 id 恰好返回一次 verdict，逐字复制 id，不能缩写、改写或新增；supported 为布尔值，并说明理由。若 partitionFeedback 非空，只说明先前响应的格式问题；仍须对本次完整 findings 和相同原文重新独立核验。不得沿用不完整判决、修改陈述或为了修复格式而放宽判断。`,{subject:input.subject,findings:selected,materials,findingChecks,expectedIds,protocolAttempt,partitionFeedback},chunkSchema);
+   const value=await model(input,`x-account-verify-${stage}`,`${RULES}\n核验规则版本：x-account-verification/report-v3。你是独立核验者。逐条核对陈述的每一部分是否被所引原文直接支持，检查范围、时间、作者、转帖、第三方关系、自述与推断、商业合作限定、反例。对每项读者问题或他人观点，逐项确认谁说的、问了什么对象与条件、是否改变了比较范围；本人回答不能替代提问者原文，更不能把本人的评价写成网友评价。必须核对赞助、广告、自述限定、行为方向与计划/实现状态、行业术语原义及语气不确定；发出不能改成收讫，意向不能改成实绩，说明一个原因不能改成排除其它原因。findingChecks 按 findingId 对应本条陈述。relationships.available反映全语料中的实际原生父帖/引用可用状态，不能因为当前所引窗口没带上就声称原帖缺失。中文时间范围起止必须各由该段实际引用的UTC日期或原文明示日期支持，不能用未引材料补足起点。relationshipContext 是其所引帖子实际父帖或引用原文的辅助窗口，仅用于检查关系、限制或反证；citedPosts 明示每个所引来源的实际作者、角色、原始日期及解析后的 UTC 日期；elapsedBetweenPosts 是这些帖子的精确发帖间隔（小时/天），只能验算相对时间，不能据此证明帖子所述动作实际发生。同处一个材料批次或主题组不证明同批发布，发布时间仍逐项看UTC。约48小时不能写成约1天，日期无效时不得补算。本人说“已发送”仍只是本人自述，不等于动作已获独立证实。逐字核对每个命题的说话者、限定强度与比较对象：“最容易理解”不能升级为“最佳形态”，第三方转述不能写成本人观点。判断矛盾或转向时，两边必须针对同一对象、同一条件的相互排斥命题；“工具加快工作且可保留品味”和“质疑别人是否使用工具”不是相反命题，不得硬造冲突；未列在该 finding.evidence 中的内容不能成为肯定判决的支持，缺少正式引用必须拒绝。不要因为中文流畅或先前已核验而放行；泛泛总结、额外结论与语义不一致一律拒绝。必须对 expectedIds 中每个 id 恰好返回一次 verdict，逐字复制 id，不能缩写、改写或新增；supported 为布尔值，并说明理由。若 partitionFeedback 非空，只说明先前响应的格式问题；仍须对本次完整 findings 和相同原文重新独立核验。不得沿用不完整判决、修改陈述或为了修复格式而放宽判断。${REPORT_REASONING_RULES}`,{subject:input.subject,findings:selected,materials,findingChecks,expectedIds,protocolAttempt,partitionFeedback},chunkSchema);
    const checked=inspectPartition(value,expectedIds);verdicts=checked.verdicts;if(verdicts)break;partitionFeedback=checked.feedback;
   }
   if(!verdicts)throw new XVerificationPartitionExhaustedError();
@@ -312,7 +313,7 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  const pagesByKey=new Map(input.pages.map(p=>[p.sourceKey,p]));
  const batchFindings=input.state.analysis.findings.filter(f=>f.id.startsWith('batch:')&&originalEvidence(f,pagesByKey,postByKey,input.subject)).sort((a,b)=>a.id.localeCompare(b.id));
  const reportScope=hash(JSON.stringify([signature,batchFindings.map(({verified,...f})=>f)]));
- const completePrefix=`report:v2:complete:${reportScope}:`;
+ const completePrefix=`report:v3:complete:${reportScope}:`;
  const priorPlan=input.state.analysis.completedBatches.filter(k=>k.startsWith(`report-plan:v1:ready:${reportScope}:`)).at(-1)?.split(':').at(-1);
  if(priorPlan&&jobs.every(job=>input.state.analysis.completedBatches.includes(`batch:${hash(JSON.stringify(job))}`))&&input.state.analysis.completedBatches.includes(completePrefix+priorPlan)){input.state.analysis.synthesisDone=true;return;}
  let plan:ReportGroup[];
@@ -323,17 +324,17 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  const nativePosts=new Map(input.posts.map(p=>[p.id,p]));
  const bundle=(selected:XAccountFinding[])=>({materials:originalWindows(selected,pagesByKey,postByKey),...nativeContext(selected,pagesByKey,postByKey,nativePosts),publicationChecks:selected.map(f=>({findingId:f.id,...findingTiming(f,postByKey)}))});
  const reportJobs=plan.map((topic,topicIndex)=>({topic,topicIndex}));
- const reportKey=(job:typeof reportJobs[number])=>`report:v2:topic:${hash(JSON.stringify([reportScope,planHash,job]))}`;
- const skippedKey=(key:string)=>key.replace('report:v2:topic:','report:v2:skipped:');
+ const reportKey=(job:typeof reportJobs[number])=>`report:v3:topic:${hash(JSON.stringify([reportScope,planHash,job]))}`;
+ const skippedKey=(key:string)=>key.replace('report:v3:topic:','report:v3:skipped:');
  await parallelJobs(reportJobs,async job=>{
-  guard(input);const key=reportKey(job),rejectedKey=key.replace('report:v2:topic:','report:v2:rejected:');if(input.state.analysis.completedBatches.includes(key)||input.state.analysis.completedBatches.includes(skippedKey(key))||input.state.analysis.completedBatches.includes(rejectedKey))return;
+  guard(input);const key=reportKey(job),rejectedKey=key.replace('report:v3:topic:','report:v3:rejected:');if(input.state.analysis.completedBatches.includes(key)||input.state.analysis.completedBatches.includes(skippedKey(key))||input.state.analysis.completedBatches.includes(rejectedKey))return;
   try{
    const selected=await selectTopicEvidence(input,job.topic,job.topic.findingIds.map(id=>byId.get(id)!),reportScope,planHash,job.topicIndex,bundle);guard(input);
    if(!selected.length){input.state.gaps=input.state.gaps.filter(g=>!(g.target===key&&['analysis_batch_protocol_unverified','analysis_report_evidence_budget','analysis_report_evidence_selection'].includes(g.code)));input.state.analysis.completedBatches.push(skippedKey(key));input.save();return;}
-   const content=bundle(selected),materials=[...content.materials,...content.relationshipContext],prefix=`report:v2:${planHash}:${String(job.topicIndex).padStart(6,'0')}`;
+   const content=bundle(selected),materials=[...content.materials,...content.relationshipContext],prefix=`report:v3:${planHash}:${String(job.topicIndex).padStart(6,'0')}`;
    let final:XAccountFinding[]=[];let rejections:RejectedFinding[]=[];
    for(let attempt=0;attempt<=2&&!final.length;attempt++){
-    const raw=await model(input,'x-account-synthesize',`${RULES}\n完整主题成稿 report/v2。一次写出本主题的连贯论证，不逐索引罗列，不跨主题重复同一偏好。outline只提供主线位置；topic.section是本次唯一允许的分类，所有finding.section必须严格相同。仅用selected原文与实际父帖/引用辅助原文形成少量有论证关系的中文段落，每段作为带精确证据的finding，不写自由body。普通问候和无信息玩笑不写。findings是未核验索引，旧verified标签无权威。relationships.available来自全语料，available=true就不能声称缺少对应父帖；未出现在当前引文窗口不等于资料不存在。辅助原文需要支持具体说法时应正式引用其sourceKey及逐字原文。自述不能升级为独立证实；时间范围两端必须由该段引用的真实UTC日期或原文明示日期支持，不能借未引材料凑跨度；材料同组不是同批发布。最终每段会独立核验。按rejections仅依据真正原文修正。`,{reportStage:'write',version:2,scope:reportScope,planHash,outline:plan.map(({section,title})=>({section,title})),topic:{section:job.topic.section,title:job.topic.title},findings:selected,...content,attempt,rejections},findingSchema);
+    const raw=await model(input,'x-account-write',`${RULES}\n完整主题成稿 report/v3。一次写出本主题的连贯论证，不逐索引罗列，不跨主题重复同一偏好。outline只提供主线位置；topic.section是本次唯一允许的分类，所有finding.section必须严格相同。仅用selected原文与实际父帖/引用辅助原文形成少量有论证关系的中文段落，每段作为带精确证据的finding，不写自由body。普通问候和无信息玩笑不写。findings是未核验索引，旧verified标签无权威。relationships.available来自全语料，available=true就不能声称缺少对应父帖；未出现在当前引文窗口不等于资料不存在。辅助原文需要支持具体说法时应正式引用其sourceKey及逐字原文。自述不能升级为独立证实；时间范围两端必须由该段引用的真实UTC日期或原文明示日期支持，不能借未引材料凑跨度；材料同组不是同批发布。最终每段会独立核验。按rejections仅依据真正原文修正。${REPORT_REASONING_RULES}`,{reportStage:'write',version:3,scope:reportScope,planHash,outline:plan.map(({section,title})=>({section,title})),topic:{section:job.topic.section,title:job.topic.title},findings:selected,...content,attempt,rejections},findingSchema);
     const proposed=candidates(raw,materials,input,prefix).filter(f=>f.section===job.topic.section&&reportEvidenceValid(f,pagesByKey,postByKey,nativePosts)).map((f,i)=>({...f,id:`${prefix}:${String(i).padStart(4,'0')}:${f.id.split(':').at(-1)}`}));rejections=[];
     if(!proposed.length)rejections.push({statement:'',reason:'正文未通过主题分类、实际父帖可用状态、所引日期边界或原文证据检查；不能补造结论。'});
     final=await verify(proposed,input,'synthesis',rejections);guard(input);
@@ -347,7 +348,7 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  });
  guard(input);
  const allWritten=reportJobs.length>0&&reportJobs.every(job=>input.state.analysis.completedBatches.includes(reportKey(job))||input.state.analysis.completedBatches.includes(skippedKey(reportKey(job))));
- const hasReport=input.state.analysis.findings.some(f=>f.verified&&f.id.startsWith(`report:v2:${planHash}:`));
+ const hasReport=input.state.analysis.findings.some(f=>f.verified&&f.id.startsWith(`report:v3:${planHash}:`));
  const reportReady=allRead&&allWritten&&hasReport;
  if(reportReady)input.state.gaps=input.state.gaps.filter(g=>!((g.code==='analysis_incomplete'&&g.target==='research')||['analysis_synthesis_unverified','analysis_report_unverified','analysis_batch_protocol_unverified','analysis_report_plan_limit','analysis_report_evidence_budget','analysis_report_evidence_selection'].includes(g.code)));
  input.state.analysis.synthesisDone=reportReady&&!input.state.gaps.some(g=>g.code.startsWith('analysis_'));
@@ -358,11 +359,11 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
 export function projectXAccountReport(input:XAccountReportInput):XAccountProjection {
  const {state}=input;const pages=new Map(input.pages.map(p=>[p.sourceKey,p]));const posts=new Map(state.posts.map(p=>[p.sourceKey,p]));const sources=new Map(input.sources.map(s=>[s.key,s]));
  const nativePosts=new Map(state.posts.map(p=>[p.id,p]));
- const verified=state.analysis.findings.filter(f=>f.verified);const valid=verified.filter(f=>!!state.profile&&originalEvidence(f,pages,posts,state.profile)&&(!f.id.startsWith('report:v2:')||reportEvidenceValid(f,pages,posts,nativePosts))&&f.evidence.every(e=>{const source=sources.get(e.sourceKey);return input.activeSourceKeys.has(e.sourceKey)&&source?.url===pages.get(e.sourceKey)?.url&&source?.fetchStatus==='ok'&&typeof source.excerpt==='string'&&hash(source.excerpt)===e.sourceContentHash&&source.excerpt.slice(e.quoteOffset,e.quoteOffset+e.quote.length)===e.quote;}));
+ const verified=state.analysis.findings.filter(f=>f.verified);const valid=verified.filter(f=>!!state.profile&&originalEvidence(f,pages,posts,state.profile)&&(!/^report:v[23]:/.test(f.id)||reportEvidenceValid(f,pages,posts,nativePosts))&&f.evidence.every(e=>{const source=sources.get(e.sourceKey);return input.activeSourceKeys.has(e.sourceKey)&&source?.url===pages.get(e.sourceKey)?.url&&source?.fetchStatus==='ok'&&typeof source.excerpt==='string'&&hash(source.excerpt)===e.sourceContentHash&&source.excerpt.slice(e.quoteOffset,e.quoteOffset+e.quote.length)===e.quote;}));
  const ready=state.analysis.completedBatches.filter(k=>k.startsWith('report-plan:v1:ready:')).at(-1)?.split(':');
- const finalPlan=state.analysis.synthesisDone&&ready&&state.analysis.completedBatches.includes(`report:v2:complete:${ready[3]}:${ready[4]}`)?ready[4]:undefined;
+ const finalPlan=state.analysis.synthesisDone&&ready&&state.analysis.completedBatches.includes(`report:v3:complete:${ready[3]}:${ready[4]}`)?ready[4]:undefined;
  const legacy=valid.filter(f=>!f.id.startsWith('report:'));const synthesisSections=new Set(legacy.filter(f=>f.id.startsWith('synthesis:')).map(f=>f.section));
- const findings=finalPlan?valid.filter(f=>f.id.startsWith(`report:v2:${finalPlan}:`)).sort((a,b)=>a.id.localeCompare(b.id)):legacy.filter(f=>f.id.startsWith('synthesis:')||!synthesisSections.has(f.section));
+ const findings=finalPlan?valid.filter(f=>f.id.startsWith(`report:v3:${finalPlan}:`)).sort((a,b)=>a.id.localeCompare(b.id)):legacy.filter(f=>f.id.startsWith('synthesis:')||!synthesisSections.has(f.section));
  const unique=findings.filter((f,i)=>findings.findIndex(other=>other.statement===f.statement&&JSON.stringify(other.evidence)===JSON.stringify(f.evidence))===i);
  const sourceKeys=(f:XAccountFinding)=>[...new Set(f.evidence.map(e=>e.sourceKey))];
  const target=state.posts.filter(p=>p.role==='target');const dates=target.map(p=>p.publishedAt).filter((d):d is string=>!!d&&Number.isFinite(Date.parse(d))).sort((a,b)=>Date.parse(a)-Date.parse(b));
