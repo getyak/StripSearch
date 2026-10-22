@@ -427,16 +427,75 @@ test('high auto prose cannot publish a decision and exhausts only two separately
 
 const RECOVERY_INPUT={...PORT_INPUT,purpose:'x-account-verify-synthesis'};
 const WRITER_RECOVERY_INPUT={...PORT_INPUT,purpose:'x-account-write',maxTokens:6500};
-function recoveryFailedKey(input=RECOVERY_INPUT):string{
- const route=input.purpose==='x-account-write'?{generationMode:'bounded-structured/v1',toolChoice:'submit_decision',outputCap:6500,timeoutMs:150000,decisionTimeoutMs:180000}:{reasoningEffort:'high',toolChoice:'auto',outputCap:16384,timeoutMs:210000,decisionTimeoutMs:240000};
- return 'x-account:model:v1:'+createHash('sha256').update(JSON.stringify({input,model:'deepseek-flash',...route})).digest('hex');
-}
+function recoveryRoute(input=RECOVERY_INPUT){return input.purpose==='x-account-write'?{generationMode:'bounded-structured/v1',toolChoice:'submit_decision',outputCap:6500,timeoutMs:150000,decisionTimeoutMs:180000}:{reasoningEffort:'high',toolChoice:'auto',outputCap:16384,timeoutMs:210000,decisionTimeoutMs:240000};}
+function recoveryFailedKey(input=RECOVERY_INPUT):string{return 'x-account:model:v1:'+createHash('sha256').update(JSON.stringify({input,model:'deepseek-flash',...recoveryRoute(input)})).digest('hex');}
 function authorizeModelRecovery(p:ReturnType<typeof productionPort>,input=RECOVERY_INPUT){
- const key=recoveryFailedKey(input);p.f.store.research.reserve(p.f.run.id,key,'model',{purpose:input.purpose},{inputTokens:40,outputTokens:12},UNLIMITED);p.f.store.research.settle(p.f.run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');
+ const key=recoveryFailedKey(input);p.f.store.research.reserve(p.f.run.id,key,'model',{...input,...recoveryRoute(input)},{inputTokens:40,outputTokens:12},UNLIMITED);p.f.store.research.settle(p.f.run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');
  const settledAt=(p.f.db.prepare('SELECT settled_at AS time FROM research_actions WHERE run_id=? AND action_key=?').get(p.f.run.id,key) as {time:string}).time;
  const binding=p.options.binding;p.cp.xAccountResearch={version:'x-account/v1',accountId:binding.accounts[0]!.accountId,profile:null,history:{timeline:{started:false,cursor:null,done:false,pages:0,cursors:[],pageHashes:[]},replies:{started:false,cursor:null,done:false,pages:0,cursors:[],pageHashes:[]}},posts:[],contextQueue:[],contextDone:[],gaps:[],analysis:{completedBatches:['synthetic-retained-batch','report-plan:v1:synthetic'],findings:[],synthesisDone:false},modelRecovery:{version:'x-model-recovery/v1',id:'c1274cbb-ae01-4f16-90f0-c3e68aa0bad9',runId:p.f.run.id,caseId:binding.caseId,scopeVersion:binding.scopeVersion,accountId:binding.accounts[0]!.accountId,reason:'Explicit operator scope for one failed synthetic action',localFixRevision:'a'.repeat(40),createdAt:new Date().toISOString(),entries:[{failedKey:key,settledAt}]}};
  return {key,plan:p.cp.xAccountResearch.modelRecovery!,before:p.f.store.research.receipt(p.f.run.id,key)};
 }
+async function rotatedCompletedRecovery(t:{after:(fn:()=>void)=>void},input=WRITER_RECOVERY_INPUT){
+ const p=productionPort(t,index=>{assert.equal(index,0,'historical replay must never dispatch another model request');return modelStream({findings:[]});});
+ const original=authorizeModelRecovery(p,input);await p.model()(input,new AbortController().signal);
+ const childKey='x-account:model-recovery:v1:'+createHash('sha256').update(JSON.stringify({recoveryPlanId:original.plan.id,retryOf:original.key,settledAt:original.plan.entries[0]!.settledAt})).digest('hex');
+ const next=authorizeModelRecovery(p,{...input,prompt:'A different synthetic action failed after the successful recovery.'});next.plan.id='af625d4c-d065-4d73-943d-8e944660dbb8';
+ return {p,original,childKey};
+}
+test('rotating a recovery plan replays a prior completed child with no new call or financial changes',async t=>{
+ for(const input of [WRITER_RECOVERY_INPUT,RECOVERY_INPUT]){
+  const {p,original,childKey}=await rotatedCompletedRecovery(t,input);const budget=p.f.store.research.budget(p.f.run.id,UNLIMITED);
+  p.cp.limits={...UNLIMITED,modelCalls:budget.modelCalls,outputTokens:budget.outputTokens};
+  const snapshot=()=>p.f.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY action_key').all(p.f.run.id);const before=snapshot();
+  assert.ok(!p.cp.xAccountResearch!.modelRecovery!.entries.some(entry=>entry.failedKey===original.key));
+  assert.deepEqual(p.f.store.research.completedModelRecoveryCandidates('another-run',original.key),[],'successful recovery results remain run-scoped');
+  p.f.store.research.receipts=()=>{throw Error('historical recovery must not scan the entire receipt ledger');};
+  assert.deepEqual(await p.model()(input,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1,'replay adds zero upstream calls');
+  assert.deepEqual(snapshot(),before);assert.deepEqual(p.f.store.research.budget(p.f.run.id,UNLIMITED),budget);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,original.key),original.before);assert.equal(p.f.store.research.receipt(p.f.run.id,childKey)!.state,'completed');
+ }
+});
+test('historical recovery refuses changed bindings, original settlement, child identity or request and unsettled children',async t=>{
+ for(const defect of ['case','scope','account','original-settlement','original-prompt','original-route','child-failed','child-inflight','child-kind','child-unsettled','retryOf','plan-id','invalid-plan-id','child-key','purpose','prompt','schema','route']as const){
+  const {p,original,childKey}=await rotatedCompletedRecovery(t);const row=p.f.store.research.receipt(p.f.run.id,childKey)!;const request=row.request as Record<string,unknown>;let updatedKey=childKey;
+  if(defect==='case')p.cp.firstStep!.caseId='another-case';
+  else if(defect==='scope')p.cp.firstStep!.scopeVersion++;
+  else if(defect==='account')p.cp.xAccountResearch!.accountId='another-account';
+  else if(defect==='original-settlement')p.f.db.prepare('UPDATE research_actions SET settled_at=? WHERE run_id=? AND action_key=?').run('2000-01-01T00:00:00.000Z',p.f.run.id,original.key);
+  else if(defect==='original-prompt'||defect==='original-route'){const originalRequest={...original.before!.request as Record<string,unknown>,[defect==='original-prompt'?'prompt':'toolChoice']:'changed'};p.f.db.prepare('UPDATE research_actions SET request_json=? WHERE run_id=? AND action_key=?').run(JSON.stringify(originalRequest),p.f.run.id,original.key);}
+  else if(defect==='child-failed'||defect==='child-inflight')p.f.db.prepare('UPDATE research_actions SET state=? WHERE run_id=? AND action_key=?').run(defect==='child-failed'?'failed':'inflight',p.f.run.id,childKey);
+  else if(defect==='child-kind')p.f.db.prepare("UPDATE research_actions SET kind='tool' WHERE run_id=? AND action_key=?").run(p.f.run.id,childKey);
+  else if(defect==='child-unsettled')p.f.db.prepare('UPDATE research_actions SET settled_at=NULL WHERE run_id=? AND action_key=?').run(p.f.run.id,childKey);
+  else if(defect==='retryOf')request.retryOf='x-account:model:v1:'+'c'.repeat(64);
+  else if(defect==='plan-id')request.recoveryPlanId='b5fb6fa6-1d6a-4568-b999-6f5c4053b2cb';
+  else if(defect==='invalid-plan-id'){request.recoveryPlanId='not-a-plan-uuid';updatedKey='x-account:model-recovery:v1:'+createHash('sha256').update(JSON.stringify({recoveryPlanId:request.recoveryPlanId,retryOf:original.key,settledAt:original.before!.settledAt})).digest('hex');}
+  else if(defect==='child-key')updatedKey='x-account:model-recovery:v1:'+'d'.repeat(64);
+  else if(defect==='purpose')request.purpose='x-account-synthesize';
+  else if(defect==='prompt')request.prompt='Different synthetic material.';
+  else if(defect==='schema')request.schema={type:'array'};
+  else if(defect==='route')request.toolChoice='auto';
+  p.f.db.prepare('UPDATE research_actions SET action_key=?,request_json=? WHERE run_id=? AND action_key=?').run(updatedKey,JSON.stringify(request),p.f.run.id,childKey);
+  const snapshot=()=>p.f.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY action_key').all(p.f.run.id);const before=snapshot();
+  await assert.rejects(p.model()(WRITER_RECOVERY_INPUT,new AbortController().signal),/model_request_failed|unknown_inflight/,defect);assert.equal(p.calls(),1,defect);assert.deepEqual(snapshot(),before,defect);
+ }
+});
+test('a completed child selected by the current plan also requires the exact original request',async t=>{
+ const {p,original,childKey}=await rotatedCompletedRecovery(t);p.cp.xAccountResearch!.modelRecovery=original.plan;
+ const request={...p.f.store.research.receipt(p.f.run.id,childKey)!.request as Record<string,unknown>,prompt:'Changed synthetic evidence.'};
+ p.f.db.prepare('UPDATE research_actions SET request_json=? WHERE run_id=? AND action_key=?').run(JSON.stringify(request),p.f.run.id,childKey);
+ const before=p.f.store.research.receipt(p.f.run.id,childKey);
+ await assert.rejects(p.model()(WRITER_RECOVERY_INPUT,new AbortController().signal),/model_request_failed/);assert.equal(p.calls(),1);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,childKey),before);
+});
+test('historical recovery lookup never decodes unrelated completed action payloads',async t=>{
+ const {p,original}=await rotatedCompletedRecovery(t);const unrelated='x-account:model:v1:'+'e'.repeat(64),otherRecovery='x-account:model-recovery:v1:'+'f'.repeat(64);
+ for(const key of [unrelated,otherRecovery]){p.f.store.research.reserve(p.f.run.id,key,'model',{retryOf:'different-original'},{inputTokens:0,outputTokens:0},UNLIMITED);p.f.store.research.settle(p.f.run.id,key,{unrelated:true},{estimatedUsd:0,unknownCost:false});p.f.db.prepare('UPDATE research_actions SET result_json=? WHERE run_id=? AND action_key=?').run('unrelated payload must stay unread',p.f.run.id,key);}
+ p.f.db.prepare('UPDATE research_actions SET request_json=? WHERE run_id=? AND action_key=?').run('unrelated request must stay unread',p.f.run.id,unrelated);
+ assert.deepEqual(await p.model()(WRITER_RECOVERY_INPUT,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,original.key),original.before);
+});
+test('historical completed recovery still checks live scope and cancellation before replay',async t=>{
+ for(const stop of ['scope','cancel']as const){const {p}=await rotatedCompletedRecovery(t);const controller=new AbortController();if(stop==='scope')p.options.assertScope=()=>{throw Error('scope withdrawn before replay');};else controller.abort(Error('cancelled before historical replay'));
+  await assert.rejects(p.model()(WRITER_RECOVERY_INPUT,controller.signal),stop==='scope'?/scope withdrawn/:/cancelled before historical replay/);assert.equal(p.calls(),1);
+ }
+});
 test('explicit model recovery makes exactly one child request and preserves original failure and batch identity',async t=>{
  const p=productionPort(t,()=>modelStream({findings:[]}),{...UNLIMITED,modelCalls:2,outputTokens:24});const {key,plan,before}=authorizeModelRecovery(p);const markers=[...p.cp.xAccountResearch!.analysis.completedBatches];
  assert.deepEqual(await p.model()(RECOVERY_INPUT,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);

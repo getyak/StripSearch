@@ -248,6 +248,28 @@ function modelRecovery(options:XAccountResearchOptions,cp:ResearchCheckpoint,key
  return {key:'x-account:model-recovery:v1:'+digest({recoveryPlanId:plan.id,retryOf:key,settledAt:entry.settledAt}),retryOf:key,recoveryPlanId:plan.id};
 }
 
+function matchesModelRequest(request:unknown,input:Parameters<XAccountModel>[0],route:Record<string,unknown>):boolean {
+ if(!request||typeof request!=='object'||Array.isArray(request))return false;
+ const saved=request as Record<string,unknown>,expected:Record<string,unknown>={purpose:input.purpose,prompt:input.prompt,schema:input.schema,...route};
+ return ['purpose','prompt','schema','generationMode','reasoningEffort','toolChoice','outputCap','timeoutMs','decisionTimeoutMs'].every(key=>JSON.stringify(saved[key])===JSON.stringify(expected[key]));
+}
+function completedModelRecovery(options:XAccountResearchOptions,cp:ResearchCheckpoint,key:string,input:Parameters<XAccountModel>[0],route:Record<string,unknown>){
+ const binding=options.binding,frozen=cp.firstStep,accountId=cp.xAccountResearch?.accountId;
+ if(!['x-account-synthesize','x-account-write','x-account-verify-synthesis'].includes(input.purpose)||binding.accounts.length!==1||
+  accountId!==binding.accounts[0]!.accountId||frozen?.caseId!==binding.caseId||frozen.scopeVersion!==binding.scopeVersion||
+  frozen.accounts.length!==1||frozen.accounts[0]!.accountId!==accountId)return null;
+ const original=options.store.research.receipt(options.run.id,key);
+ if(original?.kind!=='model'||original.state!=='failed'||typeof original.settledAt!=='string'||!Number.isFinite(Date.parse(original.settledAt))||!matchesModelRequest(original.request,input,route))return null;
+ for(const child of options.store.research.completedModelRecoveryCandidates(options.run.id,key)){
+  if(!child.request||typeof child.request!=='object'||Array.isArray(child.request))continue;
+  const request=child.request as Record<string,unknown>,recoveryPlanId=request.recoveryPlanId;
+  if(typeof recoveryPlanId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(recoveryPlanId)||request.retryOf!==key||
+   child.key!=='x-account:model-recovery:v1:'+digest({recoveryPlanId,retryOf:key,settledAt:original.settledAt})||!matchesModelRequest(request,input,route))continue;
+  return {key:child.key,retryOf:key,recoveryPlanId};
+ }
+ return null;
+}
+
 export function productionModel(options:XAccountResearchOptions,cp:ResearchCheckpoint,active:()=>void):XAccountModel {
  if(!options.transport||!options.apiKey)throw new ResearchStop('model_unavailable');
  const limits=cp.limits??options.limits??unlimited;
@@ -268,8 +290,10 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
    // Preserve generation's historical key. Thinking is a substantively new
    // verification plan and must never reuse an old non-thinking verdict.
    const originalKey='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...route});
-   const recovery=modelRecovery(options,cp,originalKey,input.purpose),key=recovery?.key??originalKey;
+   const historical=completedModelRecovery(options,cp,originalKey,attemptInput,route);
+   const recovery=historical??modelRecovery(options,cp,originalKey,input.purpose),key=recovery?.key??originalKey;
    const existing=options.store.research.receipt(options.run.id,key);
+   if(recovery&&existing?.state==='completed'&&!historical)throw new ResearchStop('model_request_failed');
    const budget=options.store.research.budget(options.run.id,limits);
    const remaining=remainingOf(limits.outputTokens,budget.outputTokens);
    const requested=Math.min(outputCap,remaining??outputCap);

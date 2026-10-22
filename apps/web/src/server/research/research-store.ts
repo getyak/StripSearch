@@ -138,6 +138,14 @@ export class ResearchStore {
   const row=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? AND action_key=?').get(runId,key) as ActionReceiptRow|undefined;
   return row?decodeReceipt(row):undefined;
  }
+ /** Read only completed recovery request metadata; unrelated bodies never leave SQLite. */
+ completedModelRecoveryCandidates(runId:string,retryOf:string):Array<Pick<ActionReceipt,'key'|'request'>> {
+  const rows=this.db.prepare(`SELECT action_key,request_json FROM research_actions
+   WHERE run_id=? AND action_key GLOB 'x-account:model-recovery:v1:*' AND kind='model' AND state='completed' AND settled_at IS NOT NULL
+    AND CASE WHEN json_valid(request_json) THEN json_extract(request_json,'$.retryOf') END=?
+   ORDER BY created_at,action_key`).all(runId,retryOf) as Array<Pick<ActionReceiptRow,'action_key'|'request_json'>>;
+  return rows.map(row=>({key:row.action_key,request:JSON.parse(row.request_json)}));
+ }
  budget(runId:string,limits:ResearchBudgetLimits=RESEARCH_LIMITS):ResearchBudget {
   const budget:ResearchBudget={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,estimatedUsd:0,firecrawlCredits:0,unknownCost:false,limits:{...limits}};
   const rows=this.db.prepare('SELECT kind,usage_json,reserved_input,reserved_output FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<Pick<ActionReceiptRow,'kind'|'usage_json'|'reserved_input'|'reserved_output'>>;
