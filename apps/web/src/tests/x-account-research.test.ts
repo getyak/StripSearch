@@ -119,3 +119,20 @@ test('queued cancellation gets an event-loop turn before synchronous cached-styl
  const cancel=setImmediate(()=>controller.abort(new Error('queued cancellation')));
  try{await assert.rejects(collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:controller.signal,limits:unlimited,assertScope:()=>{}}),/queued cancellation/);assert.equal(calls,0,'queued cancel must precede even the first provider dispatch');}finally{clearImmediate(cancel);f.close();}
 });
+
+test('newly read parent context remains covered by fresh revocation checks after expectations were cached',async()=>{
+ const{f,binding}=setup();
+ const provider:XAccountProvider={async execute(request){
+  if(request.type==='profile')return{...result(),account:profile};
+  if(request.type==='timeline')return result([post('101',{kind:'reply',parentId:'900'})]);
+  if(request.type==='replies')return result();
+  if(request.type==='detail'&&request.tweetId==='900')return result([post('900',{authorId:'99',authorHandle:'other',kind:'reply',parentId:'901'})]);
+  if(request.type==='detail'&&request.tweetId==='901'){
+   const parent=f.store.listSources(f.run.id).find(s=>s.url.endsWith('/900'))!;
+   f.store.setSourceExcluded(f.run.id,parent.sourceKey,true);
+   return result([post('901',{authorId:'99',authorHandle:'other'})]);
+  }
+  throw Error('unexpected request');
+ }};
+ try{await assert.rejects(collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{}}),/source_revoked/);assert.ok(!f.store.listSources(f.run.id).some(s=>s.url.endsWith('/901')));}finally{f.close();}
+});

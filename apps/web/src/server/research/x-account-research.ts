@@ -16,6 +16,7 @@ import {analyzeXAccount,projectXAccountReport} from './x-account-analysis.js';
 import {xSourceDrafts} from './x-account-projection.js';
 
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const sourceExpectations=(pages:ResearchCheckpoint['pages'])=>JSON.stringify(pages.map(({sourceKey,url,text})=>({sourceKey,url,text})));
 const unlimited:ResearchBudgetLimits={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0};
 export interface XAccountResearchOptions {
  store:Store;run:RunRecord;binding:FirstStepBinding;provider:XAccountProvider;signal:AbortSignal;
@@ -56,17 +57,16 @@ function setup(options:XAccountResearchOptions){
  const cp=checkpoint,state=cp.xAccountResearch!;
  // An explicit retry is a new run, but successful paid reads are immutable
  // evidence and need not be bought again under the exact same live scope.
- const ancestors:Array<{run:RunRecord;checkpoint:ResearchCheckpoint;receipts:Map<string,import('./research-store.js').ActionReceipt>}>=[];
+ const ancestors:Array<{run:RunRecord;checkpoint:ResearchCheckpoint;expectedPages:string;receipts:Map<string,import('./research-store.js').ActionReceipt>}>=[];
  const visited=new Set([run.id]);let parentId=run.retryOf;
  while(parentId&&!visited.has(parentId)){
   visited.add(parentId);const parent=store.getRunForOwner(parentId,run.ownerId);const parentCp=parent?store.research.checkpoint(parent.id):null;
   if(!parent||!parentCp?.xAccountResearch||parentCp.firstStep?.caseId!==options.binding.caseId||parentCp.firstStep.scopeVersion!==options.binding.scopeVersion||parentCp.xAccountResearch.accountId!==state.accountId||parentCp.firstStep.accounts.length!==1||parentCp.firstStep.accounts[0]!.profileUrl!==options.binding.accounts[0]!.profileUrl)break;
-  ancestors.push({run:parent,checkpoint:parentCp,receipts:new Map(store.research.receipts(parent.id).map(receipt=>[receipt.key,receipt]))});parentId=parent.retryOf;
+  ancestors.push({run:parent,checkpoint:parentCp,expectedPages:sourceExpectations(parentCp.pages),receipts:new Map(store.research.receipts(parent.id).map(receipt=>[receipt.key,receipt]))});parentId=parent.retryOf;
  }
  const checkParent=()=>{
   for(const ancestor of ancestors){
-   const live=new Map(store.listSources(ancestor.run.id).map(source=>[source.sourceKey,source]));
-   if(ancestor.checkpoint.pages.some(page=>{const source=live.get(page.sourceKey);return !source||source.excluded||source.excerpt!==page.text||source.url!==page.url;}))throw new ResearchStop('source_revoked');
+   if(!store.research.areSourcePagesCurrent(ancestor.run.id,ancestor.expectedPages))throw new ResearchStop('source_revoked');
   }
  };
  const assertModelReady=()=>{if(ancestors.some(a=>[...a.receipts.values()].some(r=>r.kind==='model'&&r.state==='inflight')))throw new ResearchStop('unknown_inflight');};
@@ -78,11 +78,14 @@ function setup(options:XAccountResearchOptions){
  rememberSourceKeys(cp,store.listSources(run.id).map(source=>source.sourceKey));
  if(state.accountId!==options.binding.accounts[0]!.accountId)throw new ResearchStop('scope_changed');
  cp.firstStep=options.binding;cp.limits=limits;store.research.save(run.id,cp);
+ let expectedPages='[]',corpusDirty=true;
+ const corpusChanged=()=>{corpusDirty=true;};
  const active=()=>{
   options.signal.throwIfAborted();store.research.assertActive(run.id);options.assertScope();checkParent();
   if(!store.isResearchScopeActive(run.id,run.ownerId))throw new FirstStepSelectionError('scope_changed','单账号研究范围已变更或撤回。');
-  const current=new Map(store.listSources(run.id).map(source=>[source.sourceKey,source]));
-  if(cp.pages.some(page=>{const source=current.get(page.sourceKey);return !source||source.excluded||source.excerpt!==page.text||source.url!==page.url;}))throw new ResearchStop('source_revoked');
+  // Cache only our immutable expectations; live evidence is queried on every check.
+  if(corpusDirty){expectedPages=sourceExpectations(cp.pages);corpusDirty=false;}
+  if(!store.research.areSourcePagesCurrent(run.id,expectedPages))throw new ResearchStop('source_revoked');
   if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');
  };
  const save=()=>{active();cp.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,cp);};
@@ -104,12 +107,12 @@ function setup(options:XAccountResearchOptions){
   active();if(result.requests!==1)throw new ResearchStop('tool_contract_violation');cp.steps++;
   return result;
  };
- return{cp,state,limits,handle,active,save,gap,progress,read,inheritedPage,assertModelReady};
+ return{cp,state,limits,handle,active,save,gap,progress,read,inheritedPage,assertModelReady,corpusChanged};
 }
 
 /** Exported so pagination/recovery and cancellation can be tested without a model. */
 export async function collectXAccount(options:XAccountResearchOptions){
- const s=setup(options);const{cp,state,handle,active,save,gap,progress,read,inheritedPage}=s;const{store,run}=options;
+ const s=setup(options);const{cp,state,handle,active,save,gap,progress,read,inheritedPage,corpusChanged}=s;const{store,run}=options;
  const queue=(type:'detail'|'comments',tweetId:string,rootId:string,relation:typeof state.contextQueue[number]['relation'])=>{
   if(!/^\d+$/.test(tweetId))return;
   const key=`${type}:${tweetId}:${rootId}:${relation}`;
@@ -136,6 +139,7 @@ export async function collectXAccount(options:XAccountResearchOptions){
   const inheritedFrom=inheritedPage(fromRunId,post.url);
   const page={sourceKey,...(inheritedFrom?{inheritedFrom}:{}),url:post.url,title:actualRole==='target'?`@${state.profile!.handle} 的${post.kind==='repost'?'转发记录':'公开帖子'}`:`@${post.authorHandle||'未知作者'} 的上下文原文`,text:post.text,kind:actualRole==='target'?'work' as const:'third_party' as const,publishedAt:post.publishedAt,author:post.authorHandle||null,retrievedAt:retrievedAt??new Date().toISOString(),retrieval:'read' as const,account:{platform:'x' as const,handle:post.authorHandle,id:post.authorId,profileUrl:`https://x.com/${post.authorHandle}`},links:[],limitations:[...(post.quotedUnavailable?['被引用原文不可访问；未补造引用对象、作者或内容。']:[]),...(post.truncated?['供应商列表返回节选，需以单帖详情补读正文。']:[]),...(actualRole!=='target'?['第三方上下文仅保留实际作者，不作为目标账号本人观点或独立事实核实。']:[]),...(post.kind==='repost'?['转发记录不表示原文由目标账号创作，也不自动表示赞同。']:[])],textTruncated:post.truncated,...(dependencies.length?{discoveredFrom:dependencies}:{})};
   const old=cp.pages.find(p=>p.sourceKey===sourceKey);if(old)cp.pages[cp.pages.indexOf(old)]=page;else cp.pages.push(page);
+  corpusChanged();
   store.addSource(run.id,sourceDraft(cp,state,sourceKey),cp.pages.indexOf(page));store.addEvent(run.id,'source',store.getSource(run.id,sourceKey));
   if(post.quotedUnavailable)gap('quoted_context_unavailable',post.id,'被引用原文不可访问；外层账号正文保留，引用对象与内容不能补造。');
   if(actualRole==='target'){
@@ -156,6 +160,7 @@ export async function collectXAccount(options:XAccountResearchOptions){
   const sourceKey=allocateSourceKey(cp);
   const inheritedFrom=inheritedPage(response.inheritedFromRunId,response.account.url);
   cp.pages.push({sourceKey,...(inheritedFrom?{inheritedFrom}:{}),url:response.account.url,title:`@${handle} 的公开账号资料`,text:response.account.description,kind:'profile',publishedAt:null,author:handle,account:{platform:'x',handle,id:response.account.nativeId,profileUrl:response.account.url},links:[],limitations:['账号资料为自述，不等于独立身份核验。'],retrieval:'profile',retrievedAt:response.retrievedAt??new Date().toISOString()});
+  corpusChanged();
   store.addSource(run.id,sourceDraft(cp,state,sourceKey),0);save();
  }
  for(const feed of ['timeline','replies'] as const){

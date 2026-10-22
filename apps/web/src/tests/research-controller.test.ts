@@ -719,3 +719,30 @@ test('budget reads financial columns only and retains settled and reserved accou
   assert.deepEqual(store.research.budget(run.id,limits),{toolCalls:1,modelCalls:2,inputTokens:15,outputTokens:21,estimatedUsd:0.375,firecrawlCredits:2,unknownCost:true,limits});
  } finally { db.close(); }
 });
+
+test('source page checks use current rows on every call and ignore unrelated sources', () => {
+ const {db,store,run}=setup();
+ try {
+  assert.equal(typeof store.research.areSourcePagesCurrent,'function','source checks need a live SQL comparison');
+  const source={key:'S1',url:'https://synthetic.invalid/one',title:'Synthetic source',kind:'work' as const,publishedAt:null,excerpt:'Synthetic original text.',excerptLocator:null,identityLabel:'Synthetic account',identityConfirmed:false,fetchStatus:'ok' as const,limits:[]};
+  const expected=JSON.stringify([{sourceKey:'S1',url:source.url,text:source.excerpt}]);
+  const current=()=>store.research.areSourcePagesCurrent(run.id,expected);
+  assert.equal(store.research.areSourcePagesCurrent(run.id,'[]'),true);
+  assert.equal(current(),false,'missing expected source is invalid');
+  store.addSource(run.id,source,0);assert.equal(current(),true);
+  store.addSource(run.id,{...source,key:'unrelated',excerpt:null},1,true);
+  assert.equal(current(),true,'extra excluded/null sources outside the expected corpus do not matter');
+  store.setSourceExcluded(run.id,'S1',true);assert.equal(current(),false,'exclusion applies immediately');
+  store.setSourceExcluded(run.id,'S1',false);assert.equal(current(),true);
+  store.addSource(run.id,{...source,url:'https://synthetic.invalid/changed'},0);assert.equal(current(),false,'URL changes invalidate the existing expectation');
+  store.addSource(run.id,source,0);assert.equal(current(),true);
+  store.addSource(run.id,{...source,excerpt:'Changed synthetic original.'},0);assert.equal(current(),false,'text edits apply immediately');
+  store.addSource(run.id,source,0);assert.equal(current(),true);
+  store.addSource(run.id,{...source,excerpt:null},0);assert.equal(current(),false,'NULL is different from the expected text');
+  assert.equal(store.research.areSourcePagesCurrent(run.id,JSON.stringify([{sourceKey:'S1',url:source.url,text:''}])),false,'NULL is also different from an empty original');
+  store.addSource(run.id,{...source,excerpt:''},0);assert.equal(store.research.areSourcePagesCurrent(run.id,JSON.stringify([{sourceKey:'S1',url:source.url,text:''}])),true);
+  store.addSource(run.id,source,0);assert.equal(current(),true);
+  assert.equal(store.research.areSourcePagesCurrent('another-run',expected),false,'a matching key in another run cannot satisfy the check');
+  db.prepare('DELETE FROM sources WHERE run_id=? AND source_key=?').run(run.id,'S1');assert.equal(current(),false,'deletion invalidates the expectation without refreshing the caller');
+ } finally { db.close(); }
+});

@@ -114,6 +114,18 @@ export class ResearchStore {
   const row=this.db.prepare("SELECT json_extract(data_json,'$.firstStep') AS binding_json FROM research_checkpoints WHERE run_id=?").get(runId) as {binding_json:string|null}|undefined;
   return row?.binding_json?JSON.parse(row.binding_json) as FirstStepBinding:null;
  }
+ /**
+  * Internal expectedJSON is a serialized Array<{sourceKey:string;url:string;text:string}>.
+  * Compare live rows on every call without returning source bodies/metadata to JavaScript.
+  * This checks corpus correspondence only; the caller still checks run/scope authority.
+  */
+ areSourcePagesCurrent(runId:string,expectedJSON:string):boolean {
+  return !this.db.prepare(`SELECT 1 AS invalid FROM json_each(?) AS expected
+   LEFT JOIN sources AS source ON source.run_id=? AND source.source_key=json_extract(expected.value,'$.sourceKey')
+   WHERE source.id IS NULL OR source.excluded<>0
+    OR source.url IS NOT json_extract(expected.value,'$.url')
+    OR source.excerpt IS NOT json_extract(expected.value,'$.text') LIMIT 1`).get(expectedJSON,runId);
+ }
  save(runId:string,checkpoint:ResearchCheckpoint):void {
   this.assertActive(runId);
   this.db.prepare('INSERT INTO research_checkpoints(run_id,data_json,updated_at) VALUES(?,?,?) ON CONFLICT(run_id) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at').run(runId,JSON.stringify(checkpoint),new Date().toISOString());
