@@ -660,7 +660,7 @@ body[data-view="app"] .work-actions > .button:hover { background: var(--surface-
 .first-step-search::placeholder { color: var(--placeholder); }
 .first-step-row-head, .first-step-card {
   display: grid;
-  grid-template-columns: minmax(190px, 1.3fr) minmax(150px, 1.05fr) minmax(190px, 1.25fr) minmax(84px, .65fr) 76px;
+  grid-template-columns: minmax(240px, 1.3fr) minmax(140px, 1.05fr) minmax(170px, 1.25fr) minmax(84px, .65fr) 52px;
   column-gap: 20px;
   align-items: center;
 }
@@ -719,7 +719,7 @@ body[data-view="app"] .work-actions > .button:hover { background: var(--surface-
 .first-step-badge { flex: none; padding: 2px 7px; border-radius: 4px; background: var(--fs-soft); color: var(--success); font-size: 13px; line-height: 20px; }
 .first-step-badge.uncertain { color: var(--warning); }
 .first-step-reason, .first-step-boundary {
-  margin: 0; color: var(--muted); font-size: 12px; line-height: 18px;
+  margin: 0; color: var(--muted); font-size: 13px; line-height: 20px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .first-step-evidence .first-step-reason, .first-step-evidence .first-step-boundary, .first-step-evidence .first-step-page-title {
@@ -731,8 +731,8 @@ body[data-view="app"] .work-actions > .button:hover { background: var(--surface-
 .first-step-select { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; min-width: 44px; cursor: pointer; }
 .first-step-select input { width: 18px; height: 18px; min-height: 18px; flex: none; margin: 0; accent-color: var(--accent); }
 .first-step-select-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.first-step-row-menu { position: absolute; right: 8px; top: 20px; z-index: 2; }
-.first-step-row-menu > summary { display: grid; place-items: center; width: 36px; height: 44px; list-style: none; cursor: pointer; font-size: 22px; border-radius: 6px; color: var(--muted); }
+.first-step-row-menu { position: absolute; right: 4px; top: 20px; z-index: 2; }
+.first-step-row-menu > summary { display: grid; place-items: center; width: 44px; height: 44px; list-style: none; cursor: pointer; font-size: 22px; border-radius: 6px; color: var(--muted); }
 .first-step-row-menu > summary::-webkit-details-marker { display: none; }
 .first-step-row-menu > summary:hover { background: var(--surface-2); }
 .first-step-row-actions { position: absolute; right: 0; top: 44px; display: grid; min-width: 220px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
@@ -751,12 +751,12 @@ body[data-view="app"] .work-actions > .button:hover { background: var(--surface-
 .first-step-evidence summary { cursor: pointer; color: var(--accent); }
 .first-step-evidence summary::-webkit-details-marker { display: none; }
 .first-step-evidence:not([open]) > summary {
-  position: absolute; top: 20px; right: 48px; display: inline-flex; gap: 5px; align-items: center;
+  position: absolute; top: 20px; right: 52px; display: inline-flex; gap: 5px; align-items: center;
   min-height: 44px; padding: 8px; border: 0; border-radius: 6px;
   background: transparent; color: var(--accent); font-size: 14px;
 }
 .first-step-evidence[open] { margin-top: 16px; }
-.first-step-evidence[open] > summary { position: absolute; top: 20px; right: 48px; display: flex; gap: 5px; align-items: center; justify-content: flex-end; min-height: 44px; padding: 8px; font-size: 14px; }
+.first-step-evidence[open] > summary { position: absolute; top: 20px; right: 52px; display: flex; gap: 5px; align-items: center; justify-content: flex-end; min-height: 44px; padding: 8px; font-size: 14px; }
 .first-step-disclosure-close { display: none; }
 .first-step-evidence[open] .first-step-disclosure-open { display: none; }
 .first-step-evidence[open] .first-step-disclosure-close { display: inline; }
