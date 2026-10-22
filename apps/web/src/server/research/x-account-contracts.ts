@@ -21,7 +21,7 @@ export interface XAccountProvider {execute(request:XReadRequest,signal:AbortSign
 export interface XAccountPost extends XNativePost {
   sourceKey:string;role:'target'|'parent_context'|'quoted_context'|'reply_context';rootIds:string[];
 }
-export interface XHistoryProgress {started:boolean;cursor:string|null;done:boolean;pages:number;cursors:string[];pageHashes:string[];blocked?:string}
+export interface XHistoryProgress {started:boolean;cursor:string|null;done:boolean;pages:number;cursors:string[];pageHashes:string[];emptyRawPages?:number;blocked?:string}
 export type XFindingSection = 'overview'|'themes'|'changes'|'work'|'interaction'|'commercial';
 export interface XFindingEvidence {sourceKey:string;quote:string;quoteOffset:number;sourceContentHash:string}
 export interface XAccountFinding {

@@ -97,3 +97,18 @@ test('distinct context reads overlap, repeated parent reads stay single, and wit
   assert.ok(!f.store.listSources(f.run.id).some(s=>s.url.endsWith('/901')||s.url.endsWith('/902')),'neither late response can ingest after source withdrawal');await operation.catch(()=>{});
  }finally{release();f.close();}
 });
+
+test('three raw empty pages with fresh cursors stop paid pagination as unknown coverage, then continue replies',async()=>{
+ const{f,binding}=setup();const calls:XReadRequest[]=[];let cursor=0;
+ const provider:XAccountProvider={async execute(request){calls.push(request);if(request.type==='profile')return{...result(),account:profile};if(request.type==='timeline')return request.cursor===null?result([post('101')],'c1'):result([],`c${++cursor+1}`);return result([post('102')]);}};
+ try{
+  const {state}=await collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:{...unlimited,toolCalls:8},assertScope:()=>{}});
+  assert.equal(state.history.timeline.pages,4);assert.equal(state.history.timeline.done,false);assert.equal(state.history.timeline.blocked,'empty_history_pages');assert.ok(state.gaps.some(g=>g.code==='empty_history_pages'));
+  assert.equal(calls.filter(r=>r.type==='timeline').length,4);assert.equal(state.history.replies.done,true);assert.ok(state.posts.some(p=>p.id==='102'));
+ }finally{f.close();}
+});
+test('three foreign-only replies pages are filtered-empty, not raw-empty, and still reach the next target post',async()=>{
+ const{f,binding}=setup();let replies=0;
+ const provider:XAccountProvider={async execute(request){if(request.type==='profile')return{...result(),account:profile};if(request.type==='timeline')return result([post('101')]);if(request.type==='replies'){replies++;return replies<=3?result([post(String(800+replies),{authorId:'99',authorHandle:'other'})],`r${replies}`):result([post('102')]);}throw Error('unexpected context');}};
+ try{const {state}=await collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{}});assert.equal(state.history.replies.pages,4);assert.equal(state.history.replies.done,true);assert.ok(state.posts.some(p=>p.id==='102'));assert.ok(!state.gaps.some(g=>g.code==='empty_history_pages'));}finally{f.close();}
+});

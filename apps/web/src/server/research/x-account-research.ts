@@ -173,6 +173,8 @@ export async function collectXAccount(options:XAccountResearchOptions){
    if(response.cursorState==='end'){cursor.done=true;cursor.cursor=null;save();break;}
    if(response.cursorState!=='more'||!response.nextCursor){cursor.blocked='cursor_unknown';gap('cursor_unknown',feed,'供应商未给出可验证的历史结束或下一页状态。');save();break;}
    if(response.nextCursor===cursor.cursor||cursor.cursors.includes(response.nextCursor)){cursor.blocked='cursor_cycle';gap('cursor_cycle',feed,'供应商历史游标循环，已停止重复读取并保留覆盖缺口。');save();break;}
+   cursor.emptyRawPages=response.recordCount===0?(cursor.emptyRawPages??0)+1:0;
+   if(cursor.emptyRawPages>=3){cursor.blocked='empty_history_pages';gap('empty_history_pages',feed,'供应商连续 3 个原始页面没有任何记录，却仍返回新游标；已暂停此入口的无效翻页，历史边界仍未知，其它入口与已取得材料继续处理。');save();break;}
    cursor.cursors.push(response.nextCursor);cursor.cursor=response.nextCursor;save();
   }
  }
