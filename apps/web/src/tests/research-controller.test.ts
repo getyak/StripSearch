@@ -687,3 +687,35 @@ test('a later profile biography cannot clear a failed native posts-history read'
  planner:{async decide(input){if(input.mode==='verify')return {supported:[0],rejected:[]};plans++;if(plans===1)return {action:'social_posts',url:accountUrl};if(plans===2)return {action:'read',url:accountUrl};assert.ok(input.checkpoint.unknowns.some(n=>n.includes('social_posts')));return {action:'finish',claims:[{sourceKey:'S1',quote:profile.text,statement:'页面说明该账号开发编译器。',kind:'page_statement',section:'expression'}]};}}});
  assert.ok(result.limitations.some(n=>n.includes('当前未取得相应原文')&&n.includes('social_posts')));assert.equal(store.research.checkpoint(run.id)!.actionFailures!.length,1);db.close();
 });
+
+test('one receipt lookup never decodes unrelated action payloads', () => {
+ const {db,store,run}=setup();
+ try {
+  const limits={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0};
+  store.research.reserve(run.id,'wanted','tool',{type:'read'},{inputTokens:0,outputTokens:0},limits);
+  store.research.settle(run.id,'wanted',{synthetic:'retained original'},{bytes:20,estimatedUsd:0});
+  store.research.reserve(run.id,'unrelated','tool',{type:'read'},{inputTokens:0,outputTokens:0},limits);
+  store.research.settle(run.id,'unrelated',{synthetic:'unrelated original'},{bytes:30,estimatedUsd:0});
+  db.prepare('UPDATE research_actions SET result_json=? WHERE run_id=? AND action_key=?').run('not decoded by a different receipt lookup',run.id,'unrelated');
+  const receipt=store.research.receipt(run.id,'wanted');
+  assert.equal(receipt?.key,'wanted');assert.equal(receipt?.state,'completed');
+  assert.deepEqual(receipt?.request,{type:'read'});assert.deepEqual(receipt?.result,{synthetic:'retained original'});assert.deepEqual(receipt?.usage,{bytes:20,estimatedUsd:0});
+  assert.equal(store.research.receipt(run.id,'missing'),undefined);
+ } finally { db.close(); }
+});
+
+test('budget reads financial columns only and retains settled and reserved accounting semantics', () => {
+ const {db,store,run}=setup();
+ try {
+  const limits={toolCalls:4,modelCalls:4,inputTokens:100,outputTokens:100,elapsedMs:0};
+  store.research.reserve(run.id,'tool','tool',{type:'read'},{inputTokens:0,outputTokens:0},limits);
+  store.research.settle(run.id,'tool',{synthetic:'original'},{estimatedUsd:0.125,credits:2,inputTokens:3,outputTokens:4});
+  store.research.reserve(run.id,'failed','model',{purpose:'verify'},{inputTokens:7,outputTokens:11},limits);
+  store.research.settle(run.id,'failed',null,{estimatedUsd:null,unknownCost:true},'failed');
+  store.research.reserve(run.id,'pending','model',{purpose:'analyze'},{inputTokens:13,outputTokens:17},limits);
+  db.prepare('UPDATE research_actions SET result_json=?,request_json=? WHERE run_id=?').run('unread result payload','unread request payload',run.id);
+  assert.deepEqual(store.research.budget(run.id,limits),{toolCalls:1,modelCalls:2,inputTokens:23,outputTokens:32,estimatedUsd:0.125,firecrawlCredits:2,unknownCost:true,limits});
+  store.research.settle(run.id,'pending',{synthetic:'completed result'},{inputTokens:5,outputTokens:6,estimatedUsd:0.25});
+  assert.deepEqual(store.research.budget(run.id,limits),{toolCalls:1,modelCalls:2,inputTokens:15,outputTokens:21,estimatedUsd:0.375,firecrawlCredits:2,unknownCost:true,limits});
+ } finally { db.close(); }
+});

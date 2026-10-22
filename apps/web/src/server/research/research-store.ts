@@ -93,6 +93,10 @@ export interface ResearchCheckpoint {
 }
 export interface ActionUsage { inputTokens?: number; outputTokens?: number; estimatedUsd?: number | null; credits?: number | null; bytes?: number; unknownCost?: boolean }
 export interface ActionReceipt { key: string; kind:'tool'|'model'; state:'inflight'|'completed'|'failed'; request:unknown; result:unknown; usage:ActionUsage|null; reservedInput:number; reservedOutput:number; createdAt:string }
+interface ActionReceiptRow {action_key:string;kind:ActionReceipt['kind'];state:ActionReceipt['state'];request_json:string;result_json:string|null;usage_json:string|null;reserved_input:number;reserved_output:number;created_at:string}
+function decodeReceipt(r:ActionReceiptRow):ActionReceipt {
+ return {key:r.action_key,kind:r.kind,state:r.state,request:JSON.parse(r.request_json),result:r.result_json?JSON.parse(r.result_json):null,usage:r.usage_json?JSON.parse(r.usage_json):null,reservedInput:r.reserved_input,reservedOutput:r.reserved_output,createdAt:r.created_at};
+}
 export class ResearchStop extends Error { constructor(readonly code:string){super(code);this.name='ResearchStop';} }
 
 export class ResearchStore {
@@ -105,24 +109,34 @@ export class ResearchStore {
   const row=this.db.prepare('SELECT data_json FROM research_checkpoints WHERE run_id=?').get(runId) as {data_json:string}|undefined;
   return row?JSON.parse(row.data_json) as ResearchCheckpoint:null;
  }
+ /** Live authority projection; do not load retained source bodies for a scope check. */
+ firstStepBinding(runId:string):FirstStepBinding|null {
+  const row=this.db.prepare("SELECT json_extract(data_json,'$.firstStep') AS binding_json FROM research_checkpoints WHERE run_id=?").get(runId) as {binding_json:string|null}|undefined;
+  return row?.binding_json?JSON.parse(row.binding_json) as FirstStepBinding:null;
+ }
  save(runId:string,checkpoint:ResearchCheckpoint):void {
   this.assertActive(runId);
   this.db.prepare('INSERT INTO research_checkpoints(run_id,data_json,updated_at) VALUES(?,?,?) ON CONFLICT(run_id) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at').run(runId,JSON.stringify(checkpoint),new Date().toISOString());
  }
  receipts(runId:string):ActionReceipt[] {
-  const rows=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<{action_key:string;kind:'tool'|'model';state:'inflight'|'completed'|'failed';request_json:string;result_json:string|null;usage_json:string|null;reserved_input:number;reserved_output:number;created_at:string}>;
-  return rows.map(r=>({key:r.action_key,kind:r.kind,state:r.state,request:JSON.parse(r.request_json),result:r.result_json?JSON.parse(r.result_json):null,usage:r.usage_json?JSON.parse(r.usage_json):null,reservedInput:r.reserved_input,reservedOutput:r.reserved_output,createdAt:r.created_at}));
+  const rows=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as ActionReceiptRow[];
+  return rows.map(decodeReceipt);
  }
- receipt(runId:string,key:string):ActionReceipt|undefined{return this.receipts(runId).find(row=>row.key===key);}
+ receipt(runId:string,key:string):ActionReceipt|undefined {
+  const row=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? AND action_key=?').get(runId,key) as ActionReceiptRow|undefined;
+  return row?decodeReceipt(row):undefined;
+ }
  budget(runId:string,limits:ResearchBudgetLimits=RESEARCH_LIMITS):ResearchBudget {
   const budget:ResearchBudget={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,estimatedUsd:0,firecrawlCredits:0,unknownCost:false,limits:{...limits}};
-  for(const row of this.receipts(runId)){
+  const rows=this.db.prepare('SELECT kind,usage_json,reserved_input,reserved_output FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<Pick<ActionReceiptRow,'kind'|'usage_json'|'reserved_input'|'reserved_output'>>;
+  for(const row of rows){
+   const usage:ActionUsage|null=row.usage_json?JSON.parse(row.usage_json):null;
    if(row.kind==='tool')budget.toolCalls++;else budget.modelCalls++;
-   budget.inputTokens+=row.usage?.inputTokens??row.reservedInput;
-   budget.outputTokens+=row.usage?.outputTokens??row.reservedOutput;
-   budget.estimatedUsd+=row.usage?.estimatedUsd??0;
-   budget.firecrawlCredits+=row.usage?.credits??0;
-   if(!row.usage||row.usage.estimatedUsd===null||row.usage.unknownCost)budget.unknownCost=true;
+   budget.inputTokens+=usage?.inputTokens??row.reserved_input;
+   budget.outputTokens+=usage?.outputTokens??row.reserved_output;
+   budget.estimatedUsd+=usage?.estimatedUsd??0;
+   budget.firecrawlCredits+=usage?.credits??0;
+   if(!usage||usage.estimatedUsd===null||usage.unknownCost)budget.unknownCost=true;
   }
   return budget;
  }

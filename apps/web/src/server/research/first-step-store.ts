@@ -1169,7 +1169,7 @@ export class FirstStepScopeGuard {
   ) {}
 
   private binding(): FirstStepBinding {
-    const binding = this.store.research.checkpoint(this.runId)?.firstStep;
+    const binding = this.store.research.firstStepBinding(this.runId);
     if (!binding) throw new FirstStepSelectionError('not_first_step', '该研究没有已冻结的范围绑定。');
     return binding;
   }

@@ -118,6 +118,33 @@ test('Runner recovery retains an unknown inflight receipt without repeating the 
   assert.equal(f.store.research.receipt(f.run.id,inflight[0]!.key)!.state,'inflight');assertPreserved(f);
 });
 
+test('a drained service upgrade resumes the same X checkpoint and reuses a late settled page',async t=>{
+  const f=selectedFixture();let held=false;let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  const p=recordingProvider(async request=>{
+    if(request.type!=='timeline')return undefined;
+    if(request.cursor===null)return pageResult([originalPost()],'second-page');
+    held=true;await gate;return pageResult([originalPost('102','A second synthetic account note.')]);
+  });
+  const first=makeRunner(f,p.provider,chineseModel().model);let restarted:Runner|undefined;
+  t.after(()=>{release();first.stopAll();restarted?.stopAll();f.close();});
+  first.enqueue(f.run.id);await waitFor(()=>held);
+  f.store.updateRun(f.run.id,{state:'partial',stop_reason:'deployment_pause'});
+  release();await waitFor(()=>first.activeCount()===0);first.stopAll();
+  assert.equal(f.store.getRun(f.run.id)!.stopReason,'deployment_pause');
+  assert.equal(f.store.research.receipts(f.run.id).filter(r=>r.state==='inflight').length,0);
+  assert.equal(f.store.research.checkpoint(f.run.id)!.xAccountResearch!.history.timeline.pages,1);
+  assert.ok(!f.store.research.checkpoint(f.run.id)!.xAccountResearch!.posts.some(p=>p.id==='102'),'a late page is settled without late ingestion');
+  f.store.updateRun(f.run.id,{state:'queued',stop_reason:null,error_code:null,error_message:null});
+  assert.equal(f.store.recoverInterruptedRuns(),0);
+  restarted=makeRunner(f,p.provider,chineseModel().model);
+  assert.equal((await terminal(f,restarted)).state,'completed');
+  assert.equal(p.calls.length,4,'profile, two timeline pages and replies are each bought once');
+  assert.equal(f.store.research.checkpoint(f.run.id)!.xAccountResearch!.history.timeline.pages,2);
+  assert.ok(f.store.research.checkpoint(f.run.id)!.xAccountResearch!.posts.some(p=>p.id==='102'));
+  assertPreserved(f);
+});
+
 test('Runner preserves prior originals and blocks late ingestion when selected account scope is withdrawn',async t=>{
   const f=selectedFixture();const m=chineseModel();
   const p=recordingProvider(request=>{

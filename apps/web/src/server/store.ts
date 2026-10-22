@@ -627,7 +627,7 @@ export class Store {
     const run = this.getRunForOwner(runId, ownerId);
     if (!run) return false;
     const seen = new Set(visited); seen.add(runId);
-    const binding = this.research.checkpoint(runId)?.firstStep;
+    const binding = this.research.firstStepBinding(runId);
     const dependencies = new Set(accountIds);
     if (binding) {
       if (!this.isFirstStepScopeActive(ownerId, binding)) return false;
