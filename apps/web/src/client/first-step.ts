@@ -808,7 +808,8 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
           }
         })
       );
-      if (requiresIndependentScope && !decision.excluded) {
+      // Linkage evidence never obliges the user to merge this account into a person.
+      if (!decision.excluded) {
         actions.appendChild(
           make('button', {
             className: 'text-button',

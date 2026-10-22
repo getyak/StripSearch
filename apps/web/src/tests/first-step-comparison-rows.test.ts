@@ -641,3 +641,19 @@ test('exclusion undo is not a selection and a submitted scope becomes read-only'
     env.document.body.replaceChildren();
   }
 });
+
+test('a linked X account can explicitly become an independent research scope without changing the person choice',async()=>{
+ const fixture=eightAccounts();
+ try{
+  fixture.republish(view=>({...view,clusters:[cluster('linked-person','Lin Zhou',view.accounts[0]!.accountId,view.accounts.map(a=>a.accountId),{linkage:'linked'})]}));
+  const container=env.document.createElement('div');env.document.body.appendChild(container);
+  const panel=createFirstStepPanel({api:panelApi(fixture),container,runId:fixture.run.id});await panel.refresh();
+  container.querySelector<HTMLButtonElement>('.first-step-cluster')!.click();
+  const account=container.querySelector<HTMLInputElement>('input[aria-label="选择 X fixture_lin · x.com/fixture_lin"]')!;
+  const id=account.dataset.focusKey!.replace('account-','');
+  const action=[...account.closest('article')!.querySelectorAll('button')].find(b=>b.textContent==='仅研究这个公开账号');
+  assert.ok(action,'linked evidence must not force the user to research a person');action.click();
+  assert.equal(panel.draft().get(id)!.selection,'only_this_account');assert.ok(container.querySelector('.first-step-cluster.chosen[data-focus-key="cluster-linked-person"]'));
+  panel.destroy();
+ }finally{fixture.close();env.document.body.replaceChildren();}
+});
