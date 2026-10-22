@@ -50,7 +50,8 @@ function chineseModel(onCall?:(purpose:string)=>void) {
   const purposes:string[]=[];
   const model:XAccountModel=async input=>{
     purposes.push(input.purpose);onCall?.(input.purpose);
-    const data=JSON.parse(input.prompt.slice(input.prompt.indexOf('\nDATA\n')+6)) as {findings?:Array<{id:string}>;materials?:Array<{sourceKey:string;role:string;text:string}>};
+    const data=JSON.parse(input.prompt.slice(input.prompt.indexOf('\nDATA\n')+6)) as {organizationStage?:string;items?:Array<{id:string;section:string}>;findings?:Array<{id:string}>;materials?:Array<{sourceKey:string;role:string;text:string}>};
+    if(data.organizationStage)return {groups:[{section:'work',title:'Synthetic work',ids:data.items!.map(item=>item.id)}]};
     if(input.purpose.includes('verify'))return {verdicts:(data.findings??[]).map(f=>({id:f.id,supported:true,reason:'该条完整原文直接支持这项账号自述。'}))};
     const material=data.materials?.find(m=>m.role==='target'&&m.text.includes(ORIGINAL));
     return {findings:material?[{section:'work',statement:STATEMENT,kind:'attributed_statement',evidence:[{sourceKey:material.sourceKey,quote:ORIGINAL}]}]:[]};
@@ -79,7 +80,7 @@ test('Runner publishes independently verified Chinese findings for the selected 
   const run=await terminal(f,runner);
   assert.equal(run.state,'completed');assert.equal(run.stopReason,'x_account_research_complete');assert.equal(run.errorCode,null);
   assert.deepEqual(p.calls.map(r=>r.type),['profile','timeline','replies']);
-  assert.deepEqual(m.purposes,['x-account-analyze','x-account-verify-batch','x-account-synthesize','x-account-verify-synthesis']);
+  assert.deepEqual(m.purposes,['x-account-analyze','x-account-synthesize','x-account-synthesize','x-account-verify-synthesis']);
   const view=f.store.buildCanonicalView(run);
   assert.equal(view.personObject,undefined,'an independent account is never promoted into a person object');
   assert.equal(view.accountObject!.account.nativeId,'42');assert.equal(view.accountObject!.claims.length,1);
@@ -188,7 +189,7 @@ test('Runner with unavailable model preserves the collected account corpus as a 
   const view=f.store.buildCanonicalView(run);assert.equal(view.accountObject!.claims.length,0);assert.match(view.limitations.join(' '),/分析|核验|模型/);
 });
 
-test('Runner retains changed live source text and invalidates already verified batch findings during synthesis',async t=>{
+test('Runner retains changed live source text and invalidates retained candidate indices during global planning',async t=>{
   const f=selectedFixture();const p=recordingProvider();let changedKey:string|undefined;
   const m=chineseModel(purpose=>{
     if(purpose!=='x-account-synthesize')return;
@@ -199,7 +200,7 @@ test('Runner retains changed live source text and invalidates already verified b
   const run=await terminal(f,runner);
   assert.equal(run.state,'partial');assert.equal(run.stopReason,'source_revoked');
   assert.ok(changedKey);assert.match(f.store.getSource(f.run.id,changedKey)!.excerpt!,/earlier statement was withdrawn/,'terminal finalization must preserve the changed live source');
-  assert.ok(f.store.research.checkpoint(f.run.id)!.xAccountResearch!.analysis.findings.some(f=>f.verified),'earlier batch analysis is retained for audit');
+  assert.ok(f.store.research.checkpoint(f.run.id)!.xAccountResearch!.analysis.findings.some(f=>f.id.startsWith('batch:')&&!f.verified),'earlier unverified research index is retained for audit');
   const view=f.store.buildCanonicalView(run);assert.equal(view.accountObject!.claims.length,0);assert.ok(!renderMarkdown(view).includes(STATEMENT));
 });
 
