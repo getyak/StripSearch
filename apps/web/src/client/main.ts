@@ -1739,6 +1739,7 @@ async function boot(): Promise<void> {
     els.footer.hidden = true;
     document.getElementById('main')?.appendChild(opening);
   }
+  let restoredUserId: string | null = null;
   try {
     try {
       const health = await api.health();
@@ -1749,8 +1750,8 @@ async function boot(): Promise<void> {
     const session = await api.session();
     if (session) {
       state.user = session.user;
+      restoredUserId = session.user.id;
       renderUserNav(session.user);
-      await loadRuns();
     }
   } catch {
     showToast('暂时无法恢复登录，请刷新页面后重试。', 'error');
@@ -1759,6 +1760,12 @@ async function boot(): Promise<void> {
     opening?.remove();
     route();
     renderAll();
+    if (restoredUserId && isCurrentUser(restoredUserId)) {
+      const ownerId = restoredUserId, epoch = state.runEpoch;
+      void loadRuns().then(() => {
+        if (isCurrentUser(ownerId) && state.runEpoch === epoch && window.location.hash === '#/app' && !state.activeRunId) route();
+      });
+    }
   }
 }
 
