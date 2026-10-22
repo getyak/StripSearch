@@ -38,6 +38,9 @@ async function parallelJobs<T>(jobs:T[],run:(job:T)=>Promise<void>):Promise<void
   while(!failed){
    const index=next++;if(index>=jobs.length)return;
    try{await run(jobs[index]!);}catch(error){if(!failed){failed=true;firstError=error;}return;}
+   // Cached jobs can otherwise form an uninterrupted microtask chain. The loop
+   // rechecks failure after yielding, before it claims any further work.
+   await new Promise<void>(resolve=>setImmediate(resolve));
   }
  }
  await Promise.all(Array.from({length:Math.min(3,jobs.length)},()=>worker()));
@@ -98,6 +101,13 @@ function nativeContext(findings:XAccountFinding[],pages:ReadonlyMap<string,Store
 function reportEvidenceValid(finding:XAccountFinding,pages:ReadonlyMap<string,StoredPage>,posts:ReadonlyMap<string,XAccountPost>,nativePosts:ReadonlyMap<string,XAccountPost>):boolean{
  const missing=/(?:缺少|缺乏|缺|没有|未取得|未提供|未给出|未附带)[^。；，,]{0,16}(?:对方原帖|对方|父帖|提问原文|引用原文|上下文|帖文原文)|(?:对方原帖|父帖|提问原文|引用原文)[^。；，,]{0,12}(?:缺失|不存在|不可见|未保存)/.test(finding.statement);
  if(missing&&nativeContext([finding],pages,posts,nativePosts).relationships.some(r=>r.available))return false;
+ // A personal block is not a platform ban; a question containing 'banning' is
+ // not an affirmative first-person action. Apply only to final report claims.
+ const ownQuotes=finding.evidence.filter(e=>posts.get(e.sourceKey)?.role==='target'&&posts.get(e.sourceKey)?.kind!=='repost').map(e=>e.quote.replace(/(?:https?:\/\/|www\.)[^\s]+/gi,''));
+ const personalBlock=ownQuotes.some(text=>/\b(?:I|we)\s+(?:(?:have|had|regularly|usually|often|sometimes)\s+)*block(?:ed|ing)?\b/i.test(text));
+ const affirmativeBan=ownQuotes.some(text=>[...text.matchAll(/[^.!?;\n]+[.!?;]?/g)].some(([sentence])=>!sentence.includes('?')&&/\b(?:I|we)\s+(?:(?:have|had|am|are|regularly|usually|often|sometimes)\s+)*ban(?:ned|ning)?\b/i.test(sentence)));
+ const assertsBan=finding.statement.split(/[。；，,]|(?:并且?|且|同时|而且|但|随后)(?=自述|称|说|表示|提到|补充|自己|本人|每周|每天|每月)/).some(clause=>/封禁|封号/.test(clause)&&!/(?:询问|发问|疑问|是否|该不该|要不要|[？?])/.test(clause)&&!/(?:不|未)(?:会|曾|进行)?(?:封禁|封号)/.test(clause));
+ if(personalBlock&&assertsBan&&!affirmativeBan)return false;
  const dates=finding.evidence.flatMap(e=>{const date=posts.get(e.sourceKey)?.publishedAt,time=date?Date.parse(date):NaN;return Number.isFinite(time)?[new Date(time)]:[];});
  const quotes=finding.evidence.map(e=>e.quote.replace(/(?:https?:\/\/|www\.)[^\s]+/gi,'')).join('\n');
  const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -282,7 +292,8 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  const included=new Set(jobs.flatMap(job=>job.materials.map(m=>`${m.sourceKey}:${m.offset}`)));
  for(const orphan of pack(all.filter(m=>!included.has(`${m.sourceKey}:${m.offset}`))))jobs.push({mode:'context',materials:orphan,contextMaterials:orphan});
  await parallelJobs(jobs,async job=>{
-  guard(input);const key=`batch:${hash(JSON.stringify(job))}`;if(input.state.analysis.completedBatches.includes(key))return;
+  input.signal.throwIfAborted();const key=`batch:${hash(JSON.stringify(job))}`;if(input.state.analysis.completedBatches.includes(key))return;
+  guard(input);
   try{
   const contextWindows=job.contextMaterials.map(m=>({sourceKey:m.sourceKey,offset:m.offset,length:m.text.length}));
   const instruction=job.mode==='context'?'这是关联上下文批次。本人正文只帮助解释关系，不能重新提议仅靠本人正文已能得出的结论。每条新发现必须至少引用一个 contextWindows 指定窗口中的原文，并明确作者与关系；上下文可能是账号自己的回复或父帖，不能只根据 role 判断是否属于本批上下文。只提取会改变对原帖理解的重要澄清、具体问题、反证、分歧或有证据的互动模式，保留有意义的相反证据。普通问候、泛泛赞美和没有新增信息的重复评论返回空 findings，不逐条罗列评论。不能从少量评论推断受众人口特征、整体满意度、传播效果或商业转化。所有上下文仍需阅读；没有新增的受支持发现可返回空数组。':'这是本人正文基础批次，逐一处理本批所有正文。';
@@ -294,6 +305,7 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
   input.state.analysis.completedBatches.push(key);input.save();
   }catch(error){protocolGap(key,error);}
  });
+ guard(input);
  const readKeys=new Set(jobs.map(job=>`batch:${hash(JSON.stringify(job))}`));
  const allRead=[...readKeys].every(key=>input.state.analysis.completedBatches.includes(key));
  if(!allRead){guard(input);input.save();return;}

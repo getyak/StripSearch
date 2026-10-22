@@ -92,10 +92,10 @@ export interface ResearchCheckpoint {
  pages: StoredPage[]; claims: ResearchClaim[]; pendingClaims?: ResearchClaim[]; unknowns: string[]; stopReason: string | null;
 }
 export interface ActionUsage { inputTokens?: number; outputTokens?: number; estimatedUsd?: number | null; credits?: number | null; bytes?: number; unknownCost?: boolean }
-export interface ActionReceipt { key: string; kind:'tool'|'model'; state:'inflight'|'completed'|'failed'; request:unknown; result:unknown; usage:ActionUsage|null; reservedInput:number; reservedOutput:number; createdAt:string }
-interface ActionReceiptRow {action_key:string;kind:ActionReceipt['kind'];state:ActionReceipt['state'];request_json:string;result_json:string|null;usage_json:string|null;reserved_input:number;reserved_output:number;created_at:string}
+export interface ActionReceipt { key: string; kind:'tool'|'model'; state:'inflight'|'completed'|'failed'; request:unknown; result:unknown; usage:ActionUsage|null; reservedInput:number; reservedOutput:number; createdAt:string; settledAt?:string|null }
+interface ActionReceiptRow {action_key:string;kind:ActionReceipt['kind'];state:ActionReceipt['state'];request_json:string;result_json:string|null;usage_json:string|null;reserved_input:number;reserved_output:number;created_at:string;settled_at:string|null}
 function decodeReceipt(r:ActionReceiptRow):ActionReceipt {
- return {key:r.action_key,kind:r.kind,state:r.state,request:JSON.parse(r.request_json),result:r.result_json?JSON.parse(r.result_json):null,usage:r.usage_json?JSON.parse(r.usage_json):null,reservedInput:r.reserved_input,reservedOutput:r.reserved_output,createdAt:r.created_at};
+ return {key:r.action_key,kind:r.kind,state:r.state,request:JSON.parse(r.request_json),result:r.result_json?JSON.parse(r.result_json):null,usage:r.usage_json?JSON.parse(r.usage_json):null,reservedInput:r.reserved_input,reservedOutput:r.reserved_output,createdAt:r.created_at,settledAt:r.settled_at};
 }
 export class ResearchStop extends Error { constructor(readonly code:string){super(code);this.name='ResearchStop';} }
 

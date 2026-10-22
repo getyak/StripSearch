@@ -8,7 +8,7 @@ import type {ResearchBudgetLimits} from '../shared/types.js';
 import type {XAccountModel,XAccountProvider,XNativePost,XReadRequest,XReadResult} from '../server/research/x-account-contracts.js';
 import {renderMarkdown} from '../shared/canonical.js';
 import {renderReportHtml} from '../shared/report-html.js';
-import {productionModel} from '../server/research/x-account-research.js';
+import {collectXAccount,productionModel} from '../server/research/x-account-research.js';
 import {DshProtocolRepairExhaustedError} from '../server/research/dsh-decision.js';
 import type {HttpTransport} from '../server/adapters/types.js';
 import {createHash} from 'node:crypto';
@@ -275,7 +275,7 @@ function productionPort(t:{after:(fn:()=>void)=>void},response:(index:number)=>s
  const requests:Record<string,unknown>[]=[];
  const transport:HttpTransport={async fetch(_url,init){requests.push(JSON.parse(init!.body!));const body=await response(calls++);return new Response(body,{status,headers:{'content-type':'text/event-stream'}});}};
  const options={store:f.store,run:f.run,binding:f.firstStep.selectionBinding(f.run.id)!,provider:recordingProvider().provider,signal:new AbortController().signal,transport,apiKey:'synthetic-offline-only',modelName:'deepseek-flash',assertScope:()=>f.firstStep.scopeGuard(f.run.ownerId,f.run.id).assertCurrent()};
- return {f,requests,calls:()=>calls,model:()=>productionModel(options,cp,()=>{f.store.research.assertActive(f.run.id);options.assertScope();})};
+ return {f,cp,options,requests,calls:()=>calls,model:()=>productionModel(options,cp,()=>{f.store.research.assertActive(f.run.id);options.assertScope();if(!f.store.research.areSourcePagesCurrent(f.run.id,JSON.stringify(cp.pages.map(({sourceKey,url,text})=>({sourceKey,url,text})))))throw Error('source_revoked');})};
 }
 
 test('production model repairs a fully observed protocol failure with a new metered prompt and replays both receipts', {timeout:30_000},async t=>{
@@ -382,4 +382,56 @@ test('high auto prose cannot publish a decision and exhausts only two separately
  await assert.rejects(p.model()({...PORT_INPUT,purpose:'x-account-verify-batch'},new AbortController().signal),error=>error instanceof DshProtocolRepairExhaustedError&&error.code==='missing_structured_decision'&&error.attemptCount===3);
  assert.equal(p.calls(),3);assert.ok(p.requests.every(request=>(request.tool_choice as {type:string}).type==='auto'&&(request.tools as unknown[]).length===1));
  const receipts=p.f.store.research.receipts(p.f.run.id);assert.equal(receipts.length,3);assert.ok(receipts.every(receipt=>receipt.state==='failed'&&(receipt.result as {usageKnown:boolean}).usageKnown&&receipt.usage!.unknownCost===false));
+});
+
+const RECOVERY_INPUT={...PORT_INPUT,purpose:'x-account-verify-synthesis'};
+function recoveryFailedKey(input=RECOVERY_INPUT):string{return 'x-account:model:v1:'+createHash('sha256').update(JSON.stringify({input,model:'deepseek-flash',reasoningEffort:'high',toolChoice:'auto',outputCap:16384,timeoutMs:210000,decisionTimeoutMs:240000})).digest('hex');}
+function authorizeModelRecovery(p:ReturnType<typeof productionPort>,input=RECOVERY_INPUT){
+ const key=recoveryFailedKey(input);p.f.store.research.reserve(p.f.run.id,key,'model',{purpose:input.purpose},{inputTokens:40,outputTokens:12},UNLIMITED);p.f.store.research.settle(p.f.run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');
+ const settledAt=(p.f.db.prepare('SELECT settled_at AS time FROM research_actions WHERE run_id=? AND action_key=?').get(p.f.run.id,key) as {time:string}).time;
+ const binding=p.options.binding;p.cp.xAccountResearch={version:'x-account/v1',accountId:binding.accounts[0]!.accountId,profile:null,history:{timeline:{started:false,cursor:null,done:false,pages:0,cursors:[],pageHashes:[]},replies:{started:false,cursor:null,done:false,pages:0,cursors:[],pageHashes:[]}},posts:[],contextQueue:[],contextDone:[],gaps:[],analysis:{completedBatches:['synthetic-retained-batch','report-plan:v1:synthetic'],findings:[],synthesisDone:false},modelRecovery:{version:'x-model-recovery/v1',id:'c1274cbb-ae01-4f16-90f0-c3e68aa0bad9',runId:p.f.run.id,caseId:binding.caseId,scopeVersion:binding.scopeVersion,accountId:binding.accounts[0]!.accountId,reason:'Explicit operator scope for one failed synthetic action',localFixRevision:'a'.repeat(40),createdAt:new Date().toISOString(),entries:[{failedKey:key,settledAt}]}};
+ return {key,plan:p.cp.xAccountResearch.modelRecovery!,before:p.f.store.research.receipt(p.f.run.id,key)};
+}
+test('explicit model recovery makes exactly one child request and preserves original failure and batch identity',async t=>{
+ const p=productionPort(t,()=>modelStream({findings:[]}),{...UNLIMITED,modelCalls:2,outputTokens:24});const {key,plan,before}=authorizeModelRecovery(p);const markers=[...p.cp.xAccountResearch!.analysis.completedBatches];
+ assert.deepEqual(await p.model()(RECOVERY_INPUT,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);
+ const child=p.f.store.research.receipts(p.f.run.id).find(r=>r.key!==key)!;assert.equal(child.state,'completed');assert.deepEqual((child.request as {retryOf:string}).retryOf,key);assert.equal((child.request as {recoveryPlanId:string}).recoveryPlanId,plan.id);
+ assert.deepEqual(await p.model()(RECOVERY_INPUT,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,key),before);assert.equal(before!.usage!.unknownCost,true);assert.deepEqual(p.cp.xAccountResearch!.analysis.completedBatches,markers);
+});
+test('model recovery refuses missing plans, wrong bindings, timestamp mismatch and original inflight',async t=>{
+ for(const change of ['missing','runId','caseId','scopeVersion','accountId','settledAt','inflight','duplicate','purpose'] as const){
+  const p=productionPort(t,()=>modelStream({findings:[]}));const input=change==='purpose'?{...RECOVERY_INPUT,purpose:'x-account-verify-batch'}:RECOVERY_INPUT;const {key,plan}=authorizeModelRecovery(p,input);
+  if(change==='missing')delete p.cp.xAccountResearch!.modelRecovery;
+  else if(change==='inflight')p.f.db.prepare("UPDATE research_actions SET state='inflight' WHERE run_id=? AND action_key=?").run(p.f.run.id,key);
+  else if(change==='settledAt')plan.entries[0]!.settledAt='2000-01-01T00:00:00.000Z';
+  else if(change==='duplicate')plan.entries.push({...plan.entries[0]!});
+  else if(change==='scopeVersion')plan.scopeVersion++;
+  else if(change!=='purpose')plan[change]='wrong';
+  await assert.rejects(p.model()(input,new AbortController().signal));assert.equal(p.calls(),0,change);assert.equal(p.f.store.research.receipts(p.f.run.id).length,1);
+ }
+});
+test('model recovery child failure, unknown inflight and exhausted budget cannot dispatch a further attempt',async t=>{
+ for(const failure of ['transport','protocol','inflight','budget']as const){
+  const p=productionPort(t,()=>{if(failure==='transport')throw Error('synthetic unknown transport');return modelStream(null);},failure==='budget'?{...UNLIMITED,modelCalls:1}:UNLIMITED);const {key,plan}=authorizeModelRecovery(p);
+  if(failure==='inflight'){
+   const childKey='x-account:model-recovery:v1:'+createHash('sha256').update(JSON.stringify({recoveryPlanId:plan.id,retryOf:key,settledAt:plan.entries[0]!.settledAt})).digest('hex');p.f.store.research.reserve(p.f.run.id,childKey,'model',{retryOf:key,recoveryPlanId:plan.id},{inputTokens:0,outputTokens:0},UNLIMITED);
+  }
+  await assert.rejects(p.model()(RECOVERY_INPUT,new AbortController().signal));const calls=p.calls();assert.equal(calls,failure==='budget'||failure==='inflight'?0:1,failure);
+  await assert.rejects(p.model()(RECOVERY_INPUT,new AbortController().signal));assert.equal(p.calls(),calls,'no automatic child repair or retry');
+ }
+});
+test('explicit model recovery preserves live source authority and caller cancellation',async t=>{
+ const p=productionPort(t,()=>modelStream({findings:[]}));const collected=await collectXAccount(p.options);Object.assign(p.cp,collected.checkpoint);authorizeModelRecovery(p);const source=p.f.store.listSources(p.f.run.id)[0]!;p.f.store.setSourceExcluded(p.f.run.id,source.sourceKey,true);await assert.rejects(p.model()(RECOVERY_INPUT,new AbortController().signal),/source_revoked/);assert.equal(p.calls(),0);
+ const cancelled=productionPort(t,()=>modelStream({findings:[]}));authorizeModelRecovery(cancelled);const controller=new AbortController();controller.abort(Error('cancelled explicit recovery'));await assert.rejects(cancelled.model()(RECOVERY_INPUT,controller.signal),/cancelled explicit recovery/);assert.equal(cancelled.calls(),0);
+});
+
+test('an explicit recovery plan cannot force a completed original or alter a different model key',async t=>{
+ const p=productionPort(t,()=>modelStream({findings:[]}));const {key}=authorizeModelRecovery(p);p.f.db.prepare("UPDATE research_actions SET state='completed',result_json=? WHERE run_id=? AND action_key=?").run(JSON.stringify({original:true}),p.f.run.id,key);const before=p.f.store.research.receipt(p.f.run.id,key);
+ assert.deepEqual(await p.model()(RECOVERY_INPUT,new AbortController().signal),{original:true});assert.equal(p.calls(),0);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,key),before);
+ const legacy=legacyModelKey(PORT_INPUT);p.f.store.research.reserve(p.f.run.id,legacy,'model',{purpose:PORT_INPUT.purpose},{inputTokens:0,outputTokens:0},UNLIMITED);p.f.store.research.settle(p.f.run.id,legacy,{retainedGeneration:true},{estimatedUsd:0,unknownCost:false});
+ assert.deepEqual(await p.model()(PORT_INPUT,new AbortController().signal),{retainedGeneration:true});assert.equal(p.calls(),0);
+});
+test('one explicit plan recovers exactly its three synthesis actions once each',async t=>{
+ const p=productionPort(t,()=>modelStream({findings:[]}));const inputs=[RECOVERY_INPUT,{...RECOVERY_INPUT,purpose:'x-account-synthesize'},{...RECOVERY_INPUT,purpose:'x-account-synthesize',prompt:'A second independent synthetic topic'}];const entries=inputs.map(input=>authorizeModelRecovery(p,input).plan.entries[0]!);p.cp.xAccountResearch!.modelRecovery!.entries=entries;const originals=entries.map(entry=>p.f.store.research.receipt(p.f.run.id,entry.failedKey));
+ for(const input of inputs)await p.model()(input,new AbortController().signal);assert.equal(p.calls(),3);for(const input of inputs)await p.model()(input,new AbortController().signal);assert.equal(p.calls(),3);assert.deepEqual(entries.map(entry=>p.f.store.research.receipt(p.f.run.id,entry.failedKey)),originals);
 });

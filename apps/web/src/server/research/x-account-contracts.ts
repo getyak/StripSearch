@@ -28,12 +28,19 @@ export interface XAccountFinding {
   id:string;section:XFindingSection;statement:string;kind:Exclude<ClaimKind,'factual'>;
   evidence:XFindingEvidence[];verified:boolean;
 }
+/** Operator-recorded, one-use paid retry scope. Never inferred from a failure. */
+export interface XModelRecoveryPlan {
+  version:'x-model-recovery/v1';id:string;runId:string;caseId:string;scopeVersion:number;accountId:string;
+  reason:string;localFixRevision:string;createdAt:string;
+  entries:Array<{failedKey:string;settledAt:string}>;
+}
 export interface XAccountResearchState {
   version:'x-account/v1';accountId:string;profile:XNativeAccount|null;
   history:{timeline:XHistoryProgress;replies:XHistoryProgress};posts:XAccountPost[];
   contextQueue:Array<{type:'detail'|'comments';tweetId:string;rootId:string;relation:'target'|'parent_context'|'quoted_context'|'reply_context'}>;
   contextDone:string[];gaps:Array<{code:string;target:string;detail:string}>;
   analysis:{completedBatches:string[];findings:XAccountFinding[];synthesisDone:boolean};
+  modelRecovery?:XModelRecoveryPlan;
 }
 export type XAccountModel = (input:{purpose:string;prompt:string;schema:Record<string,unknown>;maxTokens:number},signal:AbortSignal)=>Promise<unknown>;
 export interface XAccountAnalysisInput {

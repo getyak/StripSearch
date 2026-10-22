@@ -3,6 +3,18 @@ import test from 'node:test';
 import {seedFirstStep} from './first-step-fixtures.js';
 import {meteredInvoke} from '../server/research/metered.js';
 
+test('durable receipts expose the original settlement time without changing it on replay',t=>{
+ const f=seedFirstStep({accounts:[{url:'https://x.com/synthetic'}]});t.after(()=>f.close());
+ const key='synthetic-settlement';const limits={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0};
+ f.store.research.reserve(f.run.id,key,'model',{purpose:'synthetic'},{inputTokens:0,outputTokens:0},limits,true);
+ assert.equal(f.store.research.receipt(f.run.id,key)!.settledAt,null);
+ f.store.research.settle(f.run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');
+ const settled=f.store.research.receipt(f.run.id,key)!;
+ assert.equal(typeof settled.settledAt,'string');assert.ok(Number.isFinite(Date.parse(settled.settledAt!)));
+ assert.deepEqual(f.store.research.reserve(f.run.id,key,'model',{purpose:'synthetic'},{inputTokens:0,outputTokens:0},limits,true),settled);
+ assert.deepEqual(f.store.research.receipts(f.run.id).find(r=>r.key===key),settled);
+});
+
 test('failed metered calls preserve optional safe metadata and replay it without dispatch',async t=>{
  const f=seedFirstStep({accounts:[{url:'https://x.com/synthetic'}]});t.after(()=>f.close());
  let calls=0;

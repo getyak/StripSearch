@@ -231,6 +231,23 @@ export async function collectXAccount(options:XAccountResearchOptions){
  return{checkpoint:cp,state,active,save,assertModelReady:s.assertModelReady};
 }
 
+function modelRecovery(options:XAccountResearchOptions,cp:ResearchCheckpoint,key:string,purpose:string){
+ const plan=cp.xAccountResearch?.modelRecovery,binding=options.binding,frozen=cp.firstStep;
+ if(!plan||plan.version!=='x-model-recovery/v1'||!['x-account-synthesize','x-account-verify-synthesis'].includes(purpose)||
+  !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(plan.id)||
+  plan.runId!==options.run.id||plan.caseId!==binding.caseId||plan.scopeVersion!==binding.scopeVersion||
+  binding.accounts.length!==1||plan.accountId!==binding.accounts[0]!.accountId||plan.accountId!==cp.xAccountResearch?.accountId||
+  frozen?.caseId!==plan.caseId||frozen.scopeVersion!==plan.scopeVersion||frozen.accounts.length!==1||frozen.accounts[0]!.accountId!==plan.accountId||
+  typeof plan.reason!=='string'||!plan.reason.trim()||plan.reason.length>1000||typeof plan.localFixRevision!=='string'||!/^[a-f0-9]{40}$/.test(plan.localFixRevision)||
+  typeof plan.createdAt!=='string'||!Number.isFinite(Date.parse(plan.createdAt))||!Array.isArray(plan.entries)||!plan.entries.length||plan.entries.length>3||
+  plan.entries.some(e=>!e||typeof e.failedKey!=='string'||!/^x-account:model:v1:[a-f0-9]{64}$/.test(e.failedKey)||typeof e.settledAt!=='string'||!Number.isFinite(Date.parse(e.settledAt)))||
+  new Set(plan.entries.map(e=>e.failedKey)).size!==plan.entries.length)return null;
+ const entry=plan.entries.find(e=>e.failedKey===key);if(!entry||Date.parse(plan.createdAt)<Date.parse(entry.settledAt))return null;
+ const old=options.store.research.receipt(options.run.id,key);
+ if(old?.kind!=='model'||old.state!=='failed'||old.settledAt!==entry.settledAt||!old.request||typeof old.request!=='object'||(old.request as {purpose?:unknown}).purpose!==purpose)return null;
+ return {key:'x-account:model-recovery:v1:'+digest({recoveryPlanId:plan.id,retryOf:key,settledAt:entry.settledAt}),retryOf:key,recoveryPlanId:plan.id};
+}
+
 export function productionModel(options:XAccountResearchOptions,cp:ResearchCheckpoint,active:()=>void):XAccountModel {
  if(!options.transport||!options.apiKey)throw new ResearchStop('model_unavailable');
  const limits=cp.limits??options.limits??unlimited;
@@ -248,7 +265,8 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
    const attemptInput={...input,prompt};
    // Preserve generation's historical key. Thinking is a substantively new
    // verification plan and must never reuse an old non-thinking verdict.
-   const key='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...(highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})});
+   const originalKey='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...(highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})});
+   const recovery=modelRecovery(options,cp,originalKey,input.purpose),key=recovery?.key??originalKey;
    const existing=options.store.research.receipt(options.run.id,key);
    const budget=options.store.research.budget(options.run.id,limits);
    const remaining=remainingOf(limits.outputTokens,budget.outputTokens);
@@ -263,10 +281,10 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
     return{inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedUsd,unknownCost:dispatched&&estimatedUsd===null};
    };
    try{
-    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens,...(highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
+    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens,...(highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{}),...(recovery?{retryOf:recovery.retryOf,recoveryPlanId:recovery.recoveryPlanId}:{})},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
      replayFailure:receipt=>{
       observed=readDshFailure(receipt.result)??emptyDshFailure();
-      return repairableDshFailure(observed)?new DshProtocolError(observed.code as DshProtocolCode):new ResearchStop('model_request_failed');
+      return !recovery&&repairableDshFailure(observed)?new DshProtocolError(observed.code as DshProtocolCode):new ResearchStop('model_request_failed');
      },
      execute:()=>runDshDecision({prompt,schema:input.schema,model:options.modelName??'deepseek-flash',maxTokens,timeoutMs:decisionTimeoutMs,...(highReasoning?{reasoningEffort:'high' as const}:{}),signal,invoke:async request=>{
       active();dispatched=true;
@@ -283,7 +301,7 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
     active();cp.steps++;return result;
    }catch(error){
     if(signal.aborted)throw signal.reason;
-    if(!(error instanceof DshProtocolError)||!repairableDshFailure(observed))throw error;
+    if(recovery||!(error instanceof DshProtocolError)||!repairableDshFailure(observed))throw error;
     active();feedback=error.code;
     if(attempt===2)throw new DshProtocolRepairExhaustedError(error.code,3);
    }
