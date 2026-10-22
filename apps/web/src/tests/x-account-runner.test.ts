@@ -91,6 +91,19 @@ test('Runner publishes independently verified Chinese findings for the selected 
   assertPreserved(f);
 });
 
+test('Runner saves model phase progress once across consecutive planning selection and writing calls while retaining findings',async t=>{
+ const f=selectedFixture(),p=recordingProvider(),m=chineseModel();const runner=makeRunner(f,p.provider,m.model);t.after(()=>{runner.stopAll();f.close();});
+ const writes:Array<{phase:string;content:string;verified:boolean}>=[];const save=f.store.research.save.bind(f.store.research);
+ f.store.research.save=(runId,checkpoint)=>{save(runId,checkpoint);const{phase,elapsedMs:_elapsedMs,steps:_steps,...content}=checkpoint;writes.push({phase,content:JSON.stringify(content),verified:checkpoint.xAccountResearch?.analysis.findings.some(finding=>finding.verified)??false});};
+ const run=await terminal(f,runner);assert.equal(run.state,'completed');assert.deepEqual(m.purposes,['x-account-analyze','x-account-synthesize','x-account-synthesize','x-account-write','x-account-verify-synthesis']);
+ const phaseOnlyWrites=writes.filter((write,index)=>write.phase==='x_synthesis'&&index>0&&write.content===writes[index-1]!.content);
+ assert.equal(phaseOnlyWrites.length,1,'planning, selection and writing share one phase-progress checkpoint; their job checkpoints remain separate');
+ const stages=f.store.listEvents(f.run.id).filter(event=>event.type==='stage').map(event=>event.payload as {key?:string;status?:string}).filter(stage=>['x_analysis','x_synthesis','x_verify_synthesis'].includes(stage.key??'')&&stage.status==='active');
+ assert.deepEqual(stages.map(stage=>stage.key),['x_analysis','x_synthesis','x_verify_synthesis'],'stage switches still publish their active progress');
+ assert.ok(writes.some(write=>write.phase==='x_verify_synthesis'&&write.verified),'verified findings are checkpointed before the terminal phase');
+ const checkpoint=assertPreserved(f);assert.equal(checkpoint.xAccountResearch!.analysis.synthesisDone,true);assert.ok(checkpoint.xAccountResearch!.analysis.findings.some(finding=>finding.verified&&finding.statement===STATEMENT));
+});
+
 test('Runner tool-budget exhaustion retains read pages and reports budget_exhausted instead of internal_error',async t=>{
   const f=selectedFixture();const p=recordingProvider();const m=chineseModel();const runner=makeRunner(f,p.provider,m.model,{...UNLIMITED,toolCalls:2});
   t.after(()=>{runner.stopAll();f.close();});

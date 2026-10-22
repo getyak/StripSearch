@@ -382,7 +382,9 @@ export async function runXAccountResearch(options:XAccountResearchOptions):Promi
   const invoke=options.model??productionModel(options,cp,active);
   const model:XAccountModel=async(input,signal)=>{
    active();const phases:Record<string,[string,string]>={'x-account-analyze':['x_analysis','分批分析账号原文'],'x-account-verify-batch':['x_verify','逐条核验本批分析'],'x-account-synthesize':['x_synthesis','整理中文专题报告'],'x-account-write':['x_synthesis','撰写中文专题正文'],'x-account-verify-synthesis':['x_verify_synthesis','核验专题报告与引用']};
-   const [key,label]=phases[input.purpose]??['x_analysis','分析账号原文'];cp!.phase=key;save();options.store.addEvent(options.run.id,'stage',{index:cp!.steps,total:0,key,label,status:'active'});return invoke(input,signal);
+   const [key,label]=phases[input.purpose]??['x_analysis','分析账号原文'];
+   if(cp!.phase!==key){cp!.phase=key;save();options.store.addEvent(options.run.id,'stage',{index:cp!.steps,total:0,key,label,status:'active'});}
+   return invoke(input,signal);
   };
   await analyzeXAccount({subject:state.profile!,question:options.run.question,pages:cp.pages,posts:state.posts,state,model,signal:options.signal,save,active});
   active();
