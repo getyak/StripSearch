@@ -9,6 +9,29 @@ import { pathToFileURL } from 'node:url';
 export const DSH_SDK_VERSION = '0.1.7-rc.2';
 const MAX_WIRE_BYTES = 2 * 1024 * 1024;
 
+export type DshProtocolCode = 'invalid_decision_json' | 'non_object_decision' | 'tool_error' | 'missing_structured_decision';
+export function isDshProtocolCode(value: unknown): value is DshProtocolCode {
+  return typeof value === 'string' && ['invalid_decision_json','non_object_decision','tool_error','missing_structured_decision'].includes(value);
+}
+/** Local protocol diagnoses only. Never include provider text or runtime messages. */
+export class DshProtocolError extends Error {
+  constructor(readonly code: DshProtocolCode) {
+    const messages: Record<DshProtocolCode,string> = {
+      invalid_decision_json:'Invalid DSH decision JSON',
+      non_object_decision:'DSH decision must be a JSON object',
+      tool_error:'DSH decision tool failed',
+      missing_structured_decision:'DSH finished without a structured decision'
+    };
+    super(messages[code]); this.name='DshProtocolError';
+  }
+}
+/** Only emitted after fully observed protocol failures exhaust their repair bound. */
+export class DshProtocolRepairExhaustedError extends Error {
+  constructor(readonly code: DshProtocolCode, readonly attemptCount = 3) {
+    super('DSH structured decision repairs exhausted'); this.name='DshProtocolRepairExhaustedError';
+  }
+}
+
 export interface DshDecisionOptions {
   prompt: string;
   /** JSON Schema is guidance; the durable controller must validate the returned value. */
@@ -164,22 +187,22 @@ export async function runDshDecision(options: DshDecisionOptions): Promise<unkno
       const { event } = notification.params;
       if (!record(event) || event.type !== 'tool/result' || !record(event.data) || !record(event.data.message)) return;
       const message = event.data.message;
-      if (message.isError === true) return;
+      if (message.isError === true) { rejectDecision(new DshProtocolError('tool_error')); return; }
       try {
-        if (!Array.isArray(message.content)) throw new Error('Malformed DSH tool result');
+        if (!Array.isArray(message.content)) throw new DshProtocolError('missing_structured_decision');
         const rendered = message.content.filter((block: unknown): block is Record<string, unknown> => record(block) && block.type === 'text' && typeof block.text === 'string').map(block => block.text).join('');
         const result: unknown = JSON.parse(rendered);
-        if (!record(result) || !Object.hasOwn(result, 'decision')) throw new Error('Malformed DSH decision receipt');
+        if (!record(result) || !Object.hasOwn(result, 'decision')) throw new DshProtocolError('missing_structured_decision');
         // Some providers encode the tool's JSON value as one JSON string.
         // Decode exactly once; all semantic and evidence validation stays in
         // the controller. Never accept arrays, primitives or recursive wrappers.
         const value: unknown = typeof result.decision === 'string'
           ? JSON.parse(result.decision)
           : result.decision;
-        if (!record(value)) throw new Error('DSH decision must be a JSON object');
+        if (!record(value)) throw new DshProtocolError('non_object_decision');
         resolveDecision(value);
-      } catch (error) { rejectDecision(error); }
-    } }).then(() => { throw new Error('DSH finished without a structured decision'); });
+      } catch (error) { rejectDecision(error instanceof DshProtocolError ? error : new DshProtocolError('invalid_decision_json')); }
+    } }).then(() => { throw new DshProtocolError('missing_structured_decision'); });
     return await Promise.race([decision, run]);
   } finally {
     clearTimeout(timer);

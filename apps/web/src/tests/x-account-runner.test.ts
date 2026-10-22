@@ -8,6 +8,9 @@ import type {ResearchBudgetLimits} from '../shared/types.js';
 import type {XAccountModel,XAccountProvider,XNativePost,XReadRequest,XReadResult} from '../server/research/x-account-contracts.js';
 import {renderMarkdown} from '../shared/canonical.js';
 import {renderReportHtml} from '../shared/report-html.js';
+import {productionModel} from '../server/research/x-account-research.js';
+import {DshProtocolRepairExhaustedError} from '../server/research/dsh-decision.js';
+import type {HttpTransport} from '../server/adapters/types.js';
 
 const ACCOUNT={nativeId:'42',handle:'runner_fixture',name:'Synthetic account',description:'Synthetic public account description.',url:'https://x.com/runner_fixture'};
 const ORIGINAL='I built a synthetic tool to organize reading notes.';
@@ -253,4 +256,73 @@ test('explicit X retry also refuses an unknown ancestor model charge',async t=>{
  first.enqueue(f.run.id);await waitFor(()=>held);first.abort(f.run.id);await waitFor(()=>first.activeCount()===0);f.store.recoverInterruptedRuns();
  const retry=retryFixture(f),m=chineseModel();second=makeRunner(retry,p.provider,m.model);const run=await terminal(retry,second);
  assert.equal(run.state,'partial');assert.equal(run.stopReason,'unknown_inflight');assert.equal(m.purposes.length,0,'an explicit retry cannot ignore an unknown model charge');
+});
+
+function modelStream(value:unknown,ending:'complete'|'missing-stop'|'error'='complete'):string {
+ const events:unknown[]=[{type:'message_start',message:{id:'synthetic-model',type:'message',role:'assistant',model:'deepseek-flash',content:[],usage:{input_tokens:40,output_tokens:0}}},{type:'content_block_start',index:0,content_block:{type:'tool_use',id:'synthetic-tool',name:'submit_decision',input:{}}},{type:'content_block_delta',index:0,delta:{type:'input_json_delta',partial_json:JSON.stringify({decision:value})}},{type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:'tool_use'},usage:{output_tokens:12}}];
+ if(ending==='complete'||ending==='error')events.push({type:'message_stop'});
+ if(ending==='error')events.push({type:'error',error:{type:'api_error',message:'PRIVATE_PROVIDER_TEXT'}});
+ return events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join('');
+}
+const PORT_INPUT={purpose:'x-account-analyze',prompt:'Use all supplied synthetic materials. PRIVATE_SOURCE_TEXT',schema:{type:'object',required:['findings'],properties:{findings:{type:'array'}}},maxTokens:1000};
+function productionPort(t:{after:(fn:()=>void)=>void},response:(index:number)=>string|Promise<string>,limits=UNLIMITED,status=200){
+ const f=selectedFixture();t.after(()=>f.close());
+ const cp=f.store.research.checkpoint(f.run.id)!;cp.limits=limits;f.store.research.save(f.run.id,cp);
+ let calls=0;
+ const transport:HttpTransport={async fetch(){const body=await response(calls++);return new Response(body,{status,headers:{'content-type':'text/event-stream'}});}};
+ const options={store:f.store,run:f.run,binding:f.firstStep.selectionBinding(f.run.id)!,provider:recordingProvider().provider,signal:new AbortController().signal,transport,apiKey:'synthetic-offline-only',modelName:'deepseek-flash',assertScope:()=>f.firstStep.scopeGuard(f.run.ownerId,f.run.id).assertCurrent()};
+ return {f,calls:()=>calls,model:()=>productionModel(options,cp,()=>{f.store.research.assertActive(f.run.id);options.assertScope();})};
+}
+
+test('production model repairs a fully observed protocol failure with a new metered prompt and replays both receipts', {timeout:30_000},async t=>{
+ const p=productionPort(t,index=>modelStream(index===0?'PRIVATE_BAD_JSON':{findings:[]}),{...UNLIMITED,modelCalls:2,outputTokens:24});
+ assert.deepEqual(await p.model()(PORT_INPUT,new AbortController().signal),{findings:[]});
+ const receipts=p.f.store.research.receipts(p.f.run.id);assert.equal(receipts.length,2);assert.equal(receipts.filter(r=>r.state==='failed').length,1);
+ const failed=receipts.find(r=>r.state==='failed')!;const metadata=failed.result as Record<string,unknown>;
+ assert.equal(metadata.code,'invalid_decision_json');assert.equal(metadata.status,200);assert.equal(metadata.messageStop,true);assert.equal(metadata.upstreamError,false);assert.equal(metadata.usageKnown,true);assert.match(String(metadata.responseHash),/^[a-f0-9]{64}$/);assert.ok(Number(metadata.bytes)>0);
+ assert.doesNotMatch(JSON.stringify(metadata),/PRIVATE_|"prompt"|"body"|SyntaxError/);
+ assert.equal(failed.usage!.inputTokens,40);assert.equal(failed.usage!.outputTokens,12);assert.equal(failed.usage!.unknownCost,false);assert.ok(Math.abs(failed.usage!.estimatedUsd!-0.0000264)<1e-12);
+ const prompts=receipts.map(r=>(r.request as {prompt:string}).prompt);assert.ok(prompts.every(prompt=>prompt.startsWith(PORT_INPUT.prompt)));assert.notEqual(prompts[0],prompts[1]);assert.ok(receipts.every(r=>JSON.stringify((r.request as {schema:unknown}).schema)===JSON.stringify(PORT_INPUT.schema)));
+ assert.deepEqual(await p.model()(PORT_INPUT,new AbortController().signal),{findings:[]});assert.equal(p.calls(),2,'restart replays the same failure/repair chain without buying it again');
+});
+
+test('production model bounds completed protocol repairs at three separately metered attempts', {timeout:30_000},async t=>{
+ const p=productionPort(t,()=>modelStream(null));
+ await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal),error=>error instanceof DshProtocolRepairExhaustedError&&error.attemptCount===3);
+ assert.equal(p.calls(),3);const receipts=p.f.store.research.receipts(p.f.run.id);assert.equal(receipts.length,3);assert.equal(new Set(receipts.map(r=>r.key)).size,3);assert.ok(receipts.every(r=>r.state==='failed'&&r.usage?.unknownCost===false));
+});
+
+test('production model never repairs incomplete or errored streams and refuses old failed-null replays', {timeout:45_000},async t=>{
+ for(const ending of ['missing-stop','error']as const){
+  const p=productionPort(t,()=>modelStream('PRIVATE_BAD_JSON',ending));
+  await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal));assert.equal(p.calls(),1);
+  const receipt=p.f.store.research.receipts(p.f.run.id)[0]!;assert.equal(receipt.state,'failed');assert.equal((receipt.result as {usageKnown:boolean}).usageKnown,false);assert.equal(receipt.usage!.estimatedUsd,null);assert.equal(receipt.usage!.unknownCost,true);
+  p.f.db.prepare('UPDATE research_actions SET result_json=NULL WHERE run_id=? AND action_key=?').run(p.f.run.id,receipt.key);
+  await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal),/model_request_failed/);assert.equal(p.calls(),1);
+ }
+});
+
+test('production model preserves unknown transport failures without repair or private diagnostics', {timeout:30_000},async t=>{
+ const p=productionPort(t,()=>{throw new Error('PRIVATE_TRANSPORT_ERROR');});
+ await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal));assert.equal(p.calls(),1);
+ const receipt=p.f.store.research.receipts(p.f.run.id)[0]!;assert.equal((receipt.result as {code:string}).code,'model_failure_unknown');assert.doesNotMatch(JSON.stringify(receipt.result),/PRIVATE_|"prompt"|"body"/);assert.equal(receipt.usage!.unknownCost,true);
+ await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal),/model_request_failed/);assert.equal(p.calls(),1);
+});
+
+test('production model repair attempts respect the existing shared model budget', {timeout:30_000},async t=>{
+ const p=productionPort(t,()=>modelStream(null),{...UNLIMITED,modelCalls:1});
+ await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal),/budget_exhausted/);assert.equal(p.calls(),1);assert.equal(p.f.store.research.receipts(p.f.run.id).length,1);
+});
+
+test('production model refuses repair for non-2xx responses even with complete usage', {timeout:30_000},async t=>{
+ const p=productionPort(t,()=>modelStream(null),UNLIMITED,500);
+ await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal));assert.equal(p.calls(),1);
+ assert.equal((p.f.store.research.receipts(p.f.run.id)[0]!.result as {status:number}).status,500);
+});
+
+test('production model cancellation and lost run authority never dispatch a protocol repair', {timeout:30_000},async t=>{
+ const cancelled=productionPort(t,()=>modelStream(null));const controller=new AbortController();const reason=new Error('synthetic cancellation');controller.abort(reason);
+ await assert.rejects(cancelled.model()(PORT_INPUT,controller.signal),error=>error===reason);assert.equal(cancelled.calls(),0);assert.equal(cancelled.f.store.research.receipts(cancelled.f.run.id).length,0);
+ const inactive=productionPort(t,()=>{inactive.f.store.updateRun(inactive.f.run.id,{state:'partial',stop_reason:'synthetic_pause'});return modelStream(null);});
+ await assert.rejects(inactive.model()(PORT_INPUT,new AbortController().signal),/run_inactive/);assert.equal(inactive.calls(),1);assert.equal(inactive.f.store.research.receipts(inactive.f.run.id).length,1);
 });

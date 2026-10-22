@@ -36,13 +36,15 @@ export interface MeteredInvokeOptions<T> {
   /** Replayed settled-failure receipts stay visible (first-step/fetch scope). */
   allowSettledFailure: boolean;
   /** Error for a replayed settled-FAILED receipt; message is role-specific. */
-  replayFailure: () => Error;
+  replayFailure: (receipt: ActionReceipt) => Error;
   execute: () => Promise<T>;
   usageOf: (result: T) => ActionUsage;
   /** Runs after settle and may throw into the failure path (abort/active checks). */
   onSettled?: (receipt: ActionReceipt | undefined) => void;
   /** Failure settlement usage policy (dispatched cost retention lives here). */
   failureUsage: (error: unknown) => ActionUsage;
+  /** Optional bounded, caller-owned metadata; old callers keep a null result. */
+  failureResult?: (error: unknown) => unknown;
   /** When false no late failure receipt is written (aborted chains). */
   settleFailure: () => boolean;
   /** Called with the settled FAILED receipt when one exists. */
@@ -63,7 +65,7 @@ export async function meteredInvoke<T>(options: MeteredInvokeOptions<T>): Promis
   );
   if (old) {
     options.onReplay?.(old);
-    if (old.state === 'failed') throw options.replayFailure();
+    if (old.state === 'failed') throw options.replayFailure(old);
     return old.result as T;
   }
   try {
@@ -74,7 +76,7 @@ export async function meteredInvoke<T>(options: MeteredInvokeOptions<T>): Promis
   } catch (error) {
     if (options.settleFailure()) {
       try {
-        options.ledger.settle(options.runId, options.key, null, options.failureUsage(error), 'failed');
+        options.ledger.settle(options.runId, options.key, options.failureResult?.(error) ?? null, options.failureUsage(error), 'failed');
         options.onFailed?.(options.ledger.receipt(options.runId, options.key));
       } catch {
         /* cancelled/deleted runs refuse late receipts; keep the original error */

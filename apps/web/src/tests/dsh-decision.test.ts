@@ -75,7 +75,7 @@ test('DSH never forwards a second model request after an invented unavailable to
   await assert.rejects(runDshDecision({
     prompt, signal: new AbortController().signal, model: 'deepseek-flash', timeoutMs: 15_000,
     invoke: async () => { count++; return { status: 200, body: response({ command: 'must-not-execute' }, 'bash') }; },
-  }), /without a structured decision/);
+  }), /DSH decision tool failed/);
   assert.equal(count, 1);
 });
 
@@ -98,4 +98,25 @@ test('DSH rejects recursively encoded or non-object decisions', { timeout: 30_00
       invoke: async () => ({ status: 200, body: response(value) }),
     }), /decision must be a JSON object/);
   }
+});
+
+test('DSH exposes only safe typed codes for returned structured-protocol failures', { timeout: 45_000 }, async () => {
+  for (const [value,tool,code] of [
+    ['SYNTHETIC_PRIVATE_OUTPUT','submit_decision','invalid_decision_json'],
+    [null,'submit_decision','non_object_decision'],
+    [{ command:'SYNTHETIC_PRIVATE_OUTPUT' },'bash','tool_error']
+  ] as const) {
+    await assert.rejects(runDshDecision({prompt,signal:new AbortController().signal,model:'deepseek-flash',timeoutMs:15_000,
+      invoke:async()=>({status:200,body:response(value,tool)})}),error=>{
+      assert.equal((error as {name?:string}).name,'DshProtocolError');
+      assert.equal((error as {code?:string}).code,code);
+      assert.doesNotMatch(String(error),/SYNTHETIC_PRIVATE_OUTPUT/);
+      return true;
+    });
+  }
+});
+
+test('DSH classifies a prose end turn as a missing structured decision', {timeout:30_000},async()=>{
+ const events=[{type:'message_start',message:{id:'offline',type:'message',role:'assistant',model:'deepseek-flash',content:[],usage:{input_tokens:2,output_tokens:0}}},{type:'content_block_start',index:0,content_block:{type:'text',text:'synthetic prose'}},{type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:2}},{type:'message_stop'}];
+ await assert.rejects(runDshDecision({prompt,signal:new AbortController().signal,model:'deepseek-flash',timeoutMs:15_000,invoke:async()=>({status:200,body:events.map(e=>`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join('')})}),error=>(error as {code?:string}).code==='missing_structured_decision');
 });

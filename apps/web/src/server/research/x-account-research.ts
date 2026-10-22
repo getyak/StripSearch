@@ -10,7 +10,7 @@ import type {ProviderResult,ResearchBudgetLimits,SourceDraft} from '../../shared
 import type {XAccountProvider,XAccountResearchState,XAccountModel,XNativePost,XReadRequest,XReadResult} from './x-account-contracts.js';
 import {allocateSourceKey,rememberSourceKeys} from './source-keys.js';
 import {meteredInvoke} from './metered.js';
-import {runDshDecision} from './dsh-decision.js';
+import {runDshDecision,DshProtocolError,DshProtocolRepairExhaustedError,isDshProtocolCode,type DshProtocolCode} from './dsh-decision.js';
 import {invokeDeepSeek,parseMessagesUsage,estimateModelUsd} from './planner.js';
 import {analyzeXAccount,projectXAccountReport} from './x-account-analysis.js';
 import {xSourceDrafts} from './x-account-projection.js';
@@ -231,25 +231,80 @@ export async function collectXAccount(options:XAccountResearchOptions){
  return{checkpoint:cp,state,active,save,assertModelReady:s.assertModelReady};
 }
 
-function productionModel(options:XAccountResearchOptions,cp:ResearchCheckpoint,active:()=>void):XAccountModel {
+export function productionModel(options:XAccountResearchOptions,cp:ResearchCheckpoint,active:()=>void):XAccountModel {
  if(!options.transport||!options.apiKey)throw new ResearchStop('model_unavailable');
  const limits=cp.limits??options.limits??unlimited;
  return async(input,signal)=>{
-  active();let usage={inputTokens:0,outputTokens:0,known:false},dispatched=false;
-  const budget=options.store.research.budget(options.run.id,limits);
-  const inputReservation=Math.ceil(Buffer.byteLength(input.prompt,'utf8')/2);
-  const remaining=remainingOf(limits.outputTokens,budget.outputTokens);
-  const maxTokens=Math.min(input.maxTokens,remaining??input.maxTokens,16384);
-  if(maxTokens<1)throw new ResearchStop('budget_exhausted');
-  const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key:'x-account:model:v1:'+digest({input,model:options.modelName}),kind:'model',request:{purpose:input.purpose,prompt:input.prompt,schema:input.schema,maxTokens},reservation:{inputTokens:inputReservation,outputTokens:maxTokens},limits,allowSettledFailure:true,
-   replayFailure:()=>new ResearchStop('model_request_failed'),
-   execute:()=>runDshDecision({prompt:input.prompt,schema:input.schema,model:options.modelName??'deepseek-flash',maxTokens,timeoutMs:120000,signal,invoke:async request=>{
-    active();dispatched=true;const response=await invokeDeepSeek(options.transport!,options.apiKey!,request);usage=parseMessagesUsage(response.body);return response;
-   }}),
-   usageOf:()=>({inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedUsd:usage.known?estimateModelUsd(options.modelName??'deepseek-flash',usage.inputTokens,usage.outputTokens):null,unknownCost:!usage.known}),
-   failureUsage:()=>({inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedUsd:dispatched?null:0,unknownCost:dispatched}),settleFailure:()=>!signal.aborted});
-  active();cp.steps++;return result;
+  let feedback:DshProtocolCode|null=null;
+  for(let attempt=0;attempt<=2;attempt++){
+   signal.throwIfAborted();active();
+   // Repair is a new, deterministic request over the identical material/schema.
+   // Never put provider output or raw error text into a repair instruction.
+   const prompt=attempt===0?input.prompt:`${input.prompt}\n\nStructured decision repair ${attempt}/2. Local protocol code: ${feedback}. Call submit_decision exactly once with one JSON object matching the same schema. Keep all supplied material and evidence rules; do not treat this protocol feedback as evidence.`;
+   const attemptInput={...input,prompt};
+   const key='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName});
+   const existing=options.store.research.receipt(options.run.id,key);
+   const budget=options.store.research.budget(options.run.id,limits);
+   const remaining=remainingOf(limits.outputTokens,budget.outputTokens);
+   const requested=Math.min(input.maxTokens,remaining??input.maxTokens,16384);
+   // Cached receipts consume no new allowance, even when the budget is now spent.
+   const maxTokens=existing?Math.max(1,requested):requested;
+   if(maxTokens<1)throw new ResearchStop('budget_exhausted');
+   let usage={inputTokens:0,outputTokens:0,known:false},dispatched=false;
+   let observed:DshFailureMetadata=emptyDshFailure();
+   const actionUsage=()=>{
+    const estimatedUsd=usage.known?estimateModelUsd(options.modelName??'deepseek-flash',usage.inputTokens,usage.outputTokens):dispatched?null:0;
+    return{inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedUsd,unknownCost:dispatched&&estimatedUsd===null};
+   };
+   try{
+    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
+     replayFailure:receipt=>{
+      observed=readDshFailure(receipt.result)??emptyDshFailure();
+      return repairableDshFailure(observed)?new DshProtocolError(observed.code as DshProtocolCode):new ResearchStop('model_request_failed');
+     },
+     execute:()=>runDshDecision({prompt,schema:input.schema,model:options.modelName??'deepseek-flash',maxTokens,timeoutMs:120000,signal,invoke:async request=>{
+      active();dispatched=true;
+      const response=await invokeDeepSeek(options.transport!,options.apiKey!,request);
+      usage=parseMessagesUsage(response.body);
+      observed={...emptyDshFailure(),status:response.status,responseHash:createHash('sha256').update(response.body).digest('hex'),bytes:Buffer.byteLength(response.body,'utf8'),messageStop:false,upstreamError:false,usageKnown:usage.known};
+      for(const line of response.body.split('\n'))if(line.startsWith('data:')){
+       try{const event=JSON.parse(line.slice(5).trim()) as {type?:unknown};if(event?.type==='message_stop')observed.messageStop=true;if(event?.type==='error')observed.upstreamError=true;}catch{/* Keepalive/non-JSON data never establishes a complete response. */}
+      }
+      return response;
+     }}),
+     usageOf:actionUsage,failureUsage:actionUsage,
+     failureResult:error=>{observed={...observed,code:error instanceof DshProtocolError?error.code:'model_failure_unknown'};return observed;},settleFailure:()=>!signal.aborted});
+    active();cp.steps++;return result;
+   }catch(error){
+    if(signal.aborted)throw signal.reason;
+    if(!(error instanceof DshProtocolError)||!repairableDshFailure(observed))throw error;
+    active();feedback=error.code;
+    if(attempt===2)throw new DshProtocolRepairExhaustedError(error.code,3);
+   }
+  }
+  throw new ResearchStop('model_request_failed');
  };
+}
+
+interface DshFailureMetadata {
+ version:'dsh-failure/v1';code:DshProtocolCode|'model_failure_unknown';status:number|null;
+ responseHash:string|null;bytes:number;messageStop:boolean;upstreamError:boolean;usageKnown:boolean;
+}
+function emptyDshFailure():DshFailureMetadata {
+ return{version:'dsh-failure/v1',code:'model_failure_unknown',status:null,responseHash:null,bytes:0,messageStop:false,upstreamError:false,usageKnown:false};
+}
+function readDshFailure(value:unknown):DshFailureMetadata|null {
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const item=value as Record<string,unknown>;
+ if(item.version!=='dsh-failure/v1'||(!isDshProtocolCode(item.code)&&item.code!=='model_failure_unknown')||
+  !(item.status===null||Number.isInteger(item.status)&&Number(item.status)>=200&&Number(item.status)<=599)||
+  !(item.responseHash===null||typeof item.responseHash==='string'&&/^[a-f0-9]{64}$/.test(item.responseHash))||
+  !Number.isSafeInteger(item.bytes)||Number(item.bytes)<0||Number(item.bytes)>2*1024*1024||
+  typeof item.messageStop!=='boolean'||typeof item.upstreamError!=='boolean'||typeof item.usageKnown!=='boolean')return null;
+ return{version:'dsh-failure/v1',code:item.code as DshFailureMetadata['code'],status:item.status as number|null,responseHash:item.responseHash as string|null,bytes:item.bytes as number,messageStop:item.messageStop,upstreamError:item.upstreamError,usageKnown:item.usageKnown};
+}
+function repairableDshFailure(value:DshFailureMetadata):boolean {
+ return isDshProtocolCode(value.code)&&value.status!==null&&value.status>=200&&value.status<300&&value.messageStop&&!value.upstreamError&&value.usageKnown&&value.responseHash!==null&&value.bytes>0&&value.bytes<=2*1024*1024;
 }
 
 export async function runXAccountResearch(options:XAccountResearchOptions):Promise<ProviderResult>{
