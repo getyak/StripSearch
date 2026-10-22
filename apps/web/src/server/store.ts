@@ -880,7 +880,9 @@ export class Store {
       if (run?.provider === 'research') {
         const hasFirstStepTable = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='first_step_links'").get();
         const firstStep = hasFirstStepTable && this.db.prepare('SELECT 1 FROM first_step_links WHERE run_id=?').get(row.id);
-        const unknown = this.research.receipts(row.id).some(receipt => firstStep ? receipt.state === 'inflight' : receipt.state !== 'completed');
+        const unknown = this.db.prepare(firstStep
+          ? "SELECT 1 FROM research_actions WHERE run_id=? AND state='inflight' LIMIT 1"
+          : "SELECT 1 FROM research_actions WHERE run_id=? AND state<>'completed' LIMIT 1").get(row.id);
         if (!unknown) { this.updateRun(row.id, {state:'queued', interrupted:1}); continue; }
       }
       if (this.markInterrupted(row.id)) {

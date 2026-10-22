@@ -704,6 +704,32 @@ test('one receipt lookup never decodes unrelated action payloads', () => {
  } finally { db.close(); }
 });
 
+test('receipt traffic summary ignores unrelated payloads and retains every state and missing-byte default', () => {
+ const {db,store,run}=setup();
+ try {
+  const limits={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0};
+  for(let i=0;i<6;i++){
+   store.research.reserve(run.id,`traffic-${i}`,'tool',{type:'read'},{inputTokens:1,outputTokens:2},limits);
+   if(i!==2)store.research.settle(run.id,`traffic-${i}`,{retained:true},{...(i<2?{bytes:i===0?37:13}:{}),estimatedUsd:i===1?null:0,unknownCost:i===1},i===1?'failed':'completed');
+  }
+  db.prepare('UPDATE research_actions SET usage_json=? WHERE run_id=? AND action_key=?').run('null',run.id,'traffic-4');
+  db.prepare('UPDATE research_actions SET usage_json=? WHERE run_id=? AND action_key=?').run('',run.id,'traffic-5');
+  const unrelated='{"unused":"'+'x'.repeat(256*1024);db.prepare('UPDATE research_actions SET request_json=?,result_json=? WHERE run_id=?').run(unrelated,unrelated,run.id);
+  const snapshot=()=>db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY action_key').all(run.id);const before=snapshot();
+  assert.deepEqual(store.research.receiptUsageSummary(run.id),{requests:6,bytes:50});assert.deepEqual(store.research.receiptUsageSummary('missing-run'),{requests:0,bytes:0});
+  assert.deepEqual(snapshot(),before,'raw payload bytes, usage and unsettled or failed accounting remain unchanged');
+ } finally {db.close();}
+});
+
+test('receipt traffic summary still rejects malformed usage JSON without rewriting the ledger', () => {
+ const {db,store,run}=setup();
+ try {
+  store.research.reserve(run.id,'invalid-usage','tool',{type:'read'},{inputTokens:1,outputTokens:2});store.research.settle(run.id,'invalid-usage',{retained:true},{bytes:37,estimatedUsd:null,unknownCost:true},'failed');
+  db.prepare('UPDATE research_actions SET usage_json=? WHERE run_id=?').run('{"bytes":',run.id);const snapshot=()=>db.prepare('SELECT * FROM research_actions WHERE run_id=?').all(run.id);const before=snapshot();
+  assert.throws(()=>store.research.receiptUsageSummary(run.id),SyntaxError);assert.deepEqual(snapshot(),before);
+ } finally {db.close();}
+});
+
 test('budget reads financial columns only and retains settled and reserved accounting semantics', () => {
  const {db,store,run}=setup();
  try {

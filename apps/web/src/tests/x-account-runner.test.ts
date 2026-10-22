@@ -8,7 +8,7 @@ import type {ResearchBudgetLimits} from '../shared/types.js';
 import type {XAccountModel,XAccountProvider,XNativePost,XReadRequest,XReadResult} from '../server/research/x-account-contracts.js';
 import {renderMarkdown} from '../shared/canonical.js';
 import {renderReportHtml} from '../shared/report-html.js';
-import {collectXAccount,productionModel} from '../server/research/x-account-research.js';
+import {collectXAccount,productionModel,runXAccountResearch} from '../server/research/x-account-research.js';
 import {DshProtocolRepairExhaustedError} from '../server/research/dsh-decision.js';
 import {ProviderError,type HttpTransport} from '../server/adapters/types.js';
 import {createHash} from 'node:crypto';
@@ -63,6 +63,9 @@ function makeRunner(f:SeededFirstStep,provider:XAccountProvider,model?:XAccountM
   return new Runner({store:f.store,firstStep:f.firstStep,config:{researchLimits:limits,deepseekApiKey:null,exaApiKey:null,firecrawlApiKey:null,tikhubApiKey:null,githubToken:null} as AppConfig,
     providerFactory:()=>{throw new Error('legacy provider must not run');},transport:offlineTestTransport,researchTools:{async execute(){throw new Error('legacy tools must not run');}},xAccountProvider:provider,...(model?{xAccountModel:model}:{})});
 }
+function directResearchOptions(f:SeededFirstStep,provider:XAccountProvider,model?:XAccountModel){
+ return{store:f.store,run:f.store.getRun(f.run.id)!,binding:f.firstStep.selectionBinding(f.run.id)!,provider,signal:new AbortController().signal,limits:UNLIMITED,assertScope:()=>f.firstStep.scopeGuard(f.run.ownerId,f.run.id).assertCurrent(),...(model?{model}:{})};
+}
 async function terminal(f:SeededFirstStep,runner:Runner) {
   runner.enqueue(f.run.id);
   await waitFor(()=>runner.activeCount()===0&&!['queued','researching'].includes(f.store.getRun(f.run.id)!.state));
@@ -89,6 +92,14 @@ test('Runner publishes independently verified Chinese findings for the selected 
   assert.ok(view.answer.some(s=>s.bullets.some(b=>b.text===STATEMENT)));
   for(const output of [renderMarkdown(view),renderReportHtml(view)])assert.ok(output.includes(STATEMENT));
   assertPreserved(f);
+});
+
+test('X account finalizes traffic usage without decoding unrelated paid receipt payloads',async t=>{
+ const f=selectedFixture(),p=recordingProvider();let retained:unknown;
+ const snapshot=()=>f.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY action_key').all(f.run.id);
+ const m=chineseModel(purpose=>{if(purpose!=='x-account-verify-synthesis')return;const unrelated='{"unused":"'+'x'.repeat(256*1024);f.db.prepare('UPDATE research_actions SET request_json=?,result_json=? WHERE run_id=?').run(unrelated,unrelated,f.run.id);retained=snapshot();});
+ t.after(()=>f.close());const run=await runXAccountResearch(directResearchOptions(f,p.provider,m.model));
+ assert.equal(run.state,'completed');assert.equal(run.stopReason,'x_account_research_complete');assert.equal(run.usage.requests,3);assert.equal(run.usage.bytes,600);assert.equal(p.calls.length,3);assert.deepEqual(snapshot(),retained,'terminal traffic reporting cannot rewrite paid receipts');assertPreserved(f);
 });
 
 test('Runner saves model phase progress once across consecutive planning selection and writing calls while retaining findings',async t=>{
@@ -235,6 +246,17 @@ function retryFixture(f:SeededFirstStep):SeededFirstStep {
  const run=f.store.insertRun({ownerId:f.run.ownerId,question:f.run.question,seedUrl:f.run.seedUrl,provider:'research',parentRunId:null,retryOf:f.run.id,followup:false,idempotencyKey:null,bodyFingerprint:'synthetic-explicit-x-retry'});
  f.firstStep.inheritFirstStepScope(f.run.ownerId,run,f.run.id);return{...f,run};
 }
+test('X ancestor reuse decodes only the exact read and still blocks unrelated inflight model charges',async t=>{
+ for(const state of ['completed','failed','inflight'] as const){
+  const f=selectedFixture();t.after(()=>f.close());const p=recordingProvider();await collectXAccount(directResearchOptions(f,p.provider));
+  f.store.research.reserve(f.run.id,'unrelated-ancestor-model','model',{purpose:'unrelated'},{inputTokens:11,outputTokens:7},UNLIMITED);
+  if(state!=='inflight')f.store.research.settle(f.run.id,'unrelated-ancestor-model',{retained:true},{estimatedUsd:state==='failed'?null:0,unknownCost:state==='failed'},state);
+  const unrelated='{"unused":"'+'x'.repeat(256*1024);f.db.prepare('UPDATE research_actions SET request_json=?,result_json=?,usage_json=? WHERE run_id=? AND action_key=?').run(unrelated,unrelated,unrelated,f.run.id,'unrelated-ancestor-model');
+  f.store.updateRun(f.run.id,{state:'partial',stop_reason:'synthetic_parent_partial'});const snapshot=()=>f.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY action_key').all(f.run.id);const before=snapshot(),paid=p.calls.length,retry=retryFixture(f),m=chineseModel();
+  const result=await runXAccountResearch(directResearchOptions(retry,p.provider,m.model));assert.equal(result.state,state==='inflight'?'partial':'completed',state);assert.equal(result.stopReason,state==='inflight'?'unknown_inflight':'x_account_research_complete');assert.equal(p.calls.length,paid,'completed provider reads are reused without another paid request');assert.equal(m.purposes.length,state==='inflight'?0:5);
+  const reads=f.store.research.receipts(retry.run.id);assert.equal(reads.length,3);assert.ok(reads.every(receipt=>(receipt.request as {reusedFromRunId:string}).reusedFromRunId===f.run.id&&receipt.usage?.estimatedUsd===0&&receipt.usage?.bytes===0));assert.deepEqual(snapshot(),before,'ancestor bytes, usage and unknown charges stay unchanged');
+ }
+});
 test('explicit same-scope X retry reuses successful paid reads and retries only settled failed pages',async t=>{
  const f=selectedFixture();let failed=true;const m=chineseModel();
  const p=recordingProvider(request=>{if(request.type!=='timeline')return undefined;if(request.cursor===null)return pageResult([originalPost()],'next-page');if(failed){failed=false;throw new Error('synthetic known read failure');}return pageResult([originalPost('102')]);});

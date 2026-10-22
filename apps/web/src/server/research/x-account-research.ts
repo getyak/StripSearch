@@ -57,19 +57,19 @@ function setup(options:XAccountResearchOptions){
  const cp=checkpoint,state=cp.xAccountResearch!;
  // An explicit retry is a new run, but successful paid reads are immutable
  // evidence and need not be bought again under the exact same live scope.
- const ancestors:Array<{run:RunRecord;checkpoint:ResearchCheckpoint;expectedPages:string;receipts:Map<string,import('./research-store.js').ActionReceipt>}>=[];
+ const ancestors:Array<{run:RunRecord;checkpoint:ResearchCheckpoint;expectedPages:string}>=[];
  const visited=new Set([run.id]);let parentId=run.retryOf;
  while(parentId&&!visited.has(parentId)){
   visited.add(parentId);const parent=store.getRunForOwner(parentId,run.ownerId);const parentCp=parent?store.research.checkpoint(parent.id):null;
   if(!parent||!parentCp?.xAccountResearch||parentCp.firstStep?.caseId!==options.binding.caseId||parentCp.firstStep.scopeVersion!==options.binding.scopeVersion||parentCp.xAccountResearch.accountId!==state.accountId||parentCp.firstStep.accounts.length!==1||parentCp.firstStep.accounts[0]!.profileUrl!==options.binding.accounts[0]!.profileUrl)break;
-  ancestors.push({run:parent,checkpoint:parentCp,expectedPages:sourceExpectations(parentCp.pages),receipts:new Map(store.research.receipts(parent.id).map(receipt=>[receipt.key,receipt]))});parentId=parent.retryOf;
+  ancestors.push({run:parent,checkpoint:parentCp,expectedPages:sourceExpectations(parentCp.pages)});parentId=parent.retryOf;
  }
  const checkParent=()=>{
   for(const ancestor of ancestors){
    if(!store.research.areSourcePagesCurrent(ancestor.run.id,ancestor.expectedPages))throw new ResearchStop('source_revoked');
   }
  };
- const assertModelReady=()=>{if(ancestors.some(a=>[...a.receipts.values()].some(r=>r.kind==='model'&&r.state==='inflight')))throw new ResearchStop('unknown_inflight');};
+ const assertModelReady=()=>{if(ancestors.some(a=>store.research.hasInflightModel(a.run.id)))throw new ResearchStop('unknown_inflight');};
  const inheritedPage=(fromRunId:string|undefined,url:string)=>{
   if(!fromRunId)return undefined;const page=ancestors.find(a=>a.run.id===fromRunId)?.checkpoint.pages.find(p=>p.url===url);
   return page?{runId:fromRunId,sourceKey:page.sourceKey}:undefined;
@@ -97,7 +97,8 @@ function setup(options:XAccountResearchOptions){
   // Cached receipts resolve as microtasks; yield to HTTP/cancel handlers before dispatch.
   await new Promise<void>(resolve=>setImmediate(resolve));
   active();const key='x-account:tool:v1:'+digest({accountId:state.accountId,scopeVersion:options.binding.scopeVersion,request});
-  const ancestor=ancestors.find(a=>a.receipts.has(key));const cached=ancestor?.receipts.get(key);
+  const inherited=(()=>{for(const ancestor of ancestors){const cached=store.research.receipt(ancestor.run.id,key);if(cached)return{ancestor,cached};}return undefined;})();
+  const ancestor=inherited?.ancestor,cached=inherited?.cached;
   if(cached?.state==='inflight')throw new ResearchStop('unknown_inflight');
   const reused=cached?.state==='completed';
   const result=await meteredInvoke<XReadResult>({ledger:store.research,runId:run.id,key,kind:'tool',request:{...request,type:`x_${request.type}`,...(reused?{reusedFromRunId:ancestor!.run.id}:{})},reservation:{inputTokens:0,outputTokens:0},limits,allowSettledFailure:true,
@@ -423,6 +424,6 @@ export async function runXAccountResearch(options:XAccountResearchOptions):Promi
  // This is a terminal review checkpoint, so it must survive a revoked scope.
  // ResearchStore still enforces run cancellation/deletion/terminal-state guards.
  options.store.research.save(options.run.id,cp);
- const receipts=options.store.research.receipts(options.run.id);
- return{state:complete?'completed':'partial',identity:cp.identity??{displayName:'X 账号研究',handle:null,profileUrl:options.binding.accounts[0]!.profileUrl,status:'needs_input',note:'原生账号资料尚未核对完成，当前不能确认账号标识。',candidates:[]},sources,answer:projection.answer,observations:projection.observations,limitations:projection.limitations,usage:{requests:receipts.length,bytes:receipts.reduce((n,r)=>n+(r.usage?.bytes??0),0)},stopReason:cp.stopReason};
+ const usage=options.store.research.receiptUsageSummary(options.run.id);
+ return{state:complete?'completed':'partial',identity:cp.identity??{displayName:'X 账号研究',handle:null,profileUrl:options.binding.accounts[0]!.profileUrl,status:'needs_input',note:'原生账号资料尚未核对完成，当前不能确认账号标识。',candidates:[]},sources,answer:projection.answer,observations:projection.observations,limitations:projection.limitations,usage,stopReason:cp.stopReason};
 }

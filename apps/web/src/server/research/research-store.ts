@@ -134,6 +134,15 @@ export class ResearchStore {
   const rows=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as ActionReceiptRow[];
   return rows.map(decodeReceipt);
  }
+ /** Traffic reporting needs usage only; retain the same JSON errors and byte defaults. */
+ receiptUsageSummary(runId:string):{requests:number;bytes:number} {
+  const rows=this.db.prepare('SELECT usage_json FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<Pick<ActionReceiptRow,'usage_json'>>;
+  return{requests:rows.length,bytes:rows.reduce((bytes,row)=>{const usage:ActionUsage|null=row.usage_json?JSON.parse(row.usage_json):null;return bytes+(usage?.bytes??0);},0)};
+ }
+ /** Inflight model authority is metadata, never a reason to decode provider payloads. */
+ hasInflightModel(runId:string):boolean {
+  return !!this.db.prepare("SELECT 1 FROM research_actions WHERE run_id=? AND kind='model' AND state='inflight' LIMIT 1").get(runId);
+ }
  receipt(runId:string,key:string):ActionReceipt|undefined {
   const row=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? AND action_key=?').get(runId,key) as ActionReceiptRow|undefined;
   return row?decodeReceipt(row):undefined;
