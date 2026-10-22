@@ -11,6 +11,7 @@ import {renderReportHtml} from '../shared/report-html.js';
 import {productionModel} from '../server/research/x-account-research.js';
 import {DshProtocolRepairExhaustedError} from '../server/research/dsh-decision.js';
 import type {HttpTransport} from '../server/adapters/types.js';
+import {createHash} from 'node:crypto';
 
 const ACCOUNT={nativeId:'42',handle:'runner_fixture',name:'Synthetic account',description:'Synthetic public account description.',url:'https://x.com/runner_fixture'};
 const ORIGINAL='I built a synthetic tool to organize reading notes.';
@@ -269,9 +270,10 @@ function productionPort(t:{after:(fn:()=>void)=>void},response:(index:number)=>s
  const f=selectedFixture();t.after(()=>f.close());
  const cp=f.store.research.checkpoint(f.run.id)!;cp.limits=limits;f.store.research.save(f.run.id,cp);
  let calls=0;
- const transport:HttpTransport={async fetch(){const body=await response(calls++);return new Response(body,{status,headers:{'content-type':'text/event-stream'}});}};
+ const requests:Record<string,unknown>[]=[];
+ const transport:HttpTransport={async fetch(_url,init){requests.push(JSON.parse(init!.body!));const body=await response(calls++);return new Response(body,{status,headers:{'content-type':'text/event-stream'}});}};
  const options={store:f.store,run:f.run,binding:f.firstStep.selectionBinding(f.run.id)!,provider:recordingProvider().provider,signal:new AbortController().signal,transport,apiKey:'synthetic-offline-only',modelName:'deepseek-flash',assertScope:()=>f.firstStep.scopeGuard(f.run.ownerId,f.run.id).assertCurrent()};
- return {f,calls:()=>calls,model:()=>productionModel(options,cp,()=>{f.store.research.assertActive(f.run.id);options.assertScope();})};
+ return {f,requests,calls:()=>calls,model:()=>productionModel(options,cp,()=>{f.store.research.assertActive(f.run.id);options.assertScope();})};
 }
 
 test('production model repairs a fully observed protocol failure with a new metered prompt and replays both receipts', {timeout:30_000},async t=>{
@@ -325,4 +327,36 @@ test('production model cancellation and lost run authority never dispatch a prot
  await assert.rejects(cancelled.model()(PORT_INPUT,controller.signal),error=>error===reason);assert.equal(cancelled.calls(),0);assert.equal(cancelled.f.store.research.receipts(cancelled.f.run.id).length,0);
  const inactive=productionPort(t,()=>{inactive.f.store.updateRun(inactive.f.run.id,{state:'partial',stop_reason:'synthetic_pause'});return modelStream(null);});
  await assert.rejects(inactive.model()(PORT_INPUT,new AbortController().signal),/run_inactive/);assert.equal(inactive.calls(),1);assert.equal(inactive.f.store.research.receipts(inactive.f.run.id).length,1);
+});
+
+function legacyModelKey(input:typeof PORT_INPUT):string{return 'x-account:model:v1:'+createHash('sha256').update(JSON.stringify({input,model:'deepseek-flash'})).digest('hex');}
+test('X verification and synthesis use reasoning while old off receipts remain separate', {timeout:30_000},async t=>{
+ for(const purpose of ['x-account-verify-batch','x-account-verify-synthesis','x-account-synthesize']){
+  const input={...PORT_INPUT,purpose};const p=productionPort(t,()=>modelStream({fresh:true}));
+  const oldKey=legacyModelKey(input);p.f.store.research.reserve(p.f.run.id,oldKey,'model',{purpose},{inputTokens:0,outputTokens:0},UNLIMITED);p.f.store.research.settle(p.f.run.id,oldKey,{legacyOff:true},{inputTokens:0,outputTokens:0,estimatedUsd:0,unknownCost:false});
+  assert.deepEqual(await p.model()(input,new AbortController().signal),{fresh:true});assert.equal(p.calls(),1,'old off verification cannot satisfy a high-reasoning request');
+  assert.deepEqual(p.requests[0]!.thinking,{type:'enabled'});assert.deepEqual(p.requests[0]!.output_config,{effort:'high'});assert.equal(p.requests[0]!.max_tokens,16384);
+  assert.equal(p.f.store.research.receipts(p.f.run.id).length,2);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,oldKey)!.result,{legacyOff:true});
+ }
+});
+
+test('X generation reuses its legacy off receipt and reasoning respects remaining output budget', {timeout:30_000},async t=>{
+ const generated=productionPort(t,()=>{throw new Error('legacy generation must be replayed');});const key=legacyModelKey(PORT_INPUT);
+ generated.f.store.research.reserve(generated.f.run.id,key,'model',{purpose:PORT_INPUT.purpose},{inputTokens:0,outputTokens:0},UNLIMITED);generated.f.store.research.settle(generated.f.run.id,key,{generated:true},{estimatedUsd:0,unknownCost:false});
+ assert.deepEqual(await generated.model()(PORT_INPUT,new AbortController().signal),{generated:true});assert.equal(generated.calls(),0);
+ const bounded=productionPort(t,()=>modelStream({verified:true}),{...UNLIMITED,outputTokens:40});const input={...PORT_INPUT,purpose:'x-account-verify-batch'};
+ assert.deepEqual(await bounded.model()(input,new AbortController().signal),{verified:true});assert.equal(bounded.requests[0]!.max_tokens,40);
+ assert.equal(bounded.f.store.research.receipts(bounded.f.run.id)[0]!.usage!.outputTokens,12);
+ assert.deepEqual(await bounded.model()(input,new AbortController().signal),{verified:true});assert.equal(bounded.calls(),1,'changing remaining balance cannot create a second request key');
+});
+
+test('native reasoning remains out of successful and failed model receipts while usage stays cumulative', {timeout:30_000},async t=>{
+ const p=productionPort(t,index=>{
+  const events=modelStream(index===0?null:{verified:true}).trim().split('\n\n').map(line=>JSON.parse(line.slice(6)) as Record<string,unknown>);
+  for(const event of events)if(typeof event.index==='number')event.index++;
+  events.splice(1,0,{type:'content_block_start',index:0,content_block:{type:'thinking',thinking:''}},{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'PRIVATE_REASONING_ONLY'}},{type:'content_block_stop',index:0});
+  return events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join('');
+ });
+ assert.deepEqual(await p.model()({...PORT_INPUT,purpose:'x-account-verify-batch'},new AbortController().signal),{verified:true});
+ const receipts=p.f.store.research.receipts(p.f.run.id);assert.equal(receipts.length,2);assert.doesNotMatch(JSON.stringify(receipts),/PRIVATE_REASONING_ONLY/);assert.ok(receipts.every(receipt=>receipt.usage!.outputTokens===12&&receipt.usage!.unknownCost===false));
 });

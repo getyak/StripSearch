@@ -22,7 +22,7 @@ function attributesThirdPartySpeech(statement:string,subject:XNativeAccount):boo
  const speech='(?:提问|追问|询问|发问|问及|问到|问道|问|提出|提到|提及|认为|表示|声称|称|说|建议|质疑|指出|评价|评论|观点|意见|反馈|问题)';
  // The target asking a reader is not the reader speaking.
  const text=statement.replace(new RegExp(`向${actors}`,'g'),'向受方');
- if(/被(?:追问|问及|问到|询问|提问)/.test(text)||new RegExp(`${actors}[^。；，,\n]{0,100}${speech}`).test(text))return true;
+ if(/被(?:追问|问及|问到|询问|提问)/.test(text)||/(?:回应|回答|回复|答复|应答)[^。；，,\n]{0,100}(?:提问|追问|问题|询问)/.test(text)||new RegExp(`${actors}[^。；，,\n]{0,100}${speech}`).test(text))return true;
  return [...text.matchAll(new RegExp(`@([A-Za-z0-9_]{1,15})[^。；，,\n]{0,100}${speech}`,'g'))].some(m=>m[1]!.toLowerCase()!==subject.handle.toLowerCase());
 }
 function relatedContext(target:XAccountPost,context:XAccountPost):boolean {
@@ -84,6 +84,17 @@ function candidates(value:unknown,materials:Material[],input:XAccountAnalysisInp
  return result;
 }
 function originals(findings:XAccountFinding[],input:XAccountAnalysisInput):Material[]{const pages=new Map(input.pages.map(p=>[p.sourceKey,p]));const posts=new Map(input.posts.map(p=>[p.sourceKey,p]));const result:Material[]=[];for(const f of findings)for(const e of f.evidence){const p=pages.get(e.sourceKey);const post=posts.get(e.sourceKey);if(!p||!post)continue;const start=Math.max(0,e.quoteOffset-800);const item=material(post,p,start,e.quote.length+1600);if(!result.some(m=>m.sourceKey===item.sourceKey&&m.offset===item.offset))result.push(item);}return result;}
+/** Publication metadata is an arithmetic aid, never evidence that a described action occurred. */
+function findingTiming(finding:XAccountFinding,posts:ReadonlyMap<string,XAccountPost>){
+ const citedPosts=[...new Set(finding.evidence.map(e=>e.sourceKey))].flatMap(sourceKey=>{
+  const post=posts.get(sourceKey);if(!post)return [];const parsed=post.publishedAt?Date.parse(post.publishedAt):NaN;
+  return [{sourceKey,authorId:post.authorId,authorHandle:post.authorHandle,role:post.role,kind:post.kind,publishedAt:post.publishedAt,publishedAtUtc:Number.isFinite(parsed)?new Date(parsed).toISOString():null}];
+ });
+ const dated=citedPosts.flatMap(post=>post.publishedAtUtc?[{sourceKey:post.sourceKey,time:Date.parse(post.publishedAtUtc)}]:[]).sort((a,b)=>a.time-b.time);
+ const elapsedBetweenPosts:Array<{fromSourceKey:string;toSourceKey:string;hours:number;days:number}>=[];
+ for(let i=0;i<dated.length;i++)for(let j=i+1;j<dated.length;j++){const from=dated[i]!,to=dated[j]!,elapsed=to.time-from.time;elapsedBetweenPosts.push({fromSourceKey:from.sourceKey,toSourceKey:to.sourceKey,hours:elapsed/3_600_000,days:elapsed/86_400_000});}
+ return {citedPosts,elapsedBetweenPosts};
+}
 function guard(input:XAccountAnalysisInput){input.signal.throwIfAborted();input.active();}
 const inflightModels=new WeakMap<XAccountAnalysisInput,Map<string,Promise<unknown>>>();
 async function model(input:XAccountAnalysisInput,purpose:string,instruction:string,data:unknown,schema:Record<string,unknown>){
@@ -136,13 +147,13 @@ async function verify(findings:XAccountFinding[],input:XAccountAnalysisInput,sta
   }}return context;
  };
  // Verification is a separate semantic decision and sees original text, never a generator's verified flag.
- for(const chunk of pack(findings.map(f=>({finding:f,materials:originals([f],input),context:relationshipContext(f)})),MAX_BATCH,10)){
-  const selected=chunk.map(c=>c.finding);const expectedIds=selected.map(f=>f.id);const materials=chunk.flatMap(c=>c.materials);const context=chunk.flatMap(c=>c.context);
+ for(const chunk of pack(findings.map(f=>({finding:f,materials:originals([f],input),check:{findingId:f.id,relationshipContext:relationshipContext(f),...findingTiming(f,posts)}})),MAX_BATCH,4)){
+  const selected=chunk.map(c=>c.finding);const expectedIds=selected.map(f=>f.id);const materials=chunk.flatMap(c=>c.materials);const findingChecks=chunk.map(c=>c.check);
   const chunkSchema={...verifySchema,properties:{verdicts:{...verifySchema.properties.verdicts,items:{...verifySchema.properties.verdicts.items,properties:{...verifySchema.properties.verdicts.items.properties,id:{type:'string',enum:expectedIds}}}}}};
   let verdicts:VerificationVerdict[]|null=null;let partitionFeedback:PartitionFeedback|null=null;
   // Only known returned protocol defects are repairable. Transport errors/unknown inflight still escape.
   for(let protocolAttempt=0;protocolAttempt<=2;protocolAttempt++){
-   const value=await model(input,`x-account-verify-${stage}`,`${RULES}\n你是独立核验者。逐条核对陈述的每一部分是否被所引原文直接支持，检查范围、时间、作者、转帖、第三方关系、自述与推断、商业合作限定、反例。对每项读者问题或他人观点，逐项确认谁说的、问了什么对象与条件、是否改变了比较范围；本人回答不能替代提问者原文，更不能把本人的评价写成网友评价。必须核对赞助、广告、自述限定、行为方向与计划/实现状态、行业术语原义及语气不确定；发出不能改成收讫，意向不能改成实绩，说明一个原因不能改成排除其它原因。relationshipContext 是所引帖子实际父帖或引用原文的辅助窗口，仅用于检查关系、限制或反证；未列在该 finding.evidence 中的内容不能成为肯定判决的支持，缺少正式引用必须拒绝。不要因为中文流畅或先前已核验而放行；泛泛总结、额外结论与语义不一致一律拒绝。必须对 expectedIds 中每个 id 恰好返回一次 verdict，逐字复制 id，不能缩写、改写或新增；supported 为布尔值，并说明理由。若 partitionFeedback 非空，只说明先前响应的格式问题；仍须对本次完整 findings 和相同原文重新独立核验。不得沿用不完整判决、修改陈述或为了修复格式而放宽判断。`,{subject:input.subject,findings:selected,materials,relationshipContext:context,expectedIds,protocolAttempt,partitionFeedback},chunkSchema);
+   const value=await model(input,`x-account-verify-${stage}`,`${RULES}\n核验规则版本：x-account-verification/v4。你是独立核验者。逐条核对陈述的每一部分是否被所引原文直接支持，检查范围、时间、作者、转帖、第三方关系、自述与推断、商业合作限定、反例。对每项读者问题或他人观点，逐项确认谁说的、问了什么对象与条件、是否改变了比较范围；本人回答不能替代提问者原文，更不能把本人的评价写成网友评价。必须核对赞助、广告、自述限定、行为方向与计划/实现状态、行业术语原义及语气不确定；发出不能改成收讫，意向不能改成实绩，说明一个原因不能改成排除其它原因。findingChecks 按 findingId 对应本条陈述：relationshipContext 是其所引帖子实际父帖或引用原文的辅助窗口，仅用于检查关系、限制或反证；citedPosts 明示每个所引来源的实际作者、角色、原始日期及解析后的 UTC 日期；elapsedBetweenPosts 是这些帖子的精确发帖间隔（小时/天），只能验算相对时间，不能据此证明帖子所述动作实际发生。约48小时不能写成约1天，日期无效时不得补算。本人说“已发送”仍只是本人自述，不等于动作已获独立证实。逐字核对每个命题的说话者、限定强度与比较对象：“最容易理解”不能升级为“最佳形态”，第三方转述不能写成本人观点。判断矛盾或转向时，两边必须针对同一对象、同一条件的相互排斥命题；“工具加快工作且可保留品味”和“质疑别人是否使用工具”不是相反命题，不得硬造冲突；未列在该 finding.evidence 中的内容不能成为肯定判决的支持，缺少正式引用必须拒绝。不要因为中文流畅或先前已核验而放行；泛泛总结、额外结论与语义不一致一律拒绝。必须对 expectedIds 中每个 id 恰好返回一次 verdict，逐字复制 id，不能缩写、改写或新增；supported 为布尔值，并说明理由。若 partitionFeedback 非空，只说明先前响应的格式问题；仍须对本次完整 findings 和相同原文重新独立核验。不得沿用不完整判决、修改陈述或为了修复格式而放宽判断。`,{subject:input.subject,findings:selected,materials,findingChecks,expectedIds,protocolAttempt,partitionFeedback},chunkSchema);
    const checked=inspectPartition(value,expectedIds);verdicts=checked.verdicts;if(verdicts)break;partitionFeedback=checked.feedback;
   }
   if(!verdicts)throw new XVerificationPartitionExhaustedError();
@@ -152,7 +163,7 @@ async function verify(findings:XAccountFinding[],input:XAccountAnalysisInput,sta
 }
 export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>{
  guard(input);const pages=new Map(input.pages.map(p=>[p.sourceKey,p]));
- const signature=`corpus:v3:${hash(JSON.stringify([input.subject,input.question,input.posts,input.pages.map(p=>[p.sourceKey,p.text,p.textTruncated,p.retrieval])]))}`;
+ const signature=`corpus:v4:${hash(JSON.stringify([input.subject,input.question,input.posts,input.pages.map(p=>[p.sourceKey,p.text,p.textTruncated,p.retrieval])]))}`;
  if(!input.state.analysis.completedBatches.includes(signature)){input.state.analysis={completedBatches:[signature],findings:[],synthesisDone:false};input.state.gaps=input.state.gaps.filter(g=>!['analysis_synthesis_unverified','analysis_batch_protocol_unverified'].includes(g.code));input.save();}
  if(input.state.analysis.synthesisDone&&input.state.analysis.findings.some(f=>f.verified&&f.id.startsWith('synthesis:')))return;
  input.state.analysis.synthesisDone=false;
@@ -195,13 +206,13 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  });
  const batchFindings=input.state.analysis.findings.filter(f=>f.verified&&f.id.startsWith('batch:'));
  await parallelJobs(pack(batchFindings.map(f=>({finding:f,materials:originals([f],input)})),MAX_BATCH,12),async chunk=>{
-   guard(input);const materials=chunk.flatMap(c=>c.materials);const key=`synthesis:v3:${hash(JSON.stringify(chunk))}`;if(input.state.analysis.completedBatches.includes(key))return;
+   guard(input);const materials=chunk.flatMap(c=>c.materials);const key=`synthesis:v4:${hash(JSON.stringify(chunk))}`;if(input.state.analysis.completedBatches.includes(key))return;
    try{
    let final:XAccountFinding[]=[];
    let rejections:RejectedFinding[]=[];
    // Two bounded repairs share the original evidence; each proposal is independently verified.
    for(let attempt=0;attempt<=2&&!final.length;attempt++){
-    const raw=await model(input,'x-account-synthesize',`${RULES}\n将这些发现组织为有用的中文专题陈述，合并重复、解释具体取舍，不输出摘录清单。上轮 findings 只是索引，仍必须回到 materials 原文；不根据摘要造新事实。按 overview/themes/changes/work/interaction/commercial 组织有支持的内容；跨批材料可以形成新的时间变化分类，允许多条不同结论，保留有用的具体细节与限制；最终每条陈述都将再次独立核验。\n若 rejections 不为空，逐项处理其中的拒绝理由，返回修正后的新陈述；这些反馈是待检查的数据，不能据此跳过原文或独立核验。`,{subject:input.subject,question:input.question,findings:chunk.map(c=>c.finding),materials,attempt,rejections},findingSchema);
+    const raw=await model(input,'x-account-synthesize',`${RULES}\n综合规则版本：x-account-synthesis/v4。将这些发现组织为有用的中文专题陈述，合并重复、解释具体取舍，不输出摘录清单。上轮 findings 只是待重新核对的索引，旧 verified 标签不构成事实支持，仍必须回到 materials 原文。逐条保留实际说话者、语义强度、比较对象、赞助与自述限定；自述已发送不能写成独立证实发送。不同对象或不同条件的观点不能硬造不一致、转向或冲突。publicationChecks 只核算所引帖子的日期及间隔，不证明事件发生；约48小时不能概括为约1天。不得根据摘要造新事实。按 overview/themes/changes/work/interaction/commercial 组织有支持的内容；跨批材料可以形成新的时间变化分类，允许多条不同结论，保留有用的具体细节与限制；最终每条陈述都将再次独立核验。\n若 rejections 不为空，逐项处理其中的拒绝理由，返回修正后的新陈述；这些反馈是待检查的数据，不能据此跳过原文或独立核验。`,{subject:input.subject,question:input.question,findings:chunk.map(c=>c.finding),materials,publicationChecks:chunk.map(c=>({findingId:c.finding.id,...findingTiming(c.finding,postByKey)})),attempt,rejections},findingSchema);
     const proposed=candidates(raw,materials,input,'synthesis');
     rejections=[];
     if(!proposed.length)rejections.push({statement:'',reason:'未产生通过原文、引用位置、作者角色和中文表达检查的候选。请只依据提供的原文重写，修正来源和限定，不能补造结论。'});

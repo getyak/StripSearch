@@ -4,6 +4,7 @@ import { runDshDecision, type DshDecisionOptions } from './dsh-decision.js';
 import type { ResearchCheckpoint, ResearchClaim } from './research-store.js';
 import type { HttpTransport } from '../adapters/types.js';
 import { ProviderError } from '../adapters/types.js';
+import {readBoundedBody} from '../adapters/http.js';
 import { inspectWindow } from './research-store.js';
 import { classifyFirstStepUrl } from '../../shared/first-step-discovery.js';
 import { RESEARCH_FACETS } from '../../shared/research-depth.js';
@@ -159,19 +160,28 @@ export function parseMessagesUsage(body:string):{inputTokens:number;outputTokens
  return {inputTokens:input+cacheRead+cacheWrite,outputTokens:output,known:hasInput&&hasFinalOutput&&stopped&&!errored};
 }
 
-export async function invokeDeepSeek(transport:HttpTransport,key:string,request:Parameters<DshDecisionOptions['invoke']>[0]):Promise<Awaited<ReturnType<DshDecisionOptions['invoke']>>> {
+export async function invokeDeepSeek(transport:HttpTransport,key:string,request:Parameters<DshDecisionOptions['invoke']>[0],timeoutMs=45_000):Promise<Awaited<ReturnType<DshDecisionOptions['invoke']>>> {
  if(request.path!=='/v1/messages')throw new Error('Unexpected model endpoint');
- const signal=AbortSignal.any([request.signal,AbortSignal.timeout(45_000)]);
- const response=await transport.fetch('https://api.deepseek.com/anthropic/v1/messages',{method:'POST',headers:{'content-type':'application/json',accept:'text/event-stream','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify(request.body),signal,redirect:'error'});
- if(response.redirected||(response.status>=300&&response.status<400))throw new ProviderError('provider_redirect','模型返回了重定向。');
- let text='';
- if(response.body){
-  const reader=response.body.getReader();const chunks:Uint8Array[]=[];let size=0;
-  try{for(;;){signal.throwIfAborted();const {done,value}=await reader.read();if(done)break;if(!value)continue;size+=value.byteLength;if(size>2*1024*1024)throw new ProviderError('provider_response_too_large','模型响应超过上限。');chunks.push(value);}}
-  catch(error){await reader.cancel().catch(()=>undefined);throw error;}
-  text=Buffer.concat(chunks).toString('utf8');
- }else{text=await response.text();if(Buffer.byteLength(text)>2*1024*1024)throw new ProviderError('provider_response_too_large','模型响应超过上限。');}
- return {status:response.status,body:text,headers:{'content-type':response.headers.get('content-type')??'text/event-stream'}};
+ request.signal.throwIfAborted();
+ if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>240_000)throw new Error('Invalid model request timeout');
+ const controller=new AbortController();const signal=controller.signal;
+ let stop!:(reason:unknown)=>void;
+ const stopped=new Promise<never>((_resolve,reject)=>{stop=reject;});
+ const timer=setTimeout(()=>{const error=new ProviderError('provider_timeout','模型请求超时。');stop(error);controller.abort(error);},timeoutMs);
+ const onAbort=()=>{stop(request.signal.reason);controller.abort(request.signal.reason);};
+ request.signal.addEventListener('abort',onAbort,{once:true});
+ try{
+  const work=(async()=>{
+   signal.throwIfAborted();
+   const response=await transport.fetch('https://api.deepseek.com/anthropic/v1/messages',{method:'POST',headers:{'content-type':'application/json',accept:'text/event-stream','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify(request.body),signal,redirect:'error'});
+   signal.throwIfAborted();
+   if(response.redirected||(response.status>=300&&response.status<400))throw new ProviderError('provider_redirect','模型返回了重定向。');
+   const text=await readBoundedBody(response,2*1024*1024,signal);
+   return {status:response.status,body:text,headers:{'content-type':response.headers.get('content-type')??'text/event-stream'}};
+  })();
+  return await Promise.race([work,stopped]);
+ }catch(error){if(request.signal.aborted)throw request.signal.reason;throw error;}
+ finally{clearTimeout(timer);request.signal.removeEventListener('abort',onAbort);}
 }
 
 

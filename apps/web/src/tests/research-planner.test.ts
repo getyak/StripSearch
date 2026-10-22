@@ -1,6 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMessagesUsage } from '../server/research/planner.js';
+import {invokeDeepSeek} from '../server/research/planner.js';
+import {ProviderError,type HttpResponseLike,type HttpTransport} from '../server/adapters/types.js';
+
+test('Messages custom deadline bounds ignored fetch and body cancellation',async()=>{
+ for(const mode of ['fetch','body']as const){
+  const response:HttpResponseLike={status:200,ok:true,headers:{get:()=>null},body:null,text:()=>new Promise(()=>{})};
+  const transport:HttpTransport={fetch:()=>mode==='fetch'?new Promise(()=>{}):Promise.resolve(response)};
+  const pending=invokeDeepSeek(transport,'synthetic-offline',{path:'/v1/messages',body:{},signal:new AbortController().signal},10);
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  const watchdog=new Promise<never>((_r,reject)=>{timer=setTimeout(()=>reject(new Error('custom deadline did not release the model request')),250);});
+  try{await assert.rejects(Promise.race([pending,watchdog]),error=>error instanceof ProviderError&&error.code==='provider_timeout');}finally{clearTimeout(timer);}
+ }
+});
+
+test('Messages cancellation preserves caller reason and pre-abort never dispatches',async()=>{
+ const controller=new AbortController();const reason=new Error('synthetic caller cancellation');controller.abort(reason);let calls=0;
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ const watchdog=new Promise<never>((_r,reject)=>{timer=setTimeout(()=>reject(new Error('pre-abort did not release the model request')),250);});
+ try{await assert.rejects(Promise.race([invokeDeepSeek({fetch(){calls++;return new Promise(()=>{});}},'synthetic-offline',{path:'/v1/messages',body:{},signal:controller.signal},10),watchdog]),error=>error===reason);}finally{clearTimeout(timer);}
+ assert.equal(calls,0);
+});
+
+test('late Messages responses are observed without reading their body after a deadline',async()=>{
+ let release!:(response:HttpResponseLike)=>void;let reads=0;
+ const pending=invokeDeepSeek({fetch:()=>new Promise(resolve=>{release=resolve;})},'synthetic-offline',{path:'/v1/messages',body:{},signal:new AbortController().signal},10);
+ await assert.rejects(pending,error=>error instanceof ProviderError&&error.code==='provider_timeout');
+ release({status:200,ok:true,headers:{get:()=>null},body:null,text:async()=>{reads++;return 'PRIVATE_LATE_MODEL_OUTPUT';}});
+ await new Promise<void>(resolve=>setImmediate(resolve));assert.equal(reads,0);
+});
 test('Messages cumulative usage snapshots are counted once',()=>{
  const body='data: '+JSON.stringify({type:'message_start',message:{usage:{input_tokens:380,output_tokens:0}}})+'\n\ndata: '+JSON.stringify({type:'message_delta',usage:{input_tokens:380,output_tokens:52}})+'\ndata: '+JSON.stringify({type:'message_stop'})+'\n';
  assert.deepEqual(parseMessagesUsage(body),{inputTokens:380,outputTokens:52,known:true});

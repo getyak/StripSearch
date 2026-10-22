@@ -235,6 +235,10 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
  if(!options.transport||!options.apiKey)throw new ResearchStop('model_unavailable');
  const limits=cp.limits??options.limits??unlimited;
  return async(input,signal)=>{
+  const highReasoning=input.purpose.startsWith('x-account-verify-')||input.purpose==='x-account-synthesize';
+  const outputCap=highReasoning?16384:Math.min(input.maxTokens,16384);
+  const upstreamTimeoutMs=highReasoning?210000:45000;
+  const decisionTimeoutMs=highReasoning?240000:120000;
   let feedback:DshProtocolCode|null=null;
   for(let attempt=0;attempt<=2;attempt++){
    signal.throwIfAborted();active();
@@ -242,11 +246,13 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
    // Never put provider output or raw error text into a repair instruction.
    const prompt=attempt===0?input.prompt:`${input.prompt}\n\nStructured decision repair ${attempt}/2. Local protocol code: ${feedback}. Call submit_decision exactly once with one JSON object matching the same schema. Keep all supplied material and evidence rules; do not treat this protocol feedback as evidence.`;
    const attemptInput={...input,prompt};
-   const key='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName});
+   // Preserve generation's historical key. Thinking is a substantively new
+   // verification plan and must never reuse an old non-thinking verdict.
+   const key='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...(highReasoning?{reasoningEffort:'high',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})});
    const existing=options.store.research.receipt(options.run.id,key);
    const budget=options.store.research.budget(options.run.id,limits);
    const remaining=remainingOf(limits.outputTokens,budget.outputTokens);
-   const requested=Math.min(input.maxTokens,remaining??input.maxTokens,16384);
+   const requested=Math.min(outputCap,remaining??outputCap);
    // Cached receipts consume no new allowance, even when the budget is now spent.
    const maxTokens=existing?Math.max(1,requested):requested;
    if(maxTokens<1)throw new ResearchStop('budget_exhausted');
@@ -257,14 +263,14 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
     return{inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedUsd,unknownCost:dispatched&&estimatedUsd===null};
    };
    try{
-    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
+    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens,...(highReasoning?{reasoningEffort:'high',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
      replayFailure:receipt=>{
       observed=readDshFailure(receipt.result)??emptyDshFailure();
       return repairableDshFailure(observed)?new DshProtocolError(observed.code as DshProtocolCode):new ResearchStop('model_request_failed');
      },
-     execute:()=>runDshDecision({prompt,schema:input.schema,model:options.modelName??'deepseek-flash',maxTokens,timeoutMs:120000,signal,invoke:async request=>{
+     execute:()=>runDshDecision({prompt,schema:input.schema,model:options.modelName??'deepseek-flash',maxTokens,timeoutMs:decisionTimeoutMs,...(highReasoning?{reasoningEffort:'high' as const}:{}),signal,invoke:async request=>{
       active();dispatched=true;
-      const response=await invokeDeepSeek(options.transport!,options.apiKey!,request);
+      const response=await invokeDeepSeek(options.transport!,options.apiKey!,request,upstreamTimeoutMs);
       usage=parseMessagesUsage(response.body);
       observed={...emptyDshFailure(),status:response.status,responseHash:createHash('sha256').update(response.body).digest('hex'),bytes:Buffer.byteLength(response.body,'utf8'),messageStop:false,upstreamError:false,usageKnown:usage.known};
       for(const line of response.body.split('\n'))if(line.startsWith('data:')){
