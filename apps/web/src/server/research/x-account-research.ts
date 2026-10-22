@@ -233,7 +233,7 @@ export async function collectXAccount(options:XAccountResearchOptions){
 
 function modelRecovery(options:XAccountResearchOptions,cp:ResearchCheckpoint,key:string,purpose:string){
  const plan=cp.xAccountResearch?.modelRecovery,binding=options.binding,frozen=cp.firstStep;
- if(!plan||plan.version!=='x-model-recovery/v1'||!['x-account-synthesize','x-account-verify-synthesis'].includes(purpose)||
+ if(!plan||plan.version!=='x-model-recovery/v1'||!['x-account-synthesize','x-account-write','x-account-verify-synthesis'].includes(purpose)||
   !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(plan.id)||
   plan.runId!==options.run.id||plan.caseId!==binding.caseId||plan.scopeVersion!==binding.scopeVersion||
   binding.accounts.length!==1||plan.accountId!==binding.accounts[0]!.accountId||plan.accountId!==cp.xAccountResearch?.accountId||

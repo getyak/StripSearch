@@ -326,6 +326,50 @@ test('v2 migration retains v4 reading and v1 planning receipts but hides old fra
 test('canonical projection rejects the actual missing-parent sentence despite a prior verified flag',async()=>{
  const input=replyAttributionFixture();input.model=async({purpose,prompt})=>{const d=dataOf(prompt);if(purpose.includes('verify'))return{verdicts:d.findings.map((f:{id:string})=>({id:f.id,supported:true,reason:'合成测试'}))};return{findings:[{section:'work',statement:'该账号自述使用合成编辑器写草稿。',kind:'attributed_statement',evidence:[{sourceKey:'post-0',quote:input.posts[0]!.text}]}]};};await analyzeXAccount(input);const final=input.state.analysis.findings.find(f=>f.id.startsWith('report:v3:'))!;final.statement='该回复未附带对方帖文原文，具体所指的产品与故障内容无法从材料中核实。';const report=projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:new Set(input.pages.map(p=>p.sourceKey))});assert.equal(report.findings.length,0);assert.equal(final.verified,true);
 });
+test('complete current V3 publication is not invalidated by an archived V2 semantic rejection',async()=>{
+ const input=fixture();input.model=acceptModel();await analyzeXAccount(input);
+ const current=input.state.analysis.findings.find(f=>f.id.startsWith('report:v3:'))!;
+ const archived={...structuredClone(current),id:current.id.replace('report:v3:','report:v2:'),statement:'从6月底到8月初，该账号自述制作了阅读笔记工具。'};
+ input.state.analysis.findings.push(archived);const before=JSON.stringify(input.state);
+ const report=projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:new Set(['post-0'])});
+ assert.deepEqual(report.findings.map(f=>f.id),[current.id]);assert.equal(report.rejectedFindings,0,'unpublished V2 must not force account_evidence_changed');
+ assert.match(report.limitations.join(' '),/1 条原有判断.*待复核/,'archived rejection diagnostics remain available');
+ assert.ok(report.answer.every(section=>section.bullets.every(bullet=>bullet.text!==archived.statement)));
+ assert.equal(JSON.stringify(input.state),before,'projection preserves archived findings and completion markers');
+});
+test('invalid current V3 publication is still rejected without counting archived V2 failures',async()=>{
+ for(const defect of ['withdrawn','semantic','hash']){
+  const input=fixture();input.model=acceptModel();await analyzeXAccount(input);
+  const current=input.state.analysis.findings.find(f=>f.id.startsWith('report:v3:'))!;
+  input.state.analysis.findings.push({...structuredClone(current),id:current.id.replace('report:v3:','report:v2:'),statement:'从6月底到8月初，该账号自述制作了阅读笔记工具。'});
+  const active=new Set(['post-0']);if(defect==='withdrawn')active.clear();if(defect==='semantic')current.statement='从6月底到8月初，该账号自述制作了阅读笔记工具。';if(defect==='hash')current.evidence[0]!.sourceContentHash='stale';
+  const before=JSON.stringify(input.state);const report=projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:active});
+  assert.equal(report.rejectedFindings,1,defect);assert.equal(report.findings.length,0,defect);assert.equal(report.observations.length,0,defect);assert.equal(report.answer.length,0,defect);
+  assert.match(report.limitations.join(' '),/2 条原有判断.*待复核/);assert.equal(JSON.stringify(input.state),before,'invalid originals are retained for review');
+ }
+});
+test('incomplete V3 and archived V2 findings never invalidate unpublished report state',async()=>{
+ const input=fixture();input.model=acceptModel();await analyzeXAccount(input);
+ const current=input.state.analysis.findings.find(f=>f.id.startsWith('report:v3:'))!;
+ input.state.analysis.findings.push({...structuredClone(current),id:current.id.replace('report:v3:','report:v2:'),statement:'从6月底到8月初，该账号自述制作了阅读笔记工具。'});
+ for(const missing of ['synthesis','completion']){
+  input.state.analysis.synthesisDone=missing!=='synthesis';if(missing==='completion')input.state.analysis.completedBatches=input.state.analysis.completedBatches.filter(k=>!k.startsWith('report:v3:complete:'));
+  const report=projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:new Set(['post-0'])});
+  assert.equal(report.rejectedFindings,0,missing);assert.equal(report.findings.length,0,missing);assert.equal(report.answer.length,0,missing);
+  const statement=current.statement;current.statement='从6月底到8月初，该账号自述制作了阅读笔记工具。';
+  const invalid=projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:new Set(['post-0'])});
+  assert.equal(invalid.rejectedFindings,0,missing);assert.equal(invalid.findings.length,0,missing);assert.match(invalid.limitations.join(' '),/2 条原有判断.*待复核/);current.statement=statement;
+ }
+});
+test('legacy publication still rejects withdrawn legacy findings while ignoring archived reports',async()=>{
+ const input=fixture();input.model=acceptModel();await analyzeXAccount(input);
+ const current=input.state.analysis.findings.find(f=>f.id.startsWith('report:v3:'))!;
+ input.state.analysis.findings.push({...structuredClone(current),id:current.id.replace('report:v3:','report:v2:'),statement:'从6月底到8月初，该账号自述制作了阅读笔记工具。'});
+ current.id='synthesis:legacy';input.state.analysis.synthesisDone=false;
+ const active=new Set(['post-0']);const project=()=>projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:active});
+ assert.deepEqual(project().findings.map(f=>f.id),['synthesis:legacy']);assert.equal(project().rejectedFindings,0);
+ active.clear();const withdrawn=project();assert.equal(withdrawn.findings.length,0);assert.equal(withdrawn.rejectedFindings,1);assert.match(withdrawn.limitations.join(' '),/2 条原有判断.*待复核/);
+});
 test('completed batch replay yields to heartbeat without repeating per-batch live corpus scans',async()=>{
  const input=fixture(145);input.model=acceptModel();await analyzeXAccount(input);const markers=[...input.state.analysis.completedBatches];let guards=0,heartbeat=false;input.active=()=>{guards++;};input.model=async()=>{throw Error('completed model replay');};setImmediate(()=>{heartbeat=true;});await analyzeXAccount(input);assert.equal(heartbeat,true,'completed replay must release the event loop');assert.equal(guards,2,'entry and post-replay guards remain live without per-completed-job scans');assert.deepEqual(input.state.analysis.completedBatches,markers);
 });

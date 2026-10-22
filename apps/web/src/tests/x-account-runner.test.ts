@@ -385,7 +385,11 @@ test('high auto prose cannot publish a decision and exhausts only two separately
 });
 
 const RECOVERY_INPUT={...PORT_INPUT,purpose:'x-account-verify-synthesis'};
-function recoveryFailedKey(input=RECOVERY_INPUT):string{return 'x-account:model:v1:'+createHash('sha256').update(JSON.stringify({input,model:'deepseek-flash',reasoningEffort:'high',toolChoice:'auto',outputCap:16384,timeoutMs:210000,decisionTimeoutMs:240000})).digest('hex');}
+const WRITER_RECOVERY_INPUT={...PORT_INPUT,purpose:'x-account-write',maxTokens:6500};
+function recoveryFailedKey(input=RECOVERY_INPUT):string{
+ const route=input.purpose==='x-account-write'?{generationMode:'bounded-structured/v1',toolChoice:'submit_decision',outputCap:6500,timeoutMs:150000,decisionTimeoutMs:180000}:{reasoningEffort:'high',toolChoice:'auto',outputCap:16384,timeoutMs:210000,decisionTimeoutMs:240000};
+ return 'x-account:model:v1:'+createHash('sha256').update(JSON.stringify({input,model:'deepseek-flash',...route})).digest('hex');
+}
 function authorizeModelRecovery(p:ReturnType<typeof productionPort>,input=RECOVERY_INPUT){
  const key=recoveryFailedKey(input);p.f.store.research.reserve(p.f.run.id,key,'model',{purpose:input.purpose},{inputTokens:40,outputTokens:12},UNLIMITED);p.f.store.research.settle(p.f.run.id,key,null,{estimatedUsd:null,unknownCost:true},'failed');
  const settledAt=(p.f.db.prepare('SELECT settled_at AS time FROM research_actions WHERE run_id=? AND action_key=?').get(p.f.run.id,key) as {time:string}).time;
@@ -398,26 +402,36 @@ test('explicit model recovery makes exactly one child request and preserves orig
  const child=p.f.store.research.receipts(p.f.run.id).find(r=>r.key!==key)!;assert.equal(child.state,'completed');assert.deepEqual((child.request as {retryOf:string}).retryOf,key);assert.equal((child.request as {recoveryPlanId:string}).recoveryPlanId,plan.id);
  assert.deepEqual(await p.model()(RECOVERY_INPUT,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,key),before);assert.equal(before!.usage!.unknownCost,true);assert.deepEqual(p.cp.xAccountResearch!.analysis.completedBatches,markers);
 });
+test('explicit writer recovery makes one bounded child request and reuses its result without altering the failed original',async t=>{
+ const p=productionPort(t,()=>modelStream({findings:[]}),{...UNLIMITED,modelCalls:2,outputTokens:24});const {key,plan,before}=authorizeModelRecovery(p,WRITER_RECOVERY_INPUT);const markers=[...p.cp.xAccountResearch!.analysis.completedBatches];
+ assert.deepEqual(await p.model()(WRITER_RECOVERY_INPUT,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);
+ const receipts=p.f.store.research.receipts(p.f.run.id);assert.equal(receipts.length,2);const child=receipts.find(r=>r.key!==key)!;
+ assert.equal(child.state,'completed');assert.equal((child.request as {purpose:string}).purpose,'x-account-write');assert.equal((child.request as {retryOf:string}).retryOf,key);assert.equal((child.request as {recoveryPlanId:string}).recoveryPlanId,plan.id);assert.equal((child.request as {generationMode:string}).generationMode,'bounded-structured/v1');
+ assert.deepEqual(p.requests[0]!.thinking,{type:'disabled'});assert.deepEqual(p.requests[0]!.tool_choice,{type:'tool',name:'submit_decision'});assert.equal(p.requests[0]!.max_tokens,12,'the recovery shares the remaining output budget');
+ assert.deepEqual(await p.model()(WRITER_RECOVERY_INPUT,new AbortController().signal),{findings:[]});assert.equal(p.calls(),1);assert.deepEqual(p.f.store.research.receipt(p.f.run.id,key),before);assert.equal(before!.usage!.unknownCost,true);assert.deepEqual(p.cp.xAccountResearch!.analysis.completedBatches,markers);
+});
 test('model recovery refuses missing plans, wrong bindings, timestamp mismatch and original inflight',async t=>{
- for(const change of ['missing','runId','caseId','scopeVersion','accountId','settledAt','inflight','duplicate','purpose'] as const){
-  const p=productionPort(t,()=>modelStream({findings:[]}));const input=change==='purpose'?{...RECOVERY_INPUT,purpose:'x-account-verify-batch'}:RECOVERY_INPUT;const {key,plan}=authorizeModelRecovery(p,input);
+ for(const recoveryInput of [RECOVERY_INPUT,WRITER_RECOVERY_INPUT])for(const change of ['missing','runId','caseId','scopeVersion','accountId','failedKey','settledAt','createdAt','inflight','duplicate','purpose'] as const){
+  const p=productionPort(t,()=>modelStream({findings:[]}));const input=change==='purpose'?{...recoveryInput,purpose:'x-account-verify-batch'}:recoveryInput;const {key,plan}=authorizeModelRecovery(p,input);
   if(change==='missing')delete p.cp.xAccountResearch!.modelRecovery;
   else if(change==='inflight')p.f.db.prepare("UPDATE research_actions SET state='inflight' WHERE run_id=? AND action_key=?").run(p.f.run.id,key);
   else if(change==='settledAt')plan.entries[0]!.settledAt='2000-01-01T00:00:00.000Z';
+  else if(change==='failedKey')plan.entries[0]!.failedKey='x-account:model:v1:'+'b'.repeat(64);
+  else if(change==='createdAt')plan.createdAt='2000-01-01T00:00:00.000Z';
   else if(change==='duplicate')plan.entries.push({...plan.entries[0]!});
   else if(change==='scopeVersion')plan.scopeVersion++;
   else if(change!=='purpose')plan[change]='wrong';
-  await assert.rejects(p.model()(input,new AbortController().signal));assert.equal(p.calls(),0,change);assert.equal(p.f.store.research.receipts(p.f.run.id).length,1);
+  await assert.rejects(p.model()(input,new AbortController().signal));assert.equal(p.calls(),0,`${input.purpose}: ${change}`);assert.equal(p.f.store.research.receipts(p.f.run.id).length,1);
  }
 });
 test('model recovery child failure, unknown inflight and exhausted budget cannot dispatch a further attempt',async t=>{
- for(const failure of ['transport','protocol','inflight','budget']as const){
-  const p=productionPort(t,()=>{if(failure==='transport')throw Error('synthetic unknown transport');return modelStream(null);},failure==='budget'?{...UNLIMITED,modelCalls:1}:UNLIMITED);const {key,plan}=authorizeModelRecovery(p);
+ for(const input of [RECOVERY_INPUT,WRITER_RECOVERY_INPUT])for(const failure of ['transport','protocol','inflight','budget']as const){
+  const p=productionPort(t,()=>{if(failure==='transport')throw Error('synthetic unknown transport');return modelStream(null);},failure==='budget'?{...UNLIMITED,modelCalls:1}:UNLIMITED);const {key,plan}=authorizeModelRecovery(p,input);
   if(failure==='inflight'){
    const childKey='x-account:model-recovery:v1:'+createHash('sha256').update(JSON.stringify({recoveryPlanId:plan.id,retryOf:key,settledAt:plan.entries[0]!.settledAt})).digest('hex');p.f.store.research.reserve(p.f.run.id,childKey,'model',{retryOf:key,recoveryPlanId:plan.id},{inputTokens:0,outputTokens:0},UNLIMITED);
   }
-  await assert.rejects(p.model()(RECOVERY_INPUT,new AbortController().signal));const calls=p.calls();assert.equal(calls,failure==='budget'||failure==='inflight'?0:1,failure);
-  await assert.rejects(p.model()(RECOVERY_INPUT,new AbortController().signal));assert.equal(p.calls(),calls,'no automatic child repair or retry');
+  await assert.rejects(p.model()(input,new AbortController().signal));const calls=p.calls();assert.equal(calls,failure==='budget'||failure==='inflight'?0:1,`${input.purpose}: ${failure}`);
+  await assert.rejects(p.model()(input,new AbortController().signal));assert.equal(p.calls(),calls,'no automatic child repair or retry');
  }
 });
 test('explicit model recovery preserves live source authority and caller cancellation',async t=>{

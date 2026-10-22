@@ -364,6 +364,9 @@ export function projectXAccountReport(input:XAccountReportInput):XAccountProject
  const finalPlan=state.analysis.synthesisDone&&ready&&state.analysis.completedBatches.includes(`report:v3:complete:${ready[3]}:${ready[4]}`)?ready[4]:undefined;
  const legacy=valid.filter(f=>!f.id.startsWith('report:'));const synthesisSections=new Set(legacy.filter(f=>f.id.startsWith('synthesis:')).map(f=>f.section));
  const findings=finalPlan?valid.filter(f=>f.id.startsWith(`report:v3:${finalPlan}:`)).sort((a,b)=>a.id.localeCompare(b.id)):legacy.filter(f=>f.id.startsWith('synthesis:')||!synthesisSections.has(f.section));
+ // Archived and incomplete reports retain diagnostics without invalidating the current publication.
+ const publicationCandidates=verified.filter(f=>finalPlan?f.id.startsWith(`report:v3:${finalPlan}:`):!f.id.startsWith('report:')&&(f.id.startsWith('synthesis:')||!synthesisSections.has(f.section)));
+ const rejectedFindings=publicationCandidates.length-findings.length;
  const unique=findings.filter((f,i)=>findings.findIndex(other=>other.statement===f.statement&&JSON.stringify(other.evidence)===JSON.stringify(f.evidence))===i);
  const sourceKeys=(f:XAccountFinding)=>[...new Set(f.evidence.map(e=>e.sourceKey))];
  const target=state.posts.filter(p=>p.role==='target');const dates=target.map(p=>p.publishedAt).filter((d):d is string=>!!d&&Number.isFinite(Date.parse(d))).sort((a,b)=>Date.parse(a)-Date.parse(b));
@@ -379,5 +382,5 @@ export function projectXAccountReport(input:XAccountReportInput):XAccountProject
   const range=dates.length?`已保存帖子的日期范围为 ${new Date(dates[0]!).toISOString().slice(0,10)} 至 ${new Date(dates[dates.length-1]!).toISOString().slice(0,10)}`:'已保存帖子没有可核对的日期范围';
   answer.push({id:'x-account-coverage',heading:'阅读范围与边界',body:`本轮保留 ${target.length} 条账号记录、${state.posts.length-target.length} 条上下文，时间线 ${state.history.timeline.pages} 页、账号回复 ${state.history.replies.pages} 页。${range}，不代表连续或完整的平台历史。${boundary('timeline','时间线')}；${boundary('replies','账号回复')}。讨论按默认一页读取，媒体与站外网页未读。${state.analysis.synthesisDone?'':'专题综合尚未完成，当前只展示已通过原文核验的阶段性发现。'}`,bullets:[]});
  }
- return {findings:unique,rejectedFindings:verified.length-valid.length,answer,observations:unique.map(f=>({statement:f.statement,kind:f.kind,sourceKeys:sourceKeys(f),limitations:f.kind==='inference'?['基于所列账号原文的分析，不代表已独立证实的事实。']:f.kind==='attributed_statement'?['账号自述，未独立证实其实际结果。']:['限于所引原文的表述与作者关系。']})),limitations:[...new Set(limitations)]};
+ return {findings:unique,rejectedFindings,answer,observations:unique.map(f=>({statement:f.statement,kind:f.kind,sourceKeys:sourceKeys(f),limitations:f.kind==='inference'?['基于所列账号原文的分析，不代表已独立证实的事实。']:f.kind==='attributed_statement'?['账号自述，未独立证实其实际结果。']:['限于所引原文的表述与作者关系。']})),limitations:[...new Set(limitations)]};
 }
