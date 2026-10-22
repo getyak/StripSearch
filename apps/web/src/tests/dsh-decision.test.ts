@@ -127,7 +127,7 @@ test('DSH high reasoning reaches the constrained Messages request without anothe
  let calls=0;
  const result=await runDshDecision({prompt,model:'deepseek-flash',signal:new AbortController().signal,reasoningEffort:'high',maxTokens:16384,timeoutMs:240000,
   invoke:async({body})=>{
-   calls++;assert.deepEqual(body.thinking,{type:'enabled'});assert.deepEqual(body.output_config,{effort:'high'});assert.deepEqual(body.tool_choice,{type:'tool',name:'submit_decision'});assert.equal(body.max_tokens,16384);assert.equal('budget_tokens' in (body.thinking as object),false);
+   calls++;assert.deepEqual(body.thinking,{type:'enabled'});assert.deepEqual(body.output_config,{effort:'high'});assert.deepEqual(body.tool_choice,{type:'auto'});assert.equal(body.max_tokens,16384);assert.equal('budget_tokens' in (body.thinking as object),false);
    return {status:200,body:response({findings:[]}),headers:{'content-type':'text/event-stream'}};
   }});
  assert.deepEqual(result,{findings:[]});assert.equal(calls,1);

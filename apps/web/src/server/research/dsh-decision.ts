@@ -135,9 +135,9 @@ export async function runDshDecision(options: DshDecisionOptions): Promise<unkno
       if (!Array.isArray(tools) || tools.length !== 1 || !record(tools[0]) || tools[0].name !== 'submit_decision') {
         throw new Error('DSH exposed an unexpected tool');
       }
-      // The Messages API supports named tool_choice. Prompt-only guidance permits
-      // prose end_turn responses, which cannot complete this structured boundary.
-      body.tool_choice = { type: 'tool', name: 'submit_decision' };
+      // The real thinking endpoint rejects forced named tools. Auto still
+      // exposes only submit_decision; prose cannot complete this boundary.
+      body.tool_choice = options.reasoningEffort==='high'?{type:'auto'}:{type:'tool',name:'submit_decision'};
       if(options.reasoningEffort==='high'){
         // Verified DeepSeek Anthropic fields; budget_tokens is not supported.
         body.thinking={type:'enabled'};

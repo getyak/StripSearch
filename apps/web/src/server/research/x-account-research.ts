@@ -248,7 +248,7 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
    const attemptInput={...input,prompt};
    // Preserve generation's historical key. Thinking is a substantively new
    // verification plan and must never reuse an old non-thinking verdict.
-   const key='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...(highReasoning?{reasoningEffort:'high',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})});
+   const key='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...(highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})});
    const existing=options.store.research.receipt(options.run.id,key);
    const budget=options.store.research.budget(options.run.id,limits);
    const remaining=remainingOf(limits.outputTokens,budget.outputTokens);
@@ -263,7 +263,7 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
     return{inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedUsd,unknownCost:dispatched&&estimatedUsd===null};
    };
    try{
-    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens,...(highReasoning?{reasoningEffort:'high',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
+    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens,...(highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{})},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
      replayFailure:receipt=>{
       observed=readDshFailure(receipt.result)??emptyDshFailure();
       return repairableDshFailure(observed)?new DshProtocolError(observed.code as DshProtocolCode):new ResearchStop('model_request_failed');

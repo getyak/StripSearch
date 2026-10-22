@@ -360,3 +360,24 @@ test('native reasoning remains out of successful and failed model receipts while
  assert.deepEqual(await p.model()({...PORT_INPUT,purpose:'x-account-verify-batch'},new AbortController().signal),{verified:true});
  const receipts=p.f.store.research.receipts(p.f.run.id);assert.equal(receipts.length,2);assert.doesNotMatch(JSON.stringify(receipts),/PRIVATE_REASONING_ONLY/);assert.ok(receipts.every(receipt=>receipt.usage!.outputTokens===12&&receipt.usage!.unknownCost===false));
 });
+
+test('high auto plan preserves a failed named-tool receipt and makes one distinct request', {timeout:30_000},async t=>{
+ const input={...PORT_INPUT,purpose:'x-account-verify-batch'};const p=productionPort(t,()=>modelStream({verified:true}));
+ const oldKey='x-account:model:v1:'+createHash('sha256').update(JSON.stringify({input,model:'deepseek-flash',reasoningEffort:'high',outputCap:16384,timeoutMs:210000,decisionTimeoutMs:240000})).digest('hex');
+ p.f.store.research.reserve(p.f.run.id,oldKey,'model',{purpose:input.purpose,reasoningEffort:'high'},{inputTokens:10,outputTokens:16384},UNLIMITED);
+ p.f.store.research.settle(p.f.run.id,oldKey,null,{estimatedUsd:null,unknownCost:true},'failed');const before=p.f.store.research.receipt(p.f.run.id,oldKey);
+ assert.deepEqual(await p.model()(input,new AbortController().signal),{verified:true});assert.equal(p.calls(),1);assert.deepEqual(p.requests[0]!.tool_choice,{type:'auto'});
+ assert.deepEqual(p.f.store.research.receipt(p.f.run.id,oldKey),before,'the old failed/unknown receipt stays unchanged');
+ const next=p.f.store.research.receipts(p.f.run.id).find(receipt=>receipt.key!==oldKey)!;assert.equal((next.request as {toolChoice:string}).toolChoice,'auto');assert.equal(next.state,'completed');
+});
+
+test('high auto prose cannot publish a decision and exhausts only two separately metered repairs', {timeout:30_000},async t=>{
+ const p=productionPort(t,()=>{
+  const events=modelStream(null).trim().split('\n\n').map(line=>JSON.parse(line.slice(6)) as {type:string;content_block?:unknown;delta?:unknown});
+  for(const event of events){if(event.type==='content_block_start')event.content_block={type:'text',text:''};if(event.type==='content_block_delta')event.delta={type:'text_delta',text:'Synthetic prose without a structured submission.'};if(event.type==='message_delta')event.delta={stop_reason:'end_turn'};}
+  return events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join('');
+ });
+ await assert.rejects(p.model()({...PORT_INPUT,purpose:'x-account-verify-batch'},new AbortController().signal),error=>error instanceof DshProtocolRepairExhaustedError&&error.code==='missing_structured_decision'&&error.attemptCount===3);
+ assert.equal(p.calls(),3);assert.ok(p.requests.every(request=>(request.tool_choice as {type:string}).type==='auto'&&(request.tools as unknown[]).length===1));
+ const receipts=p.f.store.research.receipts(p.f.run.id);assert.equal(receipts.length,3);assert.ok(receipts.every(receipt=>receipt.state==='failed'&&(receipt.result as {usageKnown:boolean}).usageKnown&&receipt.usage!.unknownCost===false));
+});
