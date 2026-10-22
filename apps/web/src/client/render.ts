@@ -269,60 +269,82 @@ export function renderSourceFilters(
   }
 }
 
+const SOURCE_PAGE_SIZE = 100;
+interface SourcePageState { runId:string; filter:SourceFilter; selectedKey:string|null; page:number; focusKey:string|null }
+const sourcePages = new WeakMap<HTMLElement,SourcePageState>();
+
 export function renderSourceList(
   container: HTMLElement,
   view: CanonicalView | null,
   selectedKey: string | null,
   filter: SourceFilter,
-  onSelect: (sourceKey: string, row: HTMLElement | null) => void
+  onSelect: (sourceKey: string, row: HTMLElement | null) => void,
+  options: { revealSelected?: boolean } = {}
 ): void {
-  clear(container);
-  // Stamp the run this list belongs to so focus restoration can refuse to
-  // chase a row across a report switch.
-  container.dataset.runId = view?.runId ?? '';
-  const sources = (view?.sources ?? []).filter((source) => matchesFilter(source, filter));
-  const tabKey = sources.find((source) => source.sourceKey === selectedKey)?.sourceKey ?? sources[0]?.sourceKey;
-  container.onkeydown = (event) => {
-    if (event.isComposing || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-    const rows = [...container.querySelectorAll<HTMLButtonElement>('button.source-row')];
-    const index = rows.indexOf(event.target as HTMLButtonElement);
-    if (index < 0) return;
+  const runId=view?.runId ?? '';
+  const previous=sourcePages.get(container);
+  const sameScope=previous?.runId===runId && previous.filter===filter;
+  const paging:SourcePageState=sameScope?previous:{runId,filter,selectedKey:null,page:0,focusKey:null};
+  const sources=(view?.sources ?? []).filter(source=>matchesFilter(source,filter));
+  const selectedIndex=selectedKey===null?-1:sources.findIndex(source=>source.sourceKey===selectedKey);
+  if(selectedIndex>=0 && (!previous || options.revealSelected || (sameScope && paging.selectedKey!==selectedKey))){
+    paging.page=Math.floor(selectedIndex/SOURCE_PAGE_SIZE);paging.focusKey=selectedKey;
+  }
+  paging.selectedKey=selectedKey;
+  paging.page=Math.max(0,Math.min(paging.page,Math.ceil(sources.length/SOURCE_PAGE_SIZE)-1));
+  sourcePages.set(container,paging);
+  const active=container.ownerDocument.activeElement as HTMLElement|null;
+  const activeRow=sameScope&&active&&container.contains(active)?active.closest<HTMLElement>('button.source-row'):null;
+  const activePage=sameScope&&active&&container.contains(active)?active.dataset.sourcePage:undefined;
+  container.dataset.runId=runId;
+  // Paging controls are outside the inner listbox so its children remain options.
+  const label=container.getAttribute('aria-label') ?? '来源列表';
+  container.setAttribute('role','group');
+
+  function draw(focusKey:string|null=null,focusPage?:string,revealFocus=false):void {
+    clear(container);
+    if(!sources.length){container.appendChild(make('p',{className:'empty-state',text:filter==='excluded'?'没有已排除的来源。':'这一筛选下没有来源。'}));return;}
+    const start=paging.page*SOURCE_PAGE_SIZE;
+    const visible=sources.slice(start,start+SOURCE_PAGE_SIZE);
+    const tabKey=visible.some(source=>source.sourceKey===paging.focusKey)?paging.focusKey:
+      visible.some(source=>source.sourceKey===selectedKey)?selectedKey:visible[0]!.sourceKey;
+    if(sources.length>SOURCE_PAGE_SIZE){
+      const controls=make('div',{className:'source-filters source-pagination',attrs:{role:'group','aria-label':'来源分页'},style:{position:'sticky',top:'0',background:'var(--bg)',zIndex:'1',alignItems:'center',flexWrap:'wrap'}});
+      const changePage=(direction:number,control:string)=>{
+        paging.page=Math.max(0,Math.min(Math.ceil(sources.length/SOURCE_PAGE_SIZE)-1,paging.page+direction));
+        paging.focusKey=sources[paging.page*SOURCE_PAGE_SIZE]?.sourceKey ?? null;
+        container.scrollTop=0;draw(null,control);
+      };
+      controls.appendChild(make('button',{className:'filter',text:'上一页',attrs:{type:'button','data-source-page':'previous',disabled:paging.page===0},on:{click:()=>changePage(-1,'previous')}}));
+      controls.appendChild(make('span',{className:'source-page-range',text:`${start+1}–${Math.min(start+SOURCE_PAGE_SIZE,sources.length)} / ${sources.length}`}));
+      controls.appendChild(make('button',{className:'filter',text:'下一页',attrs:{type:'button','data-source-page':'next',disabled:start+SOURCE_PAGE_SIZE>=sources.length},on:{click:()=>changePage(1,'next')}}));
+      container.appendChild(controls);
+    }
+    const list=make('div',{attrs:{role:'listbox','aria-label':label}});
+    for(const [offset,source] of visible.entries()){
+      const row=make('button',{className:'source-row',attrs:{type:'button',role:'option',tabindex:source.sourceKey===tabKey?'0':'-1','aria-selected':source.sourceKey===selectedKey?'true':'false','aria-posinset':start+offset+1,'aria-setsize':sources.length,'data-source-key':source.sourceKey},on:{click:()=>onSelect(source.sourceKey,row),focus:()=>{paging.focusKey=source.sourceKey;for(const item of list.querySelectorAll<HTMLButtonElement>('button.source-row'))item.tabIndex=item===row?0:-1;}}});
+      row.dataset.status=source.excluded?'excluded':'ok';
+      row.appendChild(make('span',{className:'source-code',text:source.sourceKey}));
+      const body=make('span',{});body.appendChild(make('strong',{text:source.title}));
+      body.appendChild(make('span',{text:`${SOURCE_KIND_LABELS[source.kind]} · ${formatDate(source.publishedAt)}${source.excluded?' · 已排除':''}`}));
+      row.appendChild(body);list.appendChild(row);
+    }
+    container.appendChild(list);
+    if(focusKey){const row=[...list.querySelectorAll<HTMLButtonElement>('button.source-row')].find(item=>item.dataset.sourceKey===focusKey);row?.focus({preventScroll:!revealFocus});}
+    else if(focusPage){const control=[...container.querySelectorAll<HTMLButtonElement>('[data-source-page]')].find(item=>item.dataset.sourcePage===focusPage);if(control&&!control.disabled)control.focus({preventScroll:true});else list.querySelector<HTMLButtonElement>('button.source-row')?.focus({preventScroll:true});}
+  }
+  container.onkeydown=event=>{
+    if(event.isComposing||!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
+    const target=event.target as HTMLElement|null;
+    if(!target?.matches('button.source-row'))return;
+    const index=sources.findIndex(source=>source.sourceKey===target.dataset.sourceKey);if(index<0)return;
     event.preventDefault();
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1
-      : Math.max(0, Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
-    for (const [i, row] of rows.entries()) row.tabIndex = i === next ? 0 : -1;
-    rows[next]?.focus();
+    const next=event.key==='Home'?0:event.key==='End'?sources.length-1:Math.max(0,Math.min(sources.length-1,index+(event.key==='ArrowDown'?1:-1)));
+    const key=sources[next]!.sourceKey;const page=Math.floor(next/SOURCE_PAGE_SIZE);paging.focusKey=key;
+    if(page!==paging.page){paging.page=page;container.scrollTop=0;draw(key,undefined,true);}
+    else [...container.querySelectorAll<HTMLButtonElement>('button.source-row')].find(row=>row.dataset.sourceKey===key)?.focus();
   };
-  if (sources.length === 0) {
-    container.appendChild(
-      make('p', { className: 'empty-state', text: filter === 'excluded' ? '没有已排除的来源。' : '这一筛选下没有来源。' })
-    );
-    return;
-  }
-  for (const source of sources) {
-    const row = make('button', {
-      className: 'source-row',
-      attrs: {
-        type: 'button',
-        role: 'option',
-        tabindex: source.sourceKey === tabKey ? '0' : '-1',
-        'aria-selected': source.sourceKey === selectedKey ? 'true' : 'false',
-        'data-source-key': source.sourceKey
-      },
-      on: { click: () => onSelect(source.sourceKey, row) }
-    });
-    row.dataset.status = source.excluded ? 'excluded' : 'ok';
-    row.appendChild(make('span', { className: 'source-code', text: source.sourceKey }));
-    const body = make('span', {});
-    body.appendChild(make('strong', { text: source.title }));
-    body.appendChild(
-      make('span', {
-        text: `${SOURCE_KIND_LABELS[source.kind]} · ${formatDate(source.publishedAt)}${source.excluded ? ' · 已排除' : ''}`
-      })
-    );
-    row.appendChild(body);
-    container.appendChild(row);
-  }
+  draw(activeRow?.dataset.sourceKey ?? null,activePage);
 }
 
 function detailRow(label: string, value: string): HTMLElement {

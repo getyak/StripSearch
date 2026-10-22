@@ -1217,7 +1217,7 @@ function renderReportView(): void {
   syncResearchPresentation();
 }
 
-function renderSourcePanels(): void {
+function renderSourcePanels(revealSelected = false): void {
   const anchor = captureFocusAnchor();
   const run = state.run;
   const entry = citationReturn.entry();
@@ -1245,8 +1245,8 @@ function renderSourcePanels(): void {
     });
   filters(els.sourceFilters);
   filters(els.drawerSourceFilters);
-  renderSourceList(els.inspectorSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect);
-  renderSourceList(els.drawerSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect);
+  renderSourceList(els.inspectorSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect, {revealSelected});
+  renderSourceList(els.drawerSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect, {revealSelected});
   renderSourceDetail(els.inspectorDetail, run, state.selectedSourceKey, handlers);
   renderSourceDetail(els.drawerSourceDetail, run, state.selectedSourceKey, handlers);
   syncResearchPresentation();
@@ -1298,7 +1298,7 @@ function focusSource(sourceKey: string, origin: SourceOrigin = 'citation', trigg
     citationReturn.enterViaCitation(sourceKey, trigger?.dataset.citationAnchor ?? '', trigger);
   } else if (origin === 'search') citationReturn.enterViaSearch(sourceKey, els.openSearch);
   else citationReturn.enterViaList(sourceKey, trigger);
-  renderSourcePanels();
+  renderSourcePanels(true);
   const detail = narrow ? els.drawerSourceDetail : els.inspectorDetail;
   citationReturn.emphasize(detail);
   if (narrow && !els.sourceDrawer.open) openDrawer(els.sourceDrawer);

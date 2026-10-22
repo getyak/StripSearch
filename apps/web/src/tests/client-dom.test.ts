@@ -166,27 +166,30 @@ test('open-ended progress identifies one current activity without declaring earl
  const chronological=stagesFromEvents([{seq:1,type:'stage',payload:{index:8,key:'read',label:'读取资料',status:'active'},createdAt:''},{seq:2,type:'stage',payload:{key:'repair',label:'修正陈述',status:'active'},createdAt:''}]);renderActivity(list,fill,bar,text,stateEl,indicator,chronological,'researching',true);assert.equal(stateEl.textContent,'修正陈述');assert.equal(list.querySelectorAll('[data-status="active"]').length,1);assert.equal(list.querySelector('[data-status="active"] .stage-label')!.textContent,'修正陈述');
 });
 
-// Long lists stay complete while keyboard users enter them once.
-test('3200 sources remain reachable through one roving keyboard entry', () => {
-  const container = domContainer();
-  jsdomWindow.document.body.appendChild(container);
-  const base = viewWith();
-  const view = viewWith({ sources: Array.from({ length: 3200 }, (_, index) => ({
-    ...base.sources[0]!, sourceKey: `S${index + 1}`, title: `合成来源 ${index + 1}`
-  })) });
-  let selected: string | null = null;
-  renderSourceList(container, view, null, 'all', (key) => { selected = key; });
-  const rows = [...container.querySelectorAll<HTMLButtonElement>('button.source-row')];
-  assert.equal(rows.length, 3200);
-  assert.equal(rows.filter((row) => row.tabIndex === 0).length, 1);
-  rows[0]!.focus();
-  rows[0]!.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
-  assert.equal(jsdomWindow.document.activeElement, rows[3199]);
-  rows[3199]!.click();
-  assert.equal(selected, 'S3200');
-  rows[3199]!.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
-  assert.equal(jsdomWindow.document.activeElement, rows[0]);
-  container.remove();
+// Long lists keep one keyboard entry and expose the full corpus through bounded pages.
+test('8005 sources render only one page while End and Home still reach the entire list', () => {
+ const container=domContainer();jsdomWindow.document.body.appendChild(container);const base=viewWith();const view=viewWith({sources:Array.from({length:8005},(_,i)=>({...base.sources[0]!,sourceKey:`S${i+1}`,title:`合成来源 ${i+1}`}))});let selected:string|null=null;
+ renderSourceList(container,view,null,'all',key=>{selected=key;});
+ assert.equal(container.querySelectorAll('button.source-row').length,100);assert.match(container.textContent!,/1–100 \/ 8005/);assert.equal(container.querySelectorAll('button.source-row[tabindex="0"]').length,1);
+ let row=container.querySelector<HTMLButtonElement>('button.source-row')!;row.focus();row.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));
+ assert.equal(container.querySelectorAll('button.source-row').length,5);assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S8005');assert.match(container.textContent!,/8001–8005 \/ 8005/);(jsdomWindow.document.activeElement as HTMLButtonElement).click();assert.equal(selected,'S8005');
+ jsdomWindow.document.activeElement!.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S1');assert.equal(view.sources.length,8005);container.remove();
+});
+
+test('source paging preserves navigation focus, crosses page boundaries and locates a selected distant citation',()=>{
+ const container=domContainer();jsdomWindow.document.body.appendChild(container);const base=viewWith();const view=viewWith({sources:Array.from({length:1005},(_,i)=>({...base.sources[0]!,sourceKey:`S${i+1}`}))});const select=()=>undefined;
+ renderSourceList(container,view,null,'all',select);container.querySelector<HTMLButtonElement>('[data-source-page="next"]')!.click();assert.match(container.textContent!,/101–200 \/ 1005/);
+ const first=container.querySelector<HTMLButtonElement>('button.source-row')!;first.focus();first.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S100');
+ jsdomWindow.document.activeElement!.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S101');
+ renderSourceList(container,view,'S999','all',select);assert.match(container.textContent!,/901–1000 \/ 1005/);assert.equal(container.querySelector('[aria-selected="true"]')?.getAttribute('data-source-key'),'S999');
+ container.querySelector<HTMLButtonElement>('[data-source-page="previous"]')!.click();renderSourceList(container,{...view,sources:[...view.sources,{...base.sources[0]!,sourceKey:'S1006'}]},'S999','all',select);assert.match(container.textContent!,/801–900 \/ 1006/);
+ renderSourceList(container,view,'S999','all',select,{revealSelected:true});assert.match(container.textContent!,/901–1000 \/ 1005/);const selected=container.querySelector<HTMLButtonElement>('[data-source-key="S999"]')!;selected.focus();renderSourceList(container,view,'S999','all',select);assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S999');container.remove();
+});
+
+test('source filter and run changes reset paging without hiding remaining sources',()=>{
+ const container=domContainer();const base=viewWith();const view=viewWith({sources:Array.from({length:250},(_,i)=>({...base.sources[0]!,sourceKey:`S${i+1}`,kind:i<120?'profile' as const:'work' as const}))});const select=()=>undefined;
+ renderSourceList(container,view,'S230','all',select);assert.match(container.textContent!,/201–250 \/ 250/);renderSourceList(container,view,'S230','profile',select);assert.match(container.textContent!,/1–100 \/ 120/);container.querySelector<HTMLButtonElement>('[data-source-page="next"]')!.click();assert.equal(container.querySelectorAll('.source-row').length,20);
+ renderSourceList(container,{...view,runId:'other-run'},null,'all',select);assert.match(container.textContent!,/1–100 \/ 250/);assert.equal(container.dataset.runId,'other-run');renderSourceList(container,null,null,'all',select);assert.equal(container.querySelectorAll('.source-row').length,0);assert.equal(container.querySelector('[data-source-page]'),null);
 });
 
 test('return refuses a replaced sentence or a different source at the same report slot', async () => {
@@ -240,4 +243,10 @@ test('source inspector presents readable inert HTML and retains the immutable or
  assert.equal(container.querySelector('.source-quote p')?.textContent,"Actual author: R&D 'work'.");
  assert.equal(container.querySelector('.source-original pre')?.textContent,raw);assert.equal(container.querySelectorAll('script,img,style').length,0);
  assert.match(container.textContent??'',/已选人物账号范围/);assert.equal(JSON.stringify(source),original);
+});
+
+test('small source lists keep roving keys and restore selected row focus without paging controls',()=>{
+ const container=domContainer();jsdomWindow.document.body.appendChild(container);const base=viewWith();const view=viewWith({sources:Array.from({length:3},(_,i)=>({...base.sources[0]!,sourceKey:`S${i+1}`}))});let selected:string|null='S2';
+ const onSelect=(key:string)=>{selected=key;renderSourceList(container,view,selected,'all',onSelect);};renderSourceList(container,view,selected,'all',onSelect);assert.equal(container.querySelector('[data-source-page]'),null);
+ const row=container.querySelector<HTMLButtonElement>('[data-source-key="S2"]')!;row.focus();row.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S3');(jsdomWindow.document.activeElement as HTMLButtonElement).click();assert.equal(selected,'S3');assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S3');assert.equal(container.querySelectorAll('button.source-row[tabindex="0"]').length,1);container.remove();
 });
