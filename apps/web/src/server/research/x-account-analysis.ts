@@ -11,11 +11,12 @@ const MAX_BATCH=30000;
 const MAX_REPORT_MERGE_ROUNDS=12;
 const REPORT_REASONING_RULES='通用反例约束：双方都要求人批准时，不能写成人类审批原则发生变化；少而短的 skills 与按需调用可以兼容，不能据此硬造分歧；two sections 表示两个章节或部分，不等于两份文档。先赞赏再询问 benchmark 方法，不足以推出否定排名，必须保留赞赏这一反证。这些仅为核对规则，不是本账号事实；具体判断仍须逐项引用真实材料。';
 interface Material {sourceKey:string;url:string;authorId:string;authorHandle:string;role:XAccountPost['role'];kind:XAccountPost['kind'];publishedAt:string|null;parentId:string|null;quotedId:string|null;rootIds:string[];offset:number;text:string;truncated:boolean}
-type LocalEvidenceRejectionCode='changes_requires_two_distinct_own_dates'|'missing_related_third_party_quote'|'quote_mismatch_or_outside_window';
+type LocalEvidenceRejectionCode='changes_requires_two_distinct_own_dates'|'missing_related_third_party_quote'|'quote_mismatch_or_outside_window'|'internal_source_label_in_statement';
 const LOCAL_EVIDENCE_REPAIRS:Record<LocalEvidenceRejectionCode,string>={
  changes_requires_two_distinct_own_dates:'时间变化须引用至少两篇本人非转帖原文，并有两个不同且可解析的发布时间；请补齐实际引用或收回时间变化。',
  missing_related_third_party_quote:'第三方提问或观点须正式引用与本人帖子具有原生关系的第三方原文；不能仅凭本人回复补写对方的话。',
- quote_mismatch_or_outside_window:'引文不能精确绑定到原文，或不在本次提供的原文窗口中；请只引用窗口内逐字连续且位置明确的原文。'
+ quote_mismatch_or_outside_window:'引文不能精确绑定到原文，或不在本次提供的原文窗口中；请只引用窗口内逐字连续且位置明确的原文。',
+ internal_source_label_in_statement:'内部来源编号仅放在 evidence 中；正文请用真实作者、日期与内容表达，不能把研究编号写成原帖内容或引用动作。原文确实出现的同名字面值须正式引用。'
 };
 const findingSchema={type:'object',additionalProperties:false,required:['findings'],properties:{findings:{type:'array',items:{type:'object',additionalProperties:false,required:['section','statement','kind','evidence'],properties:{section:{type:'string',enum:SECTIONS},statement:{type:'string'},kind:{type:'string',enum:['attributed_statement','page_statement','inference']},evidence:{type:'array',minItems:1,maxItems:8,items:{type:'object',additionalProperties:false,required:['sourceKey','quote'],properties:{sourceKey:{type:'string'},quote:{type:'string'},quoteOffset:{type:'integer',minimum:0}}}}}}}}};
 const verifySchema={type:'object',additionalProperties:false,required:['verdicts'],properties:{verdicts:{type:'array',items:{type:'object',additionalProperties:false,required:['id','supported','reason'],properties:{id:{type:'string'},supported:{type:'boolean'},reason:{type:'string'}}}}}};
@@ -39,7 +40,7 @@ function relatedContext(target:XAccountPost,context:XAccountPost):boolean {
 function material(post:XAccountPost,page:StoredPage,offset=0,length=7500):Material{return {sourceKey:post.sourceKey,url:post.url,authorId:post.authorId,authorHandle:post.authorHandle,role:post.role,kind:post.kind,publishedAt:post.publishedAt,parentId:post.parentId,quotedId:post.quotedId,rootIds:post.rootIds,offset,text:page.text.slice(offset,offset+length),truncated:post.truncated||!!page.textTruncated};}
 function pack<T>(values:T[],limit=MAX_BATCH,maxItems=24):T[][] {const batches:T[][]=[];let current:T[]=[];let size=0;for(const value of values){const length=JSON.stringify(value).length;if(current.length&&(size+length>limit||current.length>=maxItems)){batches.push(current);current=[];size=0;}current.push(value);size+=length;}if(current.length)batches.push(current);return batches;}
 /** Bound active jobs, not the retained corpus. A failure drains workers before the caller can finalize. */
-async function parallelJobs<T>(jobs:T[],run:(job:T)=>Promise<void>):Promise<void> {
+async function parallelJobs<T>(jobs:T[],run:(job:T)=>Promise<void>,modelConcurrency:1|3=3):Promise<void> {
  let next=0;let failed=false;let firstError:unknown;
  async function worker():Promise<void>{
   while(!failed){
@@ -50,7 +51,7 @@ async function parallelJobs<T>(jobs:T[],run:(job:T)=>Promise<void>):Promise<void
    await new Promise<void>(resolve=>setImmediate(resolve));
   }
  }
- await Promise.all(Array.from({length:Math.min(3,jobs.length)},()=>worker()));
+ await Promise.all(Array.from({length:Math.min(modelConcurrency,jobs.length)},()=>worker()));
  if(failed)throw firstError;
 }
 function originalEvidence(finding:XAccountFinding,pages:Map<string,StoredPage>,posts:Map<string,XAccountPost>,subject:XNativeAccount,reject?:(code:LocalEvidenceRejectionCode)=>void):boolean {
@@ -109,7 +110,10 @@ function nativeContext(findings:XAccountFinding[],pages:ReadonlyMap<string,Store
  }}return{relationships,relationshipContext};
 }
 /** Report-only guards do not change the v4 candidate corpus or cached v1 plan identity. */
-function reportEvidenceValid(finding:XAccountFinding,pages:ReadonlyMap<string,StoredPage>,posts:ReadonlyMap<string,XAccountPost>,nativePosts:ReadonlyMap<string,XAccountPost>):boolean{
+function reportEvidenceValid(finding:XAccountFinding,pages:ReadonlyMap<string,StoredPage>,posts:ReadonlyMap<string,XAccountPost>,nativePosts:ReadonlyMap<string,XAccountPost>,reject?:(code:LocalEvidenceRejectionCode)=>void):boolean{
+ const labels=(text:string)=>text.replace(/(?:https?:\/\/|www\.)[^\s]+/gi,'').match(/\bS\d+\b/g)??[];
+ const quotedLabels=new Set(finding.evidence.flatMap(e=>labels(e.quote)));
+ if(labels(finding.statement).some(label=>pages.has(label)&&!quotedLabels.has(label))){reject?.('internal_source_label_in_statement');return false;}
  const missing=/(?:缺少|缺乏|缺|没有|未取得|未提供|未给出|未附带)[^。；，,]{0,16}(?:对方原帖|对方|父帖|提问原文|引用原文|上下文|帖文原文)|(?:对方原帖|父帖|提问原文|引用原文)[^。；，,]{0,12}(?:缺失|不存在|不可见|未保存)/.test(finding.statement);
  if(missing&&nativeContext([finding],pages,posts,nativePosts).relationships.some(r=>r.available))return false;
  // A personal block is not a platform ban; a question containing 'banning' is
@@ -234,14 +238,14 @@ async function organizeReport(input:XAccountAnalysisInput,findings:XAccountFindi
  const batches=bounded(index);const parts:ReportNode[][]=[];
  await parallelJobs(batches.map((items,part)=>({items,part})),async({items,part})=>{
   parts[part]=(await planCall({organizationStage:'index',scope,part,parts:batches.length,items},new Map(items.map(item=>[item.id,[item.id]])))).map(node);remember(`report-plan:v1:${scope}:index:${part}`);
- });
+ },input.modelConcurrency);
  let nodes=parts.flat();if(batches.length<=1)return nodes;
  for(let round=0;nodes.length;round++){
   if(round>=MAX_REPORT_MERGE_ROUNDS)throw new ReportPlanLimitError();
   const views=nodes.map(n=>({id:n.id,section:n.section,title:n.title,findingCount:n.findingIds.length}));const chunks=bounded(views);const available=new Map(nodes.map(n=>[n.id,n.findingIds]));const mergedParts:ReportNode[][]=[];
   await parallelJobs(chunks.map((items,part)=>({items,part})),async({items,part})=>{
    mergedParts[part]=(await planCall({organizationStage:'merge',scope,round,part,parts:chunks.length,items,requireConsolidation:chunks.length>1},new Map(items.map(item=>[item.id,available.get(item.id)!])),chunks.length>1&&items.length>1)).map(node);remember(`report-plan:v1:${scope}:merge:${round}:${part}`);
-  });
+  },input.modelConcurrency);
   const merged=mergedParts.flat();if(chunks.length===1)return merged;nodes=merged;
  }
  return [];
@@ -316,7 +320,7 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
   input.state.gaps=input.state.gaps.filter(g=>!(g.code==='analysis_batch_protocol_unverified'&&g.target===key));
   input.state.analysis.completedBatches.push(key);input.save();
   }catch(error){protocolGap(key,error);}
- });
+ },input.modelConcurrency);
  guard(input);
  const readKeys=new Set(jobs.map(job=>`batch:${hash(JSON.stringify(job))}`));
  const allRead=[...readKeys].every(key=>input.state.analysis.completedBatches.includes(key));
@@ -326,19 +330,36 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  const reportScope=hash(JSON.stringify([signature,batchFindings.map(({verified,...f})=>f)]));
  const completePrefix=`report:v4:complete:${reportScope}:`;
  const priorPlan=input.state.analysis.completedBatches.filter(k=>k.startsWith(`report-plan:v1:ready:${reportScope}:`)).at(-1)?.split(':').at(-1);
- if(priorPlan&&jobs.every(job=>input.state.analysis.completedBatches.includes(`batch:${hash(JSON.stringify(job))}`))&&input.state.analysis.completedBatches.includes(completePrefix+priorPlan)){input.state.analysis.synthesisDone=true;return;}
+ const nativePosts=new Map(input.posts.map(p=>[p.id,p]));
+ const currentEvidenceValid=(finding:XAccountFinding)=>originalEvidence(finding,pagesByKey,postByKey,input.subject)&&reportEvidenceValid(finding,pagesByKey,postByKey,nativePosts);
+ const priorFindings=input.state.analysis.findings.filter(f=>f.verified&&f.id.startsWith(`report:v4:${priorPlan}:`));
+ if(priorPlan&&jobs.every(job=>input.state.analysis.completedBatches.includes(`batch:${hash(JSON.stringify(job))}`))&&input.state.analysis.completedBatches.includes(completePrefix+priorPlan)&&priorFindings.length&&priorFindings.every(currentEvidenceValid)){input.state.analysis.synthesisDone=true;return;}
  let plan:ReportGroup[];
  try{plan=await organizeReport(input,batchFindings,reportScope);}catch(error){protocolGap(`report-plan:v1:${reportScope}`,error);return;}
  const planHash=hash(JSON.stringify(plan));const planMarker=`report-plan:v1:ready:${reportScope}:${planHash}`;
  if(!input.state.analysis.completedBatches.includes(planMarker)){input.state.analysis.completedBatches.push(planMarker);input.save();}
  const byId=new Map(batchFindings.map(f=>[f.id,f]));
- const nativePosts=new Map(input.posts.map(p=>[p.id,p]));
  const bundle=(selected:XAccountFinding[])=>({materials:originalWindows(selected,pagesByKey,postByKey),...nativeContext(selected,pagesByKey,postByKey,nativePosts),publicationChecks:selected.map(f=>({findingId:f.id,...findingTiming(f,postByKey)}))});
  const reportJobs=plan.map((topic,topicIndex)=>({topic,topicIndex}));
  const reportKey=(job:typeof reportJobs[number])=>`report:v4:topic:${hash(JSON.stringify([reportScope,planHash,job]))}`;
  const skippedKey=(key:string)=>key.replace('report:v4:topic:','report:v4:skipped:');
+ const retireInvalidTopics=(selected:typeof reportJobs)=>{
+  const invalid=new Set<XAccountFinding>(),markers=new Set<string>();
+  for(const job of selected){
+   const key=reportKey(job),findings=input.state.analysis.findings.filter(f=>f.verified&&f.id.startsWith(`report:v4:${planHash}:${String(job.topicIndex).padStart(6,'0')}:`));
+   const stale=findings.filter(f=>f.section!==job.topic.section||!currentEvidenceValid(f));
+   if(stale.length||input.state.analysis.completedBatches.includes(key)&&!findings.length){stale.forEach(f=>invalid.add(f));markers.add(key);markers.add(skippedKey(key));markers.add(key.replace('report:v4:topic:','report:v4:rejected:'));}
+  }
+  if(!markers.size)return;
+  guard(input);markers.add(completePrefix+planHash);
+  input.state.analysis.completedBatches=input.state.analysis.completedBatches.filter(marker=>!markers.has(marker));
+  invalid.forEach(f=>{f.verified=false;});input.state.analysis.synthesisDone=false;
+  // Persist retirement and both completion levels together before any repair dispatch.
+  input.save();
+ };
+ retireInvalidTopics(reportJobs);
  await parallelJobs(reportJobs,async job=>{
-  guard(input);const key=reportKey(job),rejectedKey=key.replace('report:v4:topic:','report:v4:rejected:');if(input.state.analysis.completedBatches.includes(key)||input.state.analysis.completedBatches.includes(skippedKey(key))||input.state.analysis.completedBatches.includes(rejectedKey))return;
+  guard(input);const key=reportKey(job),rejectedKey=key.replace('report:v4:topic:','report:v4:rejected:');if(input.state.analysis.completedBatches.includes(key))retireInvalidTopics([job]);if(input.state.analysis.completedBatches.includes(key)||input.state.analysis.completedBatches.includes(skippedKey(key))||input.state.analysis.completedBatches.includes(rejectedKey))return;
   try{
    const selected=await selectTopicEvidence(input,job.topic,job.topic.findingIds.map(id=>byId.get(id)!),reportScope,planHash,job.topicIndex,bundle);guard(input);
    if(!selected.length){input.state.gaps=input.state.gaps.filter(g=>!(g.target===key&&['analysis_batch_protocol_unverified','analysis_report_evidence_budget','analysis_report_evidence_selection'].includes(g.code)));input.state.analysis.completedBatches.push(skippedKey(key));input.save();return;}
@@ -347,7 +368,7 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
    for(let attempt=0;attempt<=2&&!final.length;attempt++){
     const raw=await model(input,'x-account-write',`${RULES}\n完整主题成稿 report/v3。一次写出本主题的连贯论证，不逐索引罗列，不跨主题重复同一偏好。outline只提供主线位置；topic.section是本次唯一允许的分类，所有finding.section必须严格相同。仅用selected原文与实际父帖/引用辅助原文形成少量有论证关系的中文段落，每段作为带精确证据的finding，不写自由body。普通问候和无信息玩笑不写。findings是未核验索引，旧verified标签无权威。relationships.available来自全语料，available=true就不能声称缺少对应父帖；未出现在当前引文窗口不等于资料不存在。辅助原文需要支持具体说法时应正式引用其sourceKey及逐字原文。自述不能升级为独立证实；时间范围两端必须由该段引用的真实UTC日期或原文明示日期支持，不能借未引材料凑跨度；材料同组不是同批发布。最终每段会独立核验。按rejections仅依据真正原文修正。${REPORT_REASONING_RULES}`,{reportStage:'write',version:3,scope:reportScope,planHash,outline:plan.map(({section,title})=>({section,title})),topic:{section:job.topic.section,title:job.topic.title},findings:selected,...content,attempt,rejections},findingSchema);
     const localRejections:RejectedFinding[]=[];
-    const proposed=candidates(raw,materials,input,prefix,localRejections).filter(f=>f.section===job.topic.section&&reportEvidenceValid(f,pagesByKey,postByKey,nativePosts)).map((f,i)=>({...f,id:`${prefix}:${String(i).padStart(4,'0')}:${f.id.split(':').at(-1)}`}));rejections=localRejections;
+    const proposed=candidates(raw,materials,input,prefix,localRejections).filter(f=>f.section===job.topic.section&&reportEvidenceValid(f,pagesByKey,postByKey,nativePosts,code=>localRejections.push({statement:f.statement,code,reason:LOCAL_EVIDENCE_REPAIRS[code]}))).map((f,i)=>({...f,id:`${prefix}:${String(i).padStart(4,'0')}:${f.id.split(':').at(-1)}`}));rejections=localRejections;
     if(!proposed.length&&!rejections.length)rejections.push({statement:'',reason:'正文未通过主题分类、实际父帖可用状态、所引日期边界或原文证据检查；不能补造结论。'});
     final=await verify(proposed,input,'synthesis',rejections);guard(input);
    }
@@ -357,7 +378,7 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
    else{input.state.gaps.push({code:'analysis_report_unverified',target:key,detail:'本主题正文在限定修订后仍未通过独立原文核验，最终报告尚未完成。'});input.state.analysis.completedBatches.push(rejectedKey);}
    input.save();
   }catch(error){protocolGap(key,error);}
- });
+ },input.modelConcurrency);
  guard(input);
  const allWritten=reportJobs.length>0&&reportJobs.every(job=>input.state.analysis.completedBatches.includes(reportKey(job))||input.state.analysis.completedBatches.includes(skippedKey(reportKey(job))));
  const hasReport=input.state.analysis.findings.some(f=>f.verified&&f.id.startsWith(`report:v4:${planHash}:`));

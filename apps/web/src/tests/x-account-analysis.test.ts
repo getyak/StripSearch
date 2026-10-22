@@ -454,3 +454,84 @@ test('final verifier rejects a third-party subject mislabeled as the target self
  input.model=async({purpose,prompt})=>{const d=dataOf(prompt);if(purpose==='x-account-verify-synthesis'){checks++;assert.match(prompt,/kind 必须匹配陈述中的实际说话主体/);assert.match(prompt,/第三方自己的经历或主张不能因附带一条 target 引文/);return{verdicts:d.findings.map((f:{id:string;kind:string})=>({id:f.id,supported:f.kind==='page_statement',reason:'实际主体是第三方，应改为 page_statement 并明确主体。'}))};}if(d.reportStage==='write'){writes++;if(writes>1)assert.ok(d.rejections.some((r:{reason:string})=>r.reason.includes('实际主体是第三方')));return{findings:[{...finding,kind:writes===1?'attributed_statement':'page_statement'}]};}return{findings:[{...output(),evidence:[{sourceKey:'post-0',quote:input.posts[0]!.text}]}]};};
  await analyzeXAccount(input);assert.equal(writes,2);assert.equal(checks,2);assert.equal(input.state.analysis.synthesisDone,true);const report=projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:new Set(input.pages.map(p=>p.sourceKey))});assert.equal(report.findings.length,1);assert.equal(report.findings[0]!.kind,'page_statement');assert.equal(report.findings[0]!.statement,finding.statement);
 });
+
+test('final report rejects an internal source label absent from the literal quote with precise bounded-repair feedback',async()=>{
+ for(const quoteHasOnlyUrl of [false,true]){
+  const input=fixture();input.posts[0]!.sourceKey='S71';input.pages[0]!.sourceKey='S71';if(quoteHasOnlyUrl){input.posts[0]!.text+=' https://synthetic.invalid/S71';input.pages[0]!.text=input.posts[0]!.text;}
+  const good={...output('S71'),evidence:[{sourceKey:'S71',quote:input.posts[0]!.text}]};const bad={...good,statement:quoteHasOnlyUrl?'该账号在 S71第1条中自述制作了比较阅读笔记的工具。':'该账号引用 S71 时自述制作了比较阅读笔记的工具。'};let writes=0,checks=0;
+  input.model=async({purpose,prompt})=>{const d=dataOf(prompt);if(purpose==='x-account-verify-synthesis'){checks++;assert.ok(d.findings.every((f:{statement:string})=>f.statement===good.statement));return{verdicts:d.findings.map((f:{id:string})=>({id:f.id,supported:true,reason:'The literal quote supports the repaired statement.'}))};}if(d.reportStage==='write'){writes++;if(writes===1)assert.deepEqual(d.rejections,[]);else{assert.equal(d.rejections.length,1);assert.equal(d.rejections[0].statement,bad.statement);assert.equal(d.rejections[0].code,'internal_source_label_in_statement');assert.match(d.rejections[0].reason,/编号.*evidence.*正文.*作者.*日期.*内容/);}return{findings:[writes===1?bad:good]};}return{findings:[good]};};
+  await analyzeXAccount(input);assert.equal(writes,2);assert.equal(checks,1);assert.equal(input.state.analysis.synthesisDone,true);
+ }
+});
+
+test('a real S24 product name in the formal quote and a source label confined to a URL remain valid',async()=>{
+ for(const scenario of ['product','url','different-token']){
+  const input=fixture();input.posts[0]!.sourceKey='S24';input.pages[0]!.sourceKey='S24';
+  const text=scenario==='product'?'I use the S24 to compare reading notes.':scenario==='url'?'I built the synthetic tool. https://synthetic.invalid/S24':'I use the S240 to compare reading notes.';input.posts[0]!.text=text;input.pages[0]!.text=text;
+  const statement=scenario==='product'?'该账号自述使用 S24 比较阅读笔记。':scenario==='url'?'该账号自述制作了合成工具，并附有 https://synthetic.invalid/S24 链接。':'该账号自述使用 S240 比较阅读笔记。';let writes=0;
+  input.model=async({purpose,prompt})=>{const d=dataOf(prompt);if(purpose.includes('verify'))return{verdicts:d.findings.map((f:{id:string})=>({id:f.id,supported:true,reason:'Synthetic literal support.'}))};if(d.reportStage==='write')writes++;return{findings:[{section:'work',statement,kind:'attributed_statement',evidence:[{sourceKey:'S24',quote:text}]}]};};
+  await analyzeXAccount(input);assert.equal(writes,1,scenario);const report=projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:new Set(['S24'])});assert.equal(report.findings.length,1,scenario);assert.equal(report.findings[0]!.statement,statement);
+ }
+});
+
+async function completedInternalLabelFixture(){
+ const input=fixture(2,false,false);for(let i=0;i<2;i++){input.posts[i]!.sourceKey=`S${71+i}`;input.pages[i]!.sourceKey=`S${71+i}`;}
+ const cache=new Map<string,unknown>(),topicKeys=new Map<string,string>(),seen=new Set<string>();const key=(request:Parameters<XAccountModel>[0])=>JSON.stringify(request);
+ input.save=()=>{for(const marker of input.state.analysis.completedBatches)if(marker.startsWith('report:v4:topic:')&&!seen.has(marker)){seen.add(marker);const latest=input.state.analysis.findings.filter(f=>f.id.startsWith('report:v4:')&&f.verified).at(-1)!;topicKeys.set(latest.evidence[0]!.sourceKey,marker);}};
+ input.model=async request=>{const d=dataOf(request.prompt);let value:unknown;if(d.organizationStage)value={groups:d.items.map((item:{id:string;sourceKeys:string[]})=>({section:'work',title:item.sourceKeys[0],ids:[item.id]}))};else if(d.reportStage==='select')value={ids:d.items.map((item:{id:string})=>item.id)};else if(request.purpose.includes('verify'))value={verdicts:d.findings.map((f:{id:string})=>({id:f.id,supported:true,reason:'Synthetic paid original verdict.'}))};else value={findings:d.reportStage==='write'?[output(d.materials[0].sourceKey)]:d.materials.map((m:{sourceKey:string})=>output(m.sourceKey))};cache.set(key(request),structuredClone(value));return value;};
+ await analyzeXAccount(input);assert.equal(input.state.analysis.synthesisDone,true);assert.equal(topicKeys.size,2);
+ const stale=input.state.analysis.findings.find(f=>f.id.startsWith('report:v4:')&&f.evidence[0]!.sourceKey==='S71')!;stale.statement='该账号引用 S71 时自述制作了用于比较阅读笔记的工具。';stale.id=stale.id.slice(0,stale.id.lastIndexOf(':')+1)+hash(JSON.stringify([stale.section,stale.statement,stale.kind,stale.evidence])).slice(0,24);
+ for(const [request]of cache){const d=dataOf(JSON.parse(request).prompt);if(d.reportStage==='write'&&d.topic.title==='S71')cache.set(request,{findings:[{...output('S71'),statement:stale.statement}]});}
+ const corrected={...output('S71'),statement:'该账号自述制作了比较阅读笔记的合成工具。',evidence:[{sourceKey:'S71',quote:input.posts[0]!.text}]};
+ return{input,cache,key,topicKeys,stale,corrected};
+}
+
+test('current local guards reopen only the affected V4 topic while retaining every other paid input and verdict',async()=>{
+ for(const phase of ['complete','partial']){
+  const f=await completedInternalLabelFixture();const {input,cache,key,topicKeys,stale,corrected}=f;const old=structuredClone(stale);const unchanged=JSON.stringify(input.state.analysis.findings.filter(finding=>finding.id!==stale.id));const priorMarkers=[...input.state.analysis.completedBatches];
+  if(phase==='partial'){input.state.analysis.completedBatches=input.state.analysis.completedBatches.filter(marker=>!marker.startsWith('report:v4:complete:'));input.state.analysis.synthesisDone=false;}
+  let writes=0,checks=0,atomic=false,writerReplays=0;
+  input.save=()=>{if(!stale.verified&&!atomic){atomic=true;assert.equal(input.state.analysis.synthesisDone,false);assert.ok(!input.state.analysis.completedBatches.some(marker=>marker.startsWith('report:v4:complete:')));assert.ok(!input.state.analysis.completedBatches.includes(topicKeys.get('S71')!));assert.ok(input.state.analysis.completedBatches.includes(topicKeys.get('S72')!));}};
+  input.model=async request=>{const d=dataOf(request.prompt);assert.notEqual(request.purpose,'x-account-analyze');if(d.topic)assert.equal(d.topic.title,'S71','the unaffected topic must not call a model again');if(cache.has(key(request))){if(d.reportStage==='write'){writerReplays++;assert.deepEqual(d.rejections,[]);assert.equal(d.attempt,0);}return structuredClone(cache.get(key(request)));}if(request.purpose==='x-account-verify-synthesis'){checks++;assert.ok(atomic,'invalidation must be saved before any new verifier');assert.ok(d.findings.every((finding:{statement:string})=>finding.statement===corrected.statement));return{verdicts:d.findings.map((finding:{id:string})=>({id:finding.id,supported:true,reason:'Fresh independent verdict for the corrected formal quote.'}))};}assert.equal(d.reportStage,'write');writes++;assert.equal(d.attempt,1);assert.equal(d.rejections[0].code,'internal_source_label_in_statement');return{findings:[corrected]};};
+  await analyzeXAccount(input);assert.equal(atomic,true,phase);assert.equal(writerReplays,1,phase);assert.equal(writes,1,phase);assert.equal(checks,1,phase);assert.equal(stale.verified,false);assert.deepEqual(stale,{...old,verified:false});assert.equal(input.state.analysis.synthesisDone,true);
+  assert.equal(JSON.stringify(input.state.analysis.findings.filter(finding=>finding.id!==stale.id).slice(0,-1)),unchanged,'valid findings and their original verdicts are retained');assert.ok(priorMarkers.filter(marker=>marker!==topicKeys.get('S71')&&!marker.startsWith('report:v4:complete:')).every(marker=>input.state.analysis.completedBatches.includes(marker)));
+  const report=projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:new Set(['S71','S72'])});assert.equal(report.findings.length,2);assert.ok(report.findings.every(finding=>finding.id!==stale.id));assert.ok(report.findings.some(finding=>finding.statement===corrected.statement));
+ }
+});
+
+test('V4 retirement saves complete removal topic invalidation and diagnostic history together before crash recovery',async()=>{
+ const f=await completedInternalLabelFixture();const {input,cache,key,topicKeys,stale,corrected}=f;let persisted:XAccountResearchState|null=null;
+ input.model=async request=>{const d=dataOf(request.prompt);assert.ok(d.organizationStage,'only the cached plan may run before retirement is saved');assert.ok(cache.has(key(request)));return structuredClone(cache.get(key(request)));};
+ input.save=()=>{persisted=structuredClone(input.state);throw Error('synthetic crash after atomic checkpoint');};
+ await assert.rejects(analyzeXAccount(input),/synthetic crash after atomic checkpoint/);assert.ok(persisted);const saved=persisted as XAccountResearchState;assert.equal(saved.analysis.synthesisDone,false);assert.ok(!saved.analysis.completedBatches.some(marker=>marker.startsWith('report:v4:complete:')));assert.ok(!saved.analysis.completedBatches.includes(topicKeys.get('S71')!));assert.ok(saved.analysis.completedBatches.includes(topicKeys.get('S72')!));assert.equal(saved.analysis.findings.find(finding=>finding.id===stale.id)!.verified,false);
+ input.state=structuredClone(saved);input.save=()=>{};const project=()=>projectXAccountReport({state:input.state,pages:input.pages,sources:sources(input),activeSourceKeys:new Set(['S71','S72'])});assert.equal(project().findings.length,0,'a restarted process cannot publish the stale complete report');let checks=0;
+ input.model=async request=>{const d=dataOf(request.prompt);if(d.topic)assert.equal(d.topic.title,'S71');if(cache.has(key(request)))return structuredClone(cache.get(key(request)));if(request.purpose==='x-account-verify-synthesis'){checks++;return{verdicts:d.findings.map((finding:{id:string})=>({id:finding.id,supported:true,reason:'Independent correction after crash recovery.'}))};}assert.equal(d.reportStage,'write');return{findings:[corrected]};};
+ await analyzeXAccount(input);assert.equal(checks,1);assert.equal(input.state.analysis.synthesisDone,true);assert.equal(project().findings.length,2);assert.equal(input.state.analysis.findings.find(finding=>finding.id===stale.id)!.verified,false);
+});
+
+test('serial model work still covers every batch planning part merge topic writer and verifier',async()=>{
+ const input=fixture(250,false,false);input.modelConcurrency=1;const seen=new Set<string>();const calls=new Map<string,number>();let active=0,peak=0;
+ input.model=async({purpose,prompt})=>{const d=dataOf(prompt);const stage=purpose==='x-account-analyze'?'analyze':d.organizationStage??d.reportStage??'verify';calls.set(stage,(calls.get(stage)??0)+1);active++;peak=Math.max(peak,active);
+  try{await new Promise<void>(resolve=>setImmediate(resolve));
+   if(purpose==='x-account-analyze'){for(const m of d.materials)seen.add(m.sourceKey);return{findings:d.materials.map((m:{sourceKey:string})=>output(m.sourceKey))};}
+   if(d.organizationStage==='index')return{groups:d.items.map((item:{id:string})=>({section:'work',title:'合成索引节点',ids:[item.id]}))};
+   if(d.organizationStage==='merge'){
+    const groups:Array<{section:string;title:string;ids:string[]}>=[];
+    if(d.requireConsolidation){for(let i=0;i<d.items.length;i+=2)groups.push({section:'work',title:'合成归并节点',ids:d.items.slice(i,i+2).map((item:{id:string})=>item.id)});}
+    else for(let i=0;i<3;i++)groups.push({section:'work',title:`合成主题${i}`,ids:d.items.filter((_item:unknown,index:number)=>index%3===i).map((item:{id:string})=>item.id)});
+    return{groups};
+   }
+   if(d.reportStage==='select')return{ids:[d.items[0].id]};
+   if(d.reportStage==='write')return{findings:[output(d.materials[0].sourceKey)]};
+   return{verdicts:d.findings.map((f:{id:string})=>({id:f.id,supported:true,reason:'Synthetic literal evidence.'}))};
+  }finally{active--;}
+ };
+ await analyzeXAccount(input);assert.equal(peak,1);assert.equal(active,0);assert.equal(seen.size,250,'serial execution does not sample or omit the retained corpus');assert.ok(calls.get('analyze')!>3);assert.ok(calls.get('index')!>1);assert.ok(calls.get('merge')!>1);assert.ok(calls.get('select')!>=3);assert.equal(calls.get('write'),3);assert.equal(calls.get('verify'),3);assert.equal(input.state.analysis.synthesisDone,true);
+});
+
+test('serial model failure drains its only worker and never starts another queued batch',async()=>{
+ const input=fixture(85);input.modelConcurrency=1;const pending:Array<(error:Error)=>void>=[];let calls=0,active=0,saves=0;input.save=()=>{saves++;};
+ input.model=async()=>{calls++;active++;try{await new Promise<void>((_resolve,reject)=>pending.push(reject));return{findings:[]};}finally{active--;}};
+ const running=analyzeXAccount(input);const rejected=assert.rejects(running,/serial model failure/);await until(()=>pending.length>0);const started=calls;for(const reject of pending)reject(Error('serial model failure'));await rejected;
+ assert.equal(started,1);assert.equal(calls,1);assert.equal(active,0);assert.equal(input.state.analysis.completedBatches.filter(key=>key.startsWith('batch:')).length,0);const saved=saves;await new Promise<void>(resolve=>setImmediate(resolve));assert.equal(calls,1);assert.equal(saves,saved,'all work has drained before returning the failure');
+});

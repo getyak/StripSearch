@@ -104,6 +104,19 @@ test('Runner saves model phase progress once across consecutive planning selecti
  const checkpoint=assertPreserved(f);assert.equal(checkpoint.xAccountResearch!.analysis.synthesisDone,true);assert.ok(checkpoint.xAccountResearch!.analysis.findings.some(finding=>finding.verified&&finding.statement===STATEMENT));
 });
 
+test('Runner keeps normal model concurrency three and makes recovery-plan work serial even for an invalid plan',async t=>{
+ for(const policy of ['normal','recovery','invalid-plan']){
+  const f=selectedFixture();const p=recordingProvider(request=>request.type==='timeline'?pageResult(Array.from({length:85},(_,i)=>originalPost(String(101+i)))):undefined);
+  const binding=f.firstStep.selectionBinding(f.run.id)!;await collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider:p.provider,signal:new AbortController().signal,limits:UNLIMITED,assertScope:()=>f.firstStep.scopeGuard(f.run.ownerId,f.run.id).assertCurrent()});
+  const checkpoint=f.store.research.checkpoint(f.run.id)!;
+  if(policy!=='normal')checkpoint.xAccountResearch!.modelRecovery={version:'x-model-recovery/v1',id:policy==='invalid-plan'?'invalid-plan':'c1274cbb-ae01-4f16-90f0-c3e68aa0bad9',runId:f.run.id,caseId:binding.caseId,scopeVersion:binding.scopeVersion,accountId:binding.accounts[0]!.accountId,reason:'Synthetic resource scheduling fixture; no matching failed model action.',localFixRevision:'a'.repeat(40),createdAt:new Date().toISOString(),entries:[{failedKey:'x-account:model:v1:'+'a'.repeat(64),settledAt:new Date().toISOString()}]};
+  f.store.research.save(f.run.id,checkpoint);const priorReads=p.calls.length;const m=chineseModel();let active=0,peak=0;
+  const model:XAccountModel=async(input,signal)=>{active++;peak=Math.max(peak,active);try{await new Promise<void>(resolve=>setImmediate(resolve));return await m.model(input,signal);}finally{active--;}};
+  const runner=makeRunner(f,p.provider,model);t.after(()=>{runner.stopAll();f.close();});const run=await terminal(f,runner);
+  assert.equal(run.state,'completed',policy);assert.equal(peak,policy==='normal'?3:1,policy);assert.equal(active,0);assert.equal(m.purposes.filter(purpose=>purpose==='x-account-analyze').length,5,'all retained batches are analyzed');assert.ok(m.purposes.includes('x-account-synthesize')&&m.purposes.includes('x-account-write')&&m.purposes.includes('x-account-verify-synthesis'));assert.equal(p.calls.length,priorReads,'resource scheduling does not re-read completed provider pages');assert.equal(f.store.research.checkpoint(f.run.id)!.xAccountResearch!.posts.filter(post=>post.role==='target').length,85);
+ }
+});
+
 test('Runner tool-budget exhaustion retains read pages and reports budget_exhausted instead of internal_error',async t=>{
   const f=selectedFixture();const p=recordingProvider();const m=chineseModel();const runner=makeRunner(f,p.provider,m.model,{...UNLIMITED,toolCalls:2});
   t.after(()=>{runner.stopAll();f.close();});

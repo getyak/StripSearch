@@ -47,6 +47,8 @@ export interface XAccountAnalysisInput {
   subject:XNativeAccount;question:string;pages:StoredPage[];posts:XAccountPost[];
   state:XAccountResearchState;model:XAccountModel;signal:AbortSignal;save:()=>void;
   active:()=>void;
+  /** Local scheduling only; never part of prompts or persisted request identity. */
+  modelConcurrency?:1|3;
 }
 export interface XAccountProjection {
   answer:AnswerSectionDraft[];observations:ObservationDraft[];limitations:string[];

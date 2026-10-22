@@ -386,7 +386,7 @@ export async function runXAccountResearch(options:XAccountResearchOptions):Promi
    if(cp!.phase!==key){cp!.phase=key;save();options.store.addEvent(options.run.id,'stage',{index:cp!.steps,total:0,key,label,status:'active'});}
    return invoke(input,signal);
   };
-  await analyzeXAccount({subject:state.profile!,question:options.run.question,pages:cp.pages,posts:state.posts,state,model,signal:options.signal,save,active});
+  await analyzeXAccount({subject:state.profile!,question:options.run.question,pages:cp.pages,posts:state.posts,state,model,modelConcurrency:state.modelRecovery===undefined?3:1,signal:options.signal,save,active});
   active();
  }catch(error){
   // Cancellation/process shutdown keeps the durable inflight receipt for the
