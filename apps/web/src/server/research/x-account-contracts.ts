@@ -5,7 +5,7 @@ export interface XNativeAccount {nativeId:string;handle:string;name:string;descr
 export interface XNativePost {
   id:string;url:string;authorId:string;authorHandle:string;text:string;publishedAt:string|null;
   kind:'original'|'reply'|'quote'|'repost';parentId:string|null;quotedId:string|null;
-  conversationId:string|null;replyCount:number|null;textField:string;truncated:boolean;
+  conversationId:string|null;replyCount:number|null;textField:string;truncated:boolean;quotedUnavailable?:boolean;
   originalPostId?:string|null;originalAuthorId?:string|null;originalAuthorHandle?:string|null;
 }
 export type XReadRequest =
@@ -14,7 +14,7 @@ export type XReadRequest =
   | {type:'detail';tweetId:string}
   | {type:'comments';tweetId:string;cursor:string|null};
 export interface XReadResult {
-  account?:XNativeAccount;posts:XNativePost[];nextCursor:string|null;cursorState:'more'|'end'|'unknown';
+  retrievedAt?:string;inheritedFromRunId?:string;account?:XNativeAccount;posts:XNativePost[];nextCursor:string|null;cursorState:'more'|'end'|'unknown';
   recordCount:number;limitations:string[];requests:1;bytes:number;estimatedUsd:number|null;endpoint:string;
 }
 export interface XAccountProvider {execute(request:XReadRequest,signal:AbortSignal):Promise<XReadResult>}

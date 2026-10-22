@@ -78,3 +78,22 @@ test('an independent X account publishes a verified Chinese account report and s
   for(const text of [renderMarkdown(withdrawn),renderReportHtml(withdrawn)])assert.doesNotMatch(text,/该账号在这条原帖中自述制作了一个合成阅读工具/);
  }finally{f.close();}
 });
+
+test('distinct context reads overlap, repeated parent reads stay single, and withdrawn late responses are discarded',async()=>{
+ const{f,binding}=setup();const calls:string[]=[];let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let withdrawn=false;
+ const provider:XAccountProvider={async execute(request){
+  if(request.type==='profile')return{...result(),account:profile};
+  if(request.type==='timeline')return result([post('101',{kind:'reply',parentId:'901'}),post('102',{kind:'reply',parentId:'901'}),post('103',{kind:'quote',quotedId:'902'})]);
+  if(request.type==='replies')return result();
+  if(request.type!=='detail')throw Error('unexpected comment');
+  calls.push(request.tweetId);
+  if(request.tweetId==='901'){await held;return result([post('901',{authorId:'99',authorHandle:'other'})]);}
+  const key=f.store.listSources(f.run.id).find(s=>s.url.endsWith('/101'))!.sourceKey;f.store.setSourceExcluded(f.run.id,key,true);withdrawn=true;release();return result([post('902',{authorId:'99',authorHandle:'other'})]);
+ }};
+ try{
+  const operation=collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{}});
+  const outcome=await Promise.race([operation.then(()=>null,error=>error),new Promise<Error>(resolve=>setTimeout(()=>{release();resolve(Error('context calls remained serial'));},1000))]);
+  assert.ok(withdrawn,'a distinct contextual request must start while its peer is awaiting a response');assert.match(String(outcome),/source_revoked/);assert.equal(calls.filter(id=>id==='901').length,1,'shared parent cannot dispatch concurrently twice');
+  assert.ok(!f.store.listSources(f.run.id).some(s=>s.url.endsWith('/901')||s.url.endsWith('/902')),'neither late response can ingest after source withdrawal');await operation.catch(()=>{});
+ }finally{release();f.close();}
+});

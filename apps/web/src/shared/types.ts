@@ -46,6 +46,8 @@ export interface RunInput {
 
 /** A source exactly as persisted, before exclusion is applied. */
 export interface SourceDraft {
+  /** Original acquisition time, retained when a read receipt is reused. */
+  retrievedAt?: string;
   key: string;
   url: string;
   title: string;

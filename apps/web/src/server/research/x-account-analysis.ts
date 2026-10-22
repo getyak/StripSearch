@@ -18,6 +18,18 @@ function chinese(statement:string):boolean {const han=(statement.match(/\p{Scrip
 function own(post:XAccountPost,subject:XNativeAccount):boolean{return post.role==='target'&&post.authorId===subject.nativeId&&post.authorHandle.toLowerCase()===subject.handle.toLowerCase()&&post.kind!=='repost';}
 function material(post:XAccountPost,page:StoredPage,offset=0,length=7500):Material{return {sourceKey:post.sourceKey,url:post.url,authorId:post.authorId,authorHandle:post.authorHandle,role:post.role,kind:post.kind,publishedAt:post.publishedAt,parentId:post.parentId,quotedId:post.quotedId,rootIds:post.rootIds,offset,text:page.text.slice(offset,offset+length),truncated:post.truncated||!!page.textTruncated};}
 function pack<T>(values:T[],limit=MAX_BATCH,maxItems=24):T[][] {const batches:T[][]=[];let current:T[]=[];let size=0;for(const value of values){const length=JSON.stringify(value).length;if(current.length&&(size+length>limit||current.length>=maxItems)){batches.push(current);current=[];size=0;}current.push(value);size+=length;}if(current.length)batches.push(current);return batches;}
+/** Bound active jobs, not the retained corpus. A failure drains workers before the caller can finalize. */
+async function parallelJobs<T>(jobs:T[],run:(job:T)=>Promise<void>):Promise<void> {
+ let next=0;let failed=false;let firstError:unknown;
+ async function worker():Promise<void>{
+  while(!failed){
+   const index=next++;if(index>=jobs.length)return;
+   try{await run(jobs[index]!);}catch(error){if(!failed){failed=true;firstError=error;}return;}
+  }
+ }
+ await Promise.all(Array.from({length:Math.min(3,jobs.length)},()=>worker()));
+ if(failed)throw firstError;
+}
 function originalEvidence(finding:XAccountFinding,pages:Map<string,StoredPage>,posts:Map<string,XAccountPost>,subject:XNativeAccount):boolean {
  if(!SECTIONS.includes(finding.section)||!['attributed_statement','page_statement','inference'].includes(finding.kind)||!chinese(finding.statement)||!finding.evidence.length||finding.evidence.length>8)return false;
  if(/人格|性格|智商|心理疾病|确认为本人|身份已确认/.test(finding.statement))return false;
@@ -52,7 +64,23 @@ function candidates(value:unknown,materials:Material[],input:XAccountAnalysisInp
 }
 function originals(findings:XAccountFinding[],input:XAccountAnalysisInput):Material[]{const pages=new Map(input.pages.map(p=>[p.sourceKey,p]));const posts=new Map(input.posts.map(p=>[p.sourceKey,p]));const result:Material[]=[];for(const f of findings)for(const e of f.evidence){const p=pages.get(e.sourceKey);const post=posts.get(e.sourceKey);if(!p||!post)continue;const start=Math.max(0,e.quoteOffset-800);const item=material(post,p,start,e.quote.length+1600);if(!result.some(m=>m.sourceKey===item.sourceKey&&m.offset===item.offset))result.push(item);}return result;}
 function guard(input:XAccountAnalysisInput){input.signal.throwIfAborted();input.active();}
-async function model(input:XAccountAnalysisInput,purpose:string,instruction:string,data:unknown,schema:Record<string,unknown>){guard(input);const value=await input.model({purpose,prompt:`${instruction}\nDATA\n${JSON.stringify(data)}`,schema,maxTokens:6500},input.signal);guard(input);return value;}
+const inflightModels=new WeakMap<XAccountAnalysisInput,Map<string,Promise<unknown>>>();
+async function model(input:XAccountAnalysisInput,purpose:string,instruction:string,data:unknown,schema:Record<string,unknown>){
+ guard(input);
+ const request={purpose,prompt:`${instruction}\nDATA\n${JSON.stringify(data)}`,schema,maxTokens:6500};
+ const key=JSON.stringify(request);
+ let inflight=inflightModels.get(input);
+ if(!inflight){inflight=new Map();inflightModels.set(input,inflight);}
+ let pending=inflight.get(key);
+ if(!pending){
+  const owned=inflight;
+  // Only concurrent work is shared here; completed replay belongs to the durable metered port.
+  pending=Promise.resolve().then(()=>{guard(input);return input.model(request,input.signal);}).finally(()=>{owned.delete(key);});
+  inflight.set(key,pending);
+ }
+ try{return await pending;}finally{guard(input);}
+}
+
 interface RejectedFinding {statement:string;reason:string}
 async function verify(findings:XAccountFinding[],input:XAccountAnalysisInput,stage:string,rejections:RejectedFinding[]=[]):Promise<XAccountFinding[]>{
  const accepted:XAccountFinding[]=[];
@@ -84,16 +112,16 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  // Context-only material still gets read; no third-party item silently disappears.
  const included=new Set(jobs.flatMap(job=>job.map(m=>`${m.sourceKey}:${m.offset}`)));
  jobs.push(...pack(all.filter(m=>!included.has(`${m.sourceKey}:${m.offset}`))));
- for(const batch of jobs){
-  guard(input);const key=`batch:${hash(JSON.stringify(batch))}`;if(input.state.analysis.completedBatches.includes(key))continue;
+ await parallelJobs(jobs,async batch=>{
+  guard(input);const key=`batch:${hash(JSON.stringify(batch))}`;if(input.state.analysis.completedBatches.includes(key))return;
   const raw=await model(input,'x-account-analyze',`${RULES}\n分析本批全部正文。材料是完整保留语料的有界窗口，本批无结论可返回空 findings。优先提取具体观点、作品与行动、明确分歧和有证据的合作，不把仅有原文当作完成分析。`,{subject:input.subject,question:input.question,materials:batch},findingSchema);
   const findings=await verify(candidates(raw,batch,input,'batch'),input,'batch');guard(input);
   for(const f of findings)if(!input.state.analysis.findings.some(old=>old.id===f.id))input.state.analysis.findings.push(f);
   input.state.analysis.completedBatches.push(key);input.save();
- }
+ });
  const batchFindings=input.state.analysis.findings.filter(f=>f.verified&&f.id.startsWith('batch:'));
- for(const chunk of pack(batchFindings.map(f=>({finding:f,materials:originals([f],input)})),MAX_BATCH,12)){
-   guard(input);const materials=chunk.flatMap(c=>c.materials);const key=`synthesis:v2:${hash(JSON.stringify(chunk))}`;if(input.state.analysis.completedBatches.includes(key))continue;
+ await parallelJobs(pack(batchFindings.map(f=>({finding:f,materials:originals([f],input)})),MAX_BATCH,12),async chunk=>{
+   guard(input);const materials=chunk.flatMap(c=>c.materials);const key=`synthesis:v2:${hash(JSON.stringify(chunk))}`;if(input.state.analysis.completedBatches.includes(key))return;
    let final:XAccountFinding[]=[];
    let rejections:RejectedFinding[]=[];
    // Two bounded repairs share the original evidence; each proposal is independently verified.
@@ -107,7 +135,7 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
    for(const f of final)if(!input.state.analysis.findings.some(old=>old.id===f.id))input.state.analysis.findings.push(f);
    if(!final.length&&!input.state.gaps.some(g=>g.code==='analysis_synthesis_unverified'&&g.target===key))input.state.gaps.push({code:'analysis_synthesis_unverified',target:key,detail:'本组专题综合在初次提案及两次修订后仍未形成通过独立核验的结论；已核验的批次发现保留，综合尚未完成。'});
    input.state.analysis.completedBatches.push(key);input.save();
- }
+ });
  guard(input);
  const hasSynthesis=input.state.analysis.findings.some(f=>f.verified&&f.id.startsWith('synthesis:'));
  if(!hasSynthesis&&!input.state.gaps.some(g=>g.code==='analysis_synthesis_unverified'))input.state.gaps.push({code:'analysis_synthesis_unverified',target:input.state.accountId,detail:'专题综合未形成通过独立核验的结论；原文与已核验的批次发现保留，不能视为已完成专题分析。'});
@@ -124,6 +152,7 @@ export function projectXAccountReport(input:XAccountReportInput):XAccountProject
  if(valid.length<verified.length)limitations.push(`${verified.length-valid.length} 条原有判断的来源已撤回、缺失或内容变化，待复核；整条判断停止展示，未删掉部分引用后继续使用。`);
  if(!state.analysis.synthesisDone)limitations.push('专题综合尚未完成，当前只展示已通过独立核验的批次发现。');
  if(!unique.length)limitations.push('当前没有可展示的已核验结论；保存的原文与范围记录不等于分析结果。');
- for(const gap of state.gaps)limitations.push(`${gap.code==='analysis_synthesis_unverified'?'分析缺口':'读取缺口'}（${gap.code}）：${gap.detail}`);
+ const groups=new Map<string,typeof state.gaps>();for(const gap of state.gaps){const key=JSON.stringify([gap.code,gap.detail]);groups.set(key,[...(groups.get(key)??[]),gap]);}
+ for(const gaps of groups.values()){const gap=gaps[0]!;limitations.push(`${gap.code==='analysis_synthesis_unverified'?'分析缺口':'读取缺口'}（${gap.code}${gaps.length>1?`，${gaps.length} 项`:''}）：${gap.detail}`);}
  return {findings:unique,rejectedFindings:verified.length-valid.length,answer:SECTIONS.flatMap(section=>{const selected=unique.filter(f=>f.section===section);return selected.length?[{id:`x-account-${section}`,heading:HEADINGS[section],body:'',bullets:selected.map(f=>({text:f.statement,kind:f.kind,sourceKeys:sourceKeys(f)}))}]:[];}),observations:unique.map(f=>({statement:f.statement,kind:f.kind,sourceKeys:sourceKeys(f),limitations:f.kind==='inference'?['基于所列账号原文的分析，不代表已独立证实的事实。']:f.kind==='attributed_statement'?['账号自述，未独立证实其实际结果。']:['限于所引原文的表述与作者关系。']})),limitations:[...new Set(limitations)]};
 }

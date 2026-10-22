@@ -33,6 +33,22 @@ test('repost wrappers retain distinct original IDs and author rather than becomi
   const r=await h.execute(timelineRequest);assert.equal(r.posts[0]?.kind,'repost');assert.equal(r.posts[0]?.authorId,profile.rest_id);assert.equal(r.posts[0]?.originalPostId,'10000000000000000009');assert.equal(r.posts[0]?.originalAuthorId,'777');assert.equal(r.posts[0]?.originalAuthorHandle,'other_author');
 });
 
+test('unavailable quote placeholders preserve verified outer posts and the following history cursor',async()=>{
+  const unavailable={tweet_id:null,bookmarks:null,created_at:null,favorites:null,text:null,lang:null,views:null,quotes:null,replies:null,retweets:null,conversation_id:null,author:{rest_id:null,name:null,screen_name:null,avatar:null,blue_verified:null},media:[]};
+  for(const type of ['timeline','replies']as const){
+    const h=harness({...(type==='timeline'?{status:'ok'}:{}),user:profile,timeline:[original,{...original,tweet_id:'10000000000000000002',text:'Synthetic commentary on an unavailable quote.',quoted:unavailable}],next_cursor:'continue-after-missing-quote'});
+    const r=await h.execute({...timelineRequest,type});
+    assert.equal(r.posts.length,2);assert.equal(r.posts[1]?.authorId,profile.rest_id);assert.equal(r.posts[1]?.text,'Synthetic commentary on an unavailable quote.');assert.equal(r.posts[1]?.kind,'quote');assert.equal(r.posts[1]?.quotedId,null);assert.equal(r.nextCursor,'continue-after-missing-quote');assert.equal(r.cursorState,'more');assert.equal(r.posts[1]?.truncated,type==='replies');assert.match(r.limitations.join(' '),/引用.*不可|引用.*缺/);
+  }
+});
+
+test('unavailable quotes do not permit malformed IDs or fabricated quoted content',async()=>{
+  for(const quoted of [{tweet_id:'bad-id',text:null,author:{rest_id:null},media:[]},{tweet_id:null,text:'Synthetic text with no attributable quoted ID.',author:{rest_id:null},media:[]},{tweet_id:null,text:null,author:{rest_id:'777'},media:[]},{}]){
+    const h=harness({status:'ok',user:profile,timeline:[{...original,quoted}],next_cursor:'next'});
+    await assert.rejects(h.execute(timelineRequest),(e:any)=>e.code==='provider_bad_response');
+  }
+});
+
 test('replies accept their observed statusless envelope while retaining third-party authors and preview uncertainty',async()=>{
   const h=harness({user:profile,timeline:[{...original,in_reply_to_status_id_str:'10000000000000000005',author:{rest_id:profile.rest_id,screen_name:'fixture_author'}},{...original,tweet_id:'10000000000000000006',in_reply_to_status_id_str:'10000000000000000005',author:{rest_id:'777',screen_name:'other_author'}}],next_cursor:'next-replies'});
   const r=await h.execute({...timelineRequest,type:'replies'});assert.equal(r.posts.length,2);assert.equal(r.posts[1]?.authorId,'777');assert.equal(r.posts[1]?.url,'https://x.com/other_author/status/10000000000000000006');assert.equal(r.posts[0]?.parentId,'10000000000000000005');assert.equal(r.posts[0]?.truncated,true);assert.match(r.limitations.join(' '),/全文/);

@@ -8,7 +8,7 @@ import { xAccountActiveSourceKeys,xAccountMetadata,xSourceDrafts } from './resea
 import { newRecordId as newId, nowIso, parseJson } from './db/row-helpers.js';
 
 export { nowIso, newId };
-import { ResearchStore, type FirstStepBinding } from './research/research-store.js';
+import { ResearchStore, type FirstStepBinding, type ResearchCheckpoint, type StoredPage } from './research/research-store.js';
 import { CaseStore } from './research/case-store.js';
 import {identitySemanticReviewAccounts} from './research/identity-semantic-validity.js';
 import { CompletionStore } from './research/completion-store.js';
@@ -493,7 +493,7 @@ export class Store {
         title: draft.title,
         kind: draft.kind,
         published_at: draft.publishedAt,
-        retrieved_at: nowIso(),
+        retrieved_at: draft.retrievedAt ?? nowIso(),
         fetch_status: draft.fetchStatus,
         excerpt: draft.excerpt,
         excerpt_locator: draft.excerptLocator,
@@ -682,6 +682,24 @@ export class Store {
     });
   }
 
+  /** Memoized cross-run evidence graph for cached X reads and descendant reports. */
+  activeXAccountSourceKeys(runId:string,ownerId:string):Set<string>{
+    const done=new Map<string,Set<string>>(),visiting=new Set<string>();
+    const snapshots=new Map<string,{cp:ResearchCheckpoint|null;pages:Map<string,StoredPage>}>();
+    const snapshot=(id:string)=>{let value=snapshots.get(id);if(!value){const cp=this.research.checkpoint(id);value={cp,pages:new Map(cp?.pages.map(p=>[p.sourceKey,p])??[])};snapshots.set(id,value);}return value;};
+    const project=(id:string):Set<string>=>{
+      if(done.has(id))return done.get(id)!;if(visiting.has(id))return new Set();
+      const run=this.getRunForOwner(id,ownerId),cp=run?snapshot(id).cp:null;
+      if(!run||!cp?.xAccountResearch||!this.isResearchScopeActive(id,ownerId))return new Set();
+      visiting.add(id);const pages=snapshot(id).pages;
+      const rows=this.listSources(id).map(s=>({...s,excluded:s.excluded||s.excerpt!==pages.get(s.sourceKey)?.text||s.url!==pages.get(s.sourceKey)?.url}));
+      const keys=xAccountActiveSourceKeys(cp.pages,rows,true,page=>{
+        const parent=page.inheritedFrom!;const original=snapshot(parent.runId).pages.get(parent.sourceKey);
+        return original?.url===page.url&&original.text===page.text&&project(parent.runId).has(parent.sourceKey);
+      });visiting.delete(id);done.set(id,keys);return keys;
+    };return project(runId);
+  }
+
   buildCanonicalView(run: RunRecord): CanonicalView {
     const checkpoint = run.provider === 'research' ? this.research.checkpoint(run.id) : null;
     const scopeChanged = Boolean(checkpoint && !this.isResearchScopeActive(run.id, run.ownerId));
@@ -689,7 +707,7 @@ export class Store {
     const identityChanged = Boolean(checkpoint?.firstStep && !this.isFirstStepIdentityActive(run.ownerId, checkpoint.firstStep));
     const identityReason = '人物关联的归属依据已失效；原资料保留，人物结论需要重新核对。';
     const rawSources=this.listSources(run.id);
-    const xActive=checkpoint?.xAccountResearch?xAccountActiveSourceKeys(checkpoint.pages,rawSources,!scopeChanged):null;
+    const xActive=checkpoint?.xAccountResearch?this.activeXAccountSourceKeys(run.id,run.ownerId):null;
     const sources = rawSources.map(source => checkpoint && (xActive?!xActive.has(source.sourceKey):!this.isResearchSourceActive(run.id, source.sourceKey, run.ownerId))
       ? { ...source, excluded: true, fetchStatus: 'excluded' as const }
       : identityChanged ? { ...source, identityConfirmed: false, identityLabel: '人物归属待复核；账号自身原资料保留。' } : source);

@@ -12,6 +12,17 @@ function nativeId(value:unknown):string {if(typeof value!=='string'||! /^[1-9][0
 function handle(value:unknown):string {if(typeof value!=='string'||! /^[A-Za-z0-9_]{1,15}$/.test(value))fail();return value;}
 function optionalId(value:unknown):string|null {return value===null||value===undefined?null:nativeId(value);}
 function nonemptyText(value:unknown):string {if(typeof value!=='string'||!value.trim())fail();return value;}
+/** Observed unavailable quote: a populated object whose identity/content fields are explicitly null. */
+function unavailableQuote(quoted:RecordValue):boolean {
+  if(quoted.tweet_id!==null||quoted.text!==null||!Array.isArray(quoted.media)||quoted.media.length!==0)return false;
+  const author=record(quoted.author);
+  return author.rest_id===null&&author.screen_name===null&&Object.values(author).every(value=>value===null)
+    &&Object.entries(quoted).every(([key,value])=>key==='author'||key==='media'||value===null);
+}
+function quoteLimitations(items:unknown[]):string[] {
+  return items.flatMap(value=>{const item=record(value);return item.quoted&&unavailableQuote(record(item.quoted))
+    ?[`帖子 ${item.tweet_id??item.id} 的引用原文不可访问；仅保留已核对作者的外层正文，引用对象与内容仍是缺口。`]:[];});
+}
 
 function parseAccount(value:unknown,requestedHandle:string,expectedId?:string):XNativeAccount {
   const data=record(value);const id=nativeId(data.rest_id);const returnedHandle=handle(data.profile);
@@ -32,7 +43,7 @@ function parsePost(value:unknown,format:'list'|'detail'|'comment',account?:XNati
   if(parent&&replyTo&&parent!==replyTo)fail();
   const parentId=parent??replyTo;
   const quoted=item.quoted===null||item.quoted===undefined?null:record(item.quoted);
-  const quotedId=quoted?nativeId(quoted.tweet_id):null;
+  const quotedId=quoted&&!unavailableQuote(quoted)?nativeId(quoted.tweet_id):null;
   const repost=item.retweeted_tweet===null||item.retweeted_tweet===undefined?null:record(item.retweeted_tweet);
   const repostMarker=item.retweeted===null||item.retweeted===undefined?null:record(item.retweeted);
   const originalPostId=repost?nativeId(repost.tweet_id):repostMarker?nativeId(repostMarker.id):null;
@@ -43,8 +54,8 @@ function parsePost(value:unknown,format:'list'|'detail'|'comment',account?:XNati
     ?account?.nativeId===originalAuthorId?account.handle:null:handle(originalAuthor.screen_name);
   const replyCount=typeof item.replies==='number'&&Number.isSafeInteger(item.replies)&&item.replies>=0?item.replies:null;
   return {id,url:`https://x.com/${authorHandle}/status/${id}`,authorId,authorHandle,text:nonemptyText(item.text),publishedAt:typeof item.created_at==='string'?item.created_at:null,
-    kind:originalPostId?'repost':parentId||format==='comment'?'reply':quotedId?'quote':'original',parentId,quotedId,conversationId:optionalId(item.conversation_id),replyCount,textField:'text',truncated:preview,
-    ...(originalPostId?{originalPostId,originalAuthorId,originalAuthorHandle}:{})};
+    kind:originalPostId?'repost':parentId||format==='comment'?'reply':quoted?'quote':'original',parentId,quotedId,conversationId:optionalId(item.conversation_id),replyCount,textField:'text',truncated:preview,
+    ...(quoted&&unavailableQuote(quoted)?{quotedUnavailable:true}:{}),...(originalPostId?{originalPostId,originalAuthorId,originalAuthorHandle}:{})};
 }
 
 function pagination(data:RecordValue,key:'next_cursor'|'cursor'):Pick<XReadResult,'nextCursor'|'cursorState'|'limitations'> {
@@ -93,13 +104,13 @@ export function createXAccountProvider(options:{transport:HttpTransport;apiKey:s
       const posts=data.timeline.map(item=>parsePost(item,'list',account,request.type==='replies'));
       if(request.type==='timeline'&&posts.some(post=>post.authorId!==account.nativeId))fail();
       const continuation=pagination(data,'next_cursor');
-      return {...base,account,posts,...continuation,recordCount:data.timeline.length,limitations:[...continuation.limitations,completeness,...(request.type==='replies'?['账号回复接口可混合本人和第三方上下文，且已观察到长文预览；须读取单帖详情后才能核验全文。']:[])]};
+      return {...base,account,posts,...continuation,recordCount:data.timeline.length,limitations:[...continuation.limitations,completeness,...quoteLimitations(data.timeline),...(request.type==='replies'?['账号回复接口可混合本人和第三方上下文，且已观察到长文预览；须读取单帖详情后才能核验全文。']:[])]};
     }
     if(!('tweetId' in request)||nativeId(data.id)!==request.tweetId||data.status!=='active')fail();
-    if(request.type==='detail')return {...base,posts:[parsePost(data,'detail')],nextCursor:null,cursorState:'end',recordCount:1,limitations:[completeness,'单帖详情只保留实际父帖与引用标识，不代表整条对话已读完。']};
+    if(request.type==='detail')return {...base,posts:[parsePost(data,'detail')],nextCursor:null,cursorState:'end',recordCount:1,limitations:[completeness,...quoteLimitations([data]),'单帖详情只保留实际父帖与引用标识，不代表整条对话已读完。']};
     if(!Array.isArray(data.thread))fail();
     const posts=data.thread.map(item=>parsePost(item,'comment'));
     const continuation=pagination(data,'cursor');
-    return {...base,posts,...continuation,recordCount:data.thread.length,limitations:[...continuation.limitations,completeness,'评论排序为供应商默认；thread 是供应商返回的对话成员，缺少父帖 ID 时不推定为目标帖的直接回复。']};
+    return {...base,posts,...continuation,recordCount:data.thread.length,limitations:[...continuation.limitations,completeness,...quoteLimitations(data.thread),'评论排序为供应商默认；thread 是供应商返回的对话成员，缺少父帖 ID 时不推定为目标帖的直接回复。']};
   }};
 }
