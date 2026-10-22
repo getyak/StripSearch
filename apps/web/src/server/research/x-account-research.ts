@@ -185,6 +185,7 @@ export async function collectXAccount(options:XAccountResearchOptions){
    cursor.cursors.push(response.nextCursor);cursor.cursor=response.nextCursor;save();
   }
  }
+ let contextBillingBlocked=state.gaps.some(g=>g.code==='provider_billing'&&g.target==='context');
  const taskKey=(task:typeof state.contextQueue[number])=>`${task.type}:${task.tweetId}:${task.rootId}:${task.relation}`;
  const contextTask=async(tasks:typeof state.contextQueue)=>{
   active();const pending=tasks.filter(task=>!state.contextDone.includes(taskKey(task)));const task=pending[0];
@@ -195,13 +196,22 @@ export async function collectXAccount(options:XAccountResearchOptions){
     if(task.type==='detail'&&(!response.posts.length||response.posts[0]!.id!==task.tweetId))gap('context_missing',task.tweetId,'单帖详情未返回请求的原生帖子，缺口保留。');
     else for(const association of pending)for(const post of response.posts)savePage(post,association.relation,association.rootId,response.retrievedAt,response.inheritedFromRunId);
     if(task.type==='comments'&&response.cursorState!=='end')gap('comments_first_page',task.tweetId,'本帖讨论按默认首层一页读取；供应商后续评论或完整讨论树未穷尽。');
-   }catch(error){if(!(error instanceof ProviderError))throw error;gap('context_read_failed',task.tweetId,'该条回复、引用或讨论上下文未读取成功，失败回执保留。');}
+   }catch(error){
+    if(!(error instanceof ProviderError))throw error;
+    if(error.code==='provider_billing'){
+     contextBillingBlocked=true;
+     gap('provider_billing','context','供应商因计费或额度问题拒绝读取；后续上下文补读已暂停，未读关联保留，已读取的材料继续分析与核验。');
+     // Keep this entire unread group queued; peers already dispatched still drain normally.
+     save();return;
+    }
+    gap('context_read_failed',task.tweetId,'该条回复、引用或讨论上下文未读取成功，失败回执保留。');
+   }
    for(const association of pending)state.contextDone.push(taskKey(association));
   }
   const completedKeys=new Set(tasks.map(taskKey));
   state.contextQueue=state.contextQueue.filter(item=>!completedKeys.has(taskKey(item)));save();
  };
- while(state.contextQueue.length){
+ while(state.contextQueue.length&&!contextBillingBlocked){
   active();const requests=new Set<string>();const batch:Array<typeof state.contextQueue>=[];
   for(const task of state.contextQueue){
    const key=`${task.type}:${task.tweetId}`;if(requests.has(key))continue;requests.add(key);

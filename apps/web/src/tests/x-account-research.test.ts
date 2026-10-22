@@ -4,6 +4,7 @@ import {seedFirstStep} from './first-step-fixtures.js';
 import {collectXAccount,runXAccountResearch} from '../server/research/x-account-research.js';
 import {renderJson,renderMarkdown} from '../shared/canonical.js';
 import {renderReportHtml} from '../shared/report-html.js';
+import {ProviderError} from '../server/adapters/types.js';
 import type {XNativePost,XReadRequest,XReadResult,XAccountProvider} from '../server/research/x-account-contracts.js';
 
 const profile={nativeId:'42',handle:'synthetic_x',name:'Synthetic account',description:'Synthetic public work',url:'https://x.com/synthetic_x'};
@@ -177,4 +178,40 @@ test('350 roots sharing one detail use bounded checkpoint groups and one paid na
   assert.deepEqual(state.posts.find(p=>p.id==='900')!.rootIds.slice().sort(),rootIds.slice().sort());
   assert.equal(state.contextQueue.length,0);assert.equal(state.contextDone.length,350);
  }finally{f.close();}
+});
+
+test('context billing refusal preserves pending work, drains an issued parent and completes verified analysis of retained originals',async()=>{
+ const{f,binding}=setup();const calls:XReadRequest[]=[];const purposes:string[]=[];let parentStarted!:()=>void;let releaseParent!:()=>void;let parentReturned=false;
+ const parentReady=new Promise<void>(resolve=>{parentStarted=resolve;});const parentRelease=new Promise<void>(resolve=>{releaseParent=resolve;});
+ const original='I built a synthetic reading tool.';const statement='该账号在原帖中自述制作了一个合成阅读工具。';
+ const provider:XAccountProvider={async execute(request){
+  calls.push(request);
+  if(request.type==='profile')return{...result(),account:profile};
+  if(request.type==='timeline')return result([post('101',{text:original,replyCount:1}),post('102',{kind:'reply',parentId:'900'})]);
+  if(request.type==='replies')return result();
+  if(request.type==='comments'){await parentReady;setImmediate(releaseParent);throw new ProviderError('provider_billing','供应商计费拒绝',402);}
+  if(request.type==='detail'&&request.tweetId==='900'){parentStarted();await parentRelease;parentReturned=true;return result([post('900',{authorId:'99',authorHandle:'other',kind:'reply',parentId:'901'})]);}
+  if(request.type==='detail')return result([post(request.tweetId,{authorId:'99',authorHandle:'other'})]);
+  throw Error('unexpected request');
+ }};
+ const options={store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{},model:async(input:{purpose:string;prompt:string})=>{
+  assert.ok(parentReturned,'analysis starts only after the already-issued parent read has drained');purposes.push(input.purpose);const data=JSON.parse(input.prompt.split('\nDATA\n')[1]!);
+  if(input.purpose.includes('verify'))return{verdicts:data.findings.map((finding:{id:string})=>({id:finding.id,supported:true,reason:'所引原文支持账号自述。'}))};
+  const material=data.materials.find((m:{text:string})=>m.text===original);
+  return{findings:material?[{section:'work',statement,kind:'attributed_statement',evidence:[{sourceKey:material.sourceKey,quote:original}]}]:[]};
+ }};
+ try{
+  const output=await runXAccountResearch(options);const cp=f.store.research.checkpoint(f.run.id)!;const state=cp.xAccountResearch!;
+  assert.equal(output.state,'partial');assert.ok(state.analysis.synthesisDone);assert.ok(output.observations.some(o=>o.statement===statement));
+  assert.deepEqual(calls.filter(r=>r.type==='detail').map(r=>r.tweetId),['900'],'no later context batch is dispatched after billing refusal');
+  assert.ok(state.gaps.some(g=>g.code==='provider_billing'&&g.target==='context'),'the actual global billing refusal remains explicit');
+  assert.match(output.limitations.join(' '),/计费|额度/);
+  assert.ok(state.contextQueue.some(t=>t.type==='comments'&&t.tweetId==='101'),'the billing-refused task is still unread');
+  assert.ok(state.contextQueue.some(t=>t.type==='detail'&&t.tweetId==='901'&&t.rootId==='102'),'the newly discovered deeper parent remains queued');
+  assert.ok(!state.contextDone.includes('comments:101:101:reply_context'));
+  assert.ok(state.contextDone.includes('detail:900:102:parent_context'));assert.ok(state.posts.some(p=>p.id==='900'));
+  for(const purpose of ['x-account-analyze','x-account-verify-batch','x-account-synthesize','x-account-verify-synthesis'])assert.ok(purposes.includes(purpose));
+  assert.ok(f.store.research.receipts(f.run.id).every(r=>r.state!=='inflight'));
+  const count=calls.length;await runXAccountResearch(options);assert.equal(calls.length,count,'a saved billing boundary remains blocked during recovery');
+ }finally{releaseParent();f.close();}
 });
