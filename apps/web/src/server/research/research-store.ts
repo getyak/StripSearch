@@ -2,6 +2,7 @@ import type { ResearchFacet, ClaimAuthorialBasis } from '../../shared/research-d
 import type { DB } from '../db/index.js';
 import type { IdentityCandidate, IdentityDraft, ResearchBudget, ResearchBudgetLimits, IndependentAccountMaterial } from '../../shared/types.js';
 import type { ResearchPage, ResearchToolAction } from './tool-contracts.js';
+import type { XAccountResearchState } from './x-account-contracts.js';
 
 /**
  * Legacy finite totals for direct controller calls and historical replay
@@ -45,6 +46,8 @@ export interface ClaimGenreReview {
  quoteOffset:number;contextOffset:number;contextLength:number;
 }
 export interface ResearchCheckpoint {
+ /** Separate single-account subject; never promoted into person claims. */
+ xAccountResearch?: XAccountResearchState;
  /** Highest historical source ordinal, retained when pages leave the corpus. */
  sourceKeyHighWatermark?: number;
  /** Same-source genre context is exclusion-only, never extra fact support. */

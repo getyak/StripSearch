@@ -194,6 +194,7 @@ export interface CanonicalView {
   usage: CanonicalUsage;
   reviewCount: number;
   personObject?: PersonObject;
+  accountObject?: AccountObject;
   research?: ResearchMetadata;
 }
 
@@ -241,6 +242,19 @@ export interface ResearchMetadata {
  /** Exact original excerpts from an explicitly independent account scope.
   * These are materials, never verified claims or named-person conclusions. */
  accountMaterials?: IndependentAccountMaterial[];
+ /** Single-account research is a distinct subject, not merged person facets. */
+ accountResearch?: XAccountResearchMetadata;
+}
+export interface XAccountResearchMetadata {
+ platform:'x';handle:string;nativeId:string;profileUrl:string;
+ timelinePages:number;repliesPages:number;targetPosts:number;contextPosts:number;
+ oldestPostAt:string|null;newestPostAt:string|null;
+ timelineEnded:boolean;repliesEnded:boolean;verifiedFindings:number;synthesisComplete:boolean;
+}
+export interface AccountObject {
+ schemaVersion:'stripsearch/account/v1';account:{platform:'x';handle:string;nativeId:string;profileUrl:string};
+ claims:Array<{id:string;statement:string;kind:ClaimKind;sourceKeys:string[];evidence:Array<{sourceKey:string;quote:string}>}>;
+ coverage:XAccountResearchMetadata;report:{runId:string;revision:number;asOf:string};
 }
 export interface IndependentAccountMaterial { sourceKey:string; sourceUrl:string; quote:string; quoteOffset:number; sourceContentHash:string }
 export interface PersonObject {

@@ -3,6 +3,8 @@ import { allocateSourceKey, rememberSourceKeys } from '../research/source-keys.j
 import { buildResearchReport, failedUsage, runResearch, scopeRefusalRecord, tagScopeRefusal, type ScopedResearchTools } from '../research/controller.js';
 import { createDshPlanner, type ResearchPlanner } from '../research/planner.js';
 import type { ResearchTools } from '../research/tool-contracts.js';
+import {runXAccountResearch} from '../research/x-account-research.js';
+import type {XAccountProvider,XAccountModel} from '../research/x-account-contracts.js';
 import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState, NeedsInputError } from '../../shared/types.js';
 import type { ProviderName, RunState, ProviderResult } from '../../shared/types.js';
@@ -40,6 +42,8 @@ export interface RunnerDeps {
   now?: () => number;
   researchTools?: ResearchTools;
   researchPlanner?: ResearchPlanner;
+  xAccountProvider?: XAccountProvider;
+  xAccountModel?: XAccountModel;
   /** First-step persistence; runs with a link use the new first-step flow. */
   firstStep?: FirstStepStore;
   /** GET-213 staged person confirmation; its presence enables the staged name flow. */
@@ -422,6 +426,11 @@ export class Runner {
     // Scope-limited fetch: every dispatch AND ingestion re-checks the live
     // scope; excluded/unselected/later-discovered accounts are refused.
     const guard = firstStep.scopeGuard(initial.ownerId, runId);
+    const single=binding.accounts.length===1?classifyFirstStepUrl(binding.accounts[0]!.profileUrl):null;
+    if(this.deps.xAccountProvider&&single?.ok&&single.ref.platform==='x'&&binding.accounts[0]!.allowedScope==='public_history'){
+      const result=await runXAccountResearch({store:this.deps.store,run:initial,binding,provider:this.deps.xAccountProvider,signal:controller.signal,limits:this.deps.config.researchLimits,assertScope:()=>guard.assertCurrent(),model:this.deps.xAccountModel,transport:this.deps.transport,apiKey:this.deps.config.deepseekApiKey,modelName:this.deps.config.deepseekModel});
+      this.finishWithResult(runId,initial,result,startedAt);return;
+    }
     const independentAccountKeys = new Set(
       Object.entries(binding.accountKeys)
         .filter(([, accountId]) => binding.independentAccountIds.includes(accountId))

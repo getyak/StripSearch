@@ -3,6 +3,8 @@ import { genreReviewIssue } from './research/quote-genre.js';
 import { researchDepthCoverage, claimEvidenceIssue, presentedResearchUnknowns } from '../shared/research-depth.js';
 import { classifyFirstStepUrl, type FirstStepDiscoveryView } from '../shared/first-step-discovery.js';
 import { createHash } from 'node:crypto';
+import { projectXAccountReport } from './research/x-account-analysis.js';
+import { xAccountActiveSourceKeys,xAccountMetadata,xSourceDrafts } from './research/x-account-projection.js';
 import { newRecordId as newId, nowIso, parseJson } from './db/row-helpers.js';
 
 export { nowIso, newId };
@@ -686,7 +688,9 @@ export class Store {
     const scopeReason = '已冻结的账号研究范围已变更或撤回；原资料保留，相关结论需要重新核对。';
     const identityChanged = Boolean(checkpoint?.firstStep && !this.isFirstStepIdentityActive(run.ownerId, checkpoint.firstStep));
     const identityReason = '人物关联的归属依据已失效；原资料保留，人物结论需要重新核对。';
-    const sources = this.listSources(run.id).map(source => checkpoint && !this.isResearchSourceActive(run.id, source.sourceKey, run.ownerId)
+    const rawSources=this.listSources(run.id);
+    const xActive=checkpoint?.xAccountResearch?xAccountActiveSourceKeys(checkpoint.pages,rawSources,!scopeChanged):null;
+    const sources = rawSources.map(source => checkpoint && (xActive?!xActive.has(source.sourceKey):!this.isResearchSourceActive(run.id, source.sourceKey, run.ownerId))
       ? { ...source, excluded: true, fetchStatus: 'excluded' as const }
       : identityChanged ? { ...source, identityConfirmed: false, identityLabel: '人物归属待复核；账号自身原资料保留。' } : source);
     const excluded = excludedSourceKeys(sources);
@@ -718,11 +722,13 @@ export class Store {
       const source=sources.find(source=>source.sourceKey===material.sourceKey&&!source.excluded);
       return account.ok&&independentAccounts.has(account.ref.accountKey)&&page?.url===material.sourceUrl&&(page.retrieval==='read'||page.retrieval==='profile')&&source?.url===material.sourceUrl&&typeof source.excerpt==='string'&&Number.isSafeInteger(material.quoteOffset)&&material.quoteOffset>=0&&material.quote.length>=3&&page.text.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(page.text).digest('hex')===material.sourceContentHash&&source.excerpt.slice(material.quoteOffset,material.quoteOffset+material.quote.length)===material.quote&&createHash('sha256').update(source.excerpt).digest('hex')===material.sourceContentHash;
     });
+    const xProjection=checkpoint?.xAccountResearch?projectXAccountReport({state:checkpoint.xAccountResearch,pages:checkpoint.pages,sources:xSourceDrafts(sources),activeSourceKeys:xActive!}):null;
+    const xEvidenceChanged=Boolean(xProjection?.rejectedFindings);
     const observations = this.listObservations(run.id).filter(observation=>!isPolicyRejected(observation.statement,observation.sourceKeys)).map(observation=>({...observation,sourceKeys:projectedKeys(observation.statement,observation.sourceKeys)})).map(observation => ({ ...observation,
       validity: scopeChanged || identityChanged ? 'review' as const : validityFor(observation.sourceKeys, excluded),
       reviewReason: scopeChanged ? scopeReason : identityChanged ? identityReason : reviewReason(observation.sourceKeys, excluded)
     }));
-    const answer: CanonicalAnswerSection[] = run.answer.map((section) => ({
+    const answer: CanonicalAnswerSection[] = (xProjection?.answer??run.answer).map((section) => ({
       id: section.id,
       heading: section.heading,
       body: scopeChanged || policyRejected.some(claim=>section.body.includes(claim.statement)&&!hasActiveSupport(claim.statement))?'':section.body,
@@ -748,7 +754,7 @@ export class Store {
     return {
       schemaVersion: SCHEMA_VERSION,
       runId: run.id,
-      state: scopeChanged || policyStop ? 'partial' : run.state,
+      state: scopeChanged || policyStop || xEvidenceChanged ? 'partial' : run.state,
       revision: run.revision,
       question: run.question,
       seedUrl: run.seedUrl,
@@ -759,17 +765,18 @@ export class Store {
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
       interrupted: run.interrupted,
-      stopReason: scopeChanged ? 'scope_changed' : policyStop?'claim_scope_unverified':run.stopReason,
+      stopReason: scopeChanged ? 'scope_changed' : xEvidenceChanged?'account_evidence_changed':policyStop?'claim_scope_unverified':run.stopReason,
       identity,
       sources,
-      observations,
+      observations:xProjection?xProjection.observations.map((observation,index)=>({...observation,observationId:`XA${index+1}`,validity:'valid' as const,reviewReason:null})):observations,
       answer,
-      limitations: [...new Set([...run.limitations,...policyLimits,...scopeChanged?[scopeReason]:[]])],
+      limitations: [...new Set([...run.limitations,...(xProjection?.limitations??[]),...policyLimits,...scopeChanged?[scopeReason]:[]])],
       usage: run.usage,
       reviewCount: countReviewItems(observations, answer),
       ...(checkpoint ? {
-        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: scopeChanged ? 'scope_changed' : policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: presentedResearchUnknowns(checkpoint), ...(checkpoint.independentMaterials?{accountMaterials}:{}), coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey))) },
-        ...(checkpoint.anchorUrl && identity.status === 'resolved' ? {
+        research: { phase: checkpoint.phase, steps: checkpoint.steps, budget: this.research.budget(run.id, checkpoint.limits), stopReason: scopeChanged ? 'scope_changed' : xEvidenceChanged?'account_evidence_changed':policyStop?'claim_scope_unverified':run.stopReason ?? checkpoint.stopReason, unresolved: presentedResearchUnknowns(checkpoint), ...(checkpoint.independentMaterials?{accountMaterials}:{}), ...(checkpoint.xAccountResearch?{accountResearch:xAccountMetadata(checkpoint.xAccountResearch,xProjection!.findings.length)}:{coverage: researchDepthCoverage(personClaims.map(({claim})=>claim), new Set(sources.filter(s=>!s.excluded&&checkpoint.pages.some(p=>p.sourceKey===s.sourceKey&&(p.retrieval==='read'||p.retrieval==='profile'))).map(s=>s.sourceKey)))}) },
+        ...(checkpoint.xAccountResearch?.profile?{accountObject:{schemaVersion:'stripsearch/account/v1' as const,account:{platform:'x' as const,handle:checkpoint.xAccountResearch.profile.handle,nativeId:checkpoint.xAccountResearch.profile.nativeId,profileUrl:checkpoint.xAccountResearch.profile.url},claims:xProjection!.findings.map(f=>({id:f.id,statement:f.statement,kind:f.kind,sourceKeys:[...new Set(f.evidence.map(e=>e.sourceKey))],evidence:f.evidence.map(e=>({sourceKey:e.sourceKey,quote:e.quote}))})),coverage:xAccountMetadata(checkpoint.xAccountResearch,xProjection!.findings.length),report:{runId:run.id,revision:run.revision,asOf:run.updatedAt}}}:{}),
+        ...(!checkpoint.xAccountResearch&&checkpoint.anchorUrl && identity.status === 'resolved' ? {
           personObject: {
             schemaVersion: 'stripsearch/person/v1' as const,
             person: { id: 'person_' + createHash('sha256').update(run.ownerId + '\0' + checkpoint.anchorUrl).digest('hex').slice(0,24), displayName: identity.displayName, profileUrl: checkpoint.anchorUrl },
