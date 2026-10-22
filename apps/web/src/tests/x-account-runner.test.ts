@@ -50,8 +50,9 @@ function chineseModel(onCall?:(purpose:string)=>void) {
   const purposes:string[]=[];
   const model:XAccountModel=async input=>{
     purposes.push(input.purpose);onCall?.(input.purpose);
-    const data=JSON.parse(input.prompt.slice(input.prompt.indexOf('\nDATA\n')+6)) as {organizationStage?:string;items?:Array<{id:string;section:string}>;findings?:Array<{id:string}>;materials?:Array<{sourceKey:string;role:string;text:string}>};
+    const data=JSON.parse(input.prompt.slice(input.prompt.indexOf('\nDATA\n')+6)) as {organizationStage?:string;reportStage?:string;items?:Array<{id:string;section:string}>;findings?:Array<{id:string}>;materials?:Array<{sourceKey:string;role:string;text:string}>};
     if(data.organizationStage)return {groups:[{section:'work',title:'Synthetic work',ids:data.items!.map(item=>item.id)}]};
+    if(data.reportStage==='select')return {ids:data.items!.map(item=>item.id)};
     if(input.purpose.includes('verify'))return {verdicts:(data.findings??[]).map(f=>({id:f.id,supported:true,reason:'该条完整原文直接支持这项账号自述。'}))};
     const material=data.materials?.find(m=>m.role==='target'&&m.text.includes(ORIGINAL));
     return {findings:material?[{section:'work',statement:STATEMENT,kind:'attributed_statement',evidence:[{sourceKey:material.sourceKey,quote:ORIGINAL}]}]:[]};
@@ -80,7 +81,7 @@ test('Runner publishes independently verified Chinese findings for the selected 
   const run=await terminal(f,runner);
   assert.equal(run.state,'completed');assert.equal(run.stopReason,'x_account_research_complete');assert.equal(run.errorCode,null);
   assert.deepEqual(p.calls.map(r=>r.type),['profile','timeline','replies']);
-  assert.deepEqual(m.purposes,['x-account-analyze','x-account-synthesize','x-account-synthesize','x-account-verify-synthesis']);
+  assert.deepEqual(m.purposes,['x-account-analyze','x-account-synthesize','x-account-synthesize','x-account-synthesize','x-account-verify-synthesis']);
   const view=f.store.buildCanonicalView(run);
   assert.equal(view.personObject,undefined,'an independent account is never promoted into a person object');
   assert.equal(view.accountObject!.account.nativeId,'42');assert.equal(view.accountObject!.claims.length,1);

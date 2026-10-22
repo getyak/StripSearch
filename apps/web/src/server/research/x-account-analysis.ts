@@ -84,7 +84,31 @@ function candidates(value:unknown,materials:Material[],input:XAccountAnalysisInp
  }
  return result;
 }
-function originals(findings:XAccountFinding[],input:XAccountAnalysisInput):Material[]{const pages=new Map(input.pages.map(p=>[p.sourceKey,p]));const posts=new Map(input.posts.map(p=>[p.sourceKey,p]));const result:Material[]=[];for(const f of findings)for(const e of f.evidence){const p=pages.get(e.sourceKey);const post=posts.get(e.sourceKey);if(!p||!post)continue;const start=Math.max(0,e.quoteOffset-800);const item=material(post,p,start,e.quote.length+1600);if(!result.some(m=>m.sourceKey===item.sourceKey&&m.offset===item.offset))result.push(item);}return result;}
+function originalWindows(findings:XAccountFinding[],pages:ReadonlyMap<string,StoredPage>,posts:ReadonlyMap<string,XAccountPost>):Material[]{const result:Material[]=[];for(const f of findings)for(const e of f.evidence){const p=pages.get(e.sourceKey);const post=posts.get(e.sourceKey);if(!p||!post)continue;const start=Math.max(0,e.quoteOffset-800);const item=material(post,p,start,e.quote.length+1600);if(!result.some(m=>m.sourceKey===item.sourceKey&&m.offset===item.offset))result.push(item);}return result;}
+function nativeContext(findings:XAccountFinding[],pages:ReadonlyMap<string,StoredPage>,posts:ReadonlyMap<string,XAccountPost>,nativePosts:ReadonlyMap<string,XAccountPost>){
+ const cited=new Set(findings.flatMap(f=>f.evidence.map(e=>e.sourceKey)));const seen=new Set<string>();const relationshipContext:Material[]=[];
+ const relationships:Array<{sourceKey:string;relation:'parent'|'quote';nativeId:string;available:boolean;contextSourceKey:string|null}>=[];
+ for(const sourceKey of cited){const post=posts.get(sourceKey);for(const [relation,id] of [['parent',post?.parentId],['quote',post?.quotedId]] as const){
+  if(!id)continue;const related=nativePosts.get(id),page=related?pages.get(related.sourceKey):undefined;const available=!!related&&!!page&&page.url===related.url&&page.text===related.text&&page.retrieval!=='search';
+  relationships.push({sourceKey,relation,nativeId:id,available,contextSourceKey:available?related!.sourceKey:null});
+  if(available&&!cited.has(related!.sourceKey)&&!seen.has(id)){seen.add(id);relationshipContext.push(material(related!,page!));}
+ }}return{relationships,relationshipContext};
+}
+/** Report-only guards do not change the v4 candidate corpus or cached v1 plan identity. */
+function reportEvidenceValid(finding:XAccountFinding,pages:ReadonlyMap<string,StoredPage>,posts:ReadonlyMap<string,XAccountPost>,nativePosts:ReadonlyMap<string,XAccountPost>):boolean{
+ const missing=/(?:缺少|缺乏|缺|没有|未取得|未提供|未给出|未附带)[^。；，,]{0,16}(?:对方原帖|对方|父帖|提问原文|引用原文|上下文|帖文原文)|(?:对方原帖|父帖|提问原文|引用原文)[^。；，,]{0,12}(?:缺失|不存在|不可见|未保存)/.test(finding.statement);
+ if(missing&&nativeContext([finding],pages,posts,nativePosts).relationships.some(r=>r.available))return false;
+ const dates=finding.evidence.flatMap(e=>{const date=posts.get(e.sourceKey)?.publishedAt,time=date?Date.parse(date):NaN;return Number.isFinite(time)?[new Date(time)]:[];});
+ const quotes=finding.evidence.map(e=>e.quote.replace(/(?:https?:\/\/|www\.)[^\s]+/gi,'')).join('\n');
+ const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+ const supports=(year:string|undefined,month:string,part:string|undefined)=>{
+  const m=Number(month);if(m<1||m>12)return false;
+  if(quotes.includes(`${year?year+'年':''}${month}月${part??''}`)||new RegExp(`\\b${months[m-1]}\\b`,'i').test(quotes))return true;
+  return dates.some(date=>date.getUTCMonth()+1===m&&(!year||date.getUTCFullYear()===Number(year))&&(!part||(/初|上旬/.test(part)?date.getUTCDate()<=10:/中旬/.test(part)?date.getUTCDate()>=11&&date.getUTCDate()<=20:/底|末|下旬/.test(part)?date.getUTCDate()>=21:date.getUTCDate()===Number(part.replace('日','')))));
+ };
+ for(const match of finding.statement.matchAll(/(?:从|自)?(?:(\d{4})年)?(\d{1,2})月(初|上旬|中旬|底|末|下旬|\d{1,2}日)?(?:至|到)(?:(\d{4})年)?(\d{1,2})月(初|上旬|中旬|底|末|下旬|\d{1,2}日)?/g))if(!supports(match[1],match[2]!,match[3])||!supports(match[4],match[5]!,match[6]))return false;
+ return true;
+}
 /** Publication metadata is an arithmetic aid, never evidence that a described action occurred. */
 function findingTiming(finding:XAccountFinding,posts:ReadonlyMap<string,XAccountPost>){
  const citedPosts=[...new Set(finding.evidence.map(e=>e.sourceKey))].flatMap(sourceKey=>{
@@ -139,22 +163,14 @@ function inspectPartition(value:unknown,expectedIds:string[]):{verdicts:Verifica
 async function verify(findings:XAccountFinding[],input:XAccountAnalysisInput,stage:string,rejections:RejectedFinding[]=[]):Promise<XAccountFinding[]>{
  const accepted:XAccountFinding[]=[];
  const pages=new Map(input.pages.map(p=>[p.sourceKey,p]));const posts=new Map(input.posts.map(p=>[p.sourceKey,p]));const nativePosts=new Map(input.posts.map(p=>[p.id,p]));
- const relationshipContext=(finding:XAccountFinding):Material[]=>{
-  const cited=new Set(finding.evidence.map(e=>e.sourceKey));const seen=new Set<string>();const context:Material[]=[];
-  for(const key of cited){const post=posts.get(key);for(const id of [post?.parentId,post?.quotedId]){
-   if(!id||seen.has(id))continue;seen.add(id);const related=nativePosts.get(id);const page=related?pages.get(related.sourceKey):undefined;
-   if(!related||!page||cited.has(related.sourceKey)||page.url!==related.url||page.text!==related.text||page.retrieval==='search')continue;
-   context.push(material(related,page));
-  }}return context;
- };
  // Verification is a separate semantic decision and sees original text, never a generator's verified flag.
- for(const chunk of pack(findings.map(f=>({finding:f,materials:originals([f],input),check:{findingId:f.id,relationshipContext:relationshipContext(f),...findingTiming(f,posts)}})),MAX_BATCH,4)){
+ for(const chunk of pack(findings.map(f=>({finding:f,materials:originalWindows([f],pages,posts),check:{findingId:f.id,...nativeContext([f],pages,posts,nativePosts),...findingTiming(f,posts)}})),MAX_BATCH,4)){
   const selected=chunk.map(c=>c.finding);const expectedIds=selected.map(f=>f.id);const materials=chunk.flatMap(c=>c.materials);const findingChecks=chunk.map(c=>c.check);
   const chunkSchema={...verifySchema,properties:{verdicts:{...verifySchema.properties.verdicts,items:{...verifySchema.properties.verdicts.items,properties:{...verifySchema.properties.verdicts.items.properties,id:{type:'string',enum:expectedIds}}}}}};
   let verdicts:VerificationVerdict[]|null=null;let partitionFeedback:PartitionFeedback|null=null;
   // Only known returned protocol defects are repairable. Transport errors/unknown inflight still escape.
   for(let protocolAttempt=0;protocolAttempt<=2;protocolAttempt++){
-   const value=await model(input,`x-account-verify-${stage}`,`${RULES}\n核验规则版本：x-account-verification/v4。你是独立核验者。逐条核对陈述的每一部分是否被所引原文直接支持，检查范围、时间、作者、转帖、第三方关系、自述与推断、商业合作限定、反例。对每项读者问题或他人观点，逐项确认谁说的、问了什么对象与条件、是否改变了比较范围；本人回答不能替代提问者原文，更不能把本人的评价写成网友评价。必须核对赞助、广告、自述限定、行为方向与计划/实现状态、行业术语原义及语气不确定；发出不能改成收讫，意向不能改成实绩，说明一个原因不能改成排除其它原因。findingChecks 按 findingId 对应本条陈述：relationshipContext 是其所引帖子实际父帖或引用原文的辅助窗口，仅用于检查关系、限制或反证；citedPosts 明示每个所引来源的实际作者、角色、原始日期及解析后的 UTC 日期；elapsedBetweenPosts 是这些帖子的精确发帖间隔（小时/天），只能验算相对时间，不能据此证明帖子所述动作实际发生。同处一个材料批次或主题组不证明同批发布，发布时间仍逐项看UTC。约48小时不能写成约1天，日期无效时不得补算。本人说“已发送”仍只是本人自述，不等于动作已获独立证实。逐字核对每个命题的说话者、限定强度与比较对象：“最容易理解”不能升级为“最佳形态”，第三方转述不能写成本人观点。判断矛盾或转向时，两边必须针对同一对象、同一条件的相互排斥命题；“工具加快工作且可保留品味”和“质疑别人是否使用工具”不是相反命题，不得硬造冲突；未列在该 finding.evidence 中的内容不能成为肯定判决的支持，缺少正式引用必须拒绝。不要因为中文流畅或先前已核验而放行；泛泛总结、额外结论与语义不一致一律拒绝。必须对 expectedIds 中每个 id 恰好返回一次 verdict，逐字复制 id，不能缩写、改写或新增；supported 为布尔值，并说明理由。若 partitionFeedback 非空，只说明先前响应的格式问题；仍须对本次完整 findings 和相同原文重新独立核验。不得沿用不完整判决、修改陈述或为了修复格式而放宽判断。`,{subject:input.subject,findings:selected,materials,findingChecks,expectedIds,protocolAttempt,partitionFeedback},chunkSchema);
+   const value=await model(input,`x-account-verify-${stage}`,`${RULES}\n核验规则版本：x-account-verification/report-v2。你是独立核验者。逐条核对陈述的每一部分是否被所引原文直接支持，检查范围、时间、作者、转帖、第三方关系、自述与推断、商业合作限定、反例。对每项读者问题或他人观点，逐项确认谁说的、问了什么对象与条件、是否改变了比较范围；本人回答不能替代提问者原文，更不能把本人的评价写成网友评价。必须核对赞助、广告、自述限定、行为方向与计划/实现状态、行业术语原义及语气不确定；发出不能改成收讫，意向不能改成实绩，说明一个原因不能改成排除其它原因。findingChecks 按 findingId 对应本条陈述。relationships.available反映全语料中的实际原生父帖/引用可用状态，不能因为当前所引窗口没带上就声称原帖缺失。中文时间范围起止必须各由该段实际引用的UTC日期或原文明示日期支持，不能用未引材料补足起点。relationshipContext 是其所引帖子实际父帖或引用原文的辅助窗口，仅用于检查关系、限制或反证；citedPosts 明示每个所引来源的实际作者、角色、原始日期及解析后的 UTC 日期；elapsedBetweenPosts 是这些帖子的精确发帖间隔（小时/天），只能验算相对时间，不能据此证明帖子所述动作实际发生。同处一个材料批次或主题组不证明同批发布，发布时间仍逐项看UTC。约48小时不能写成约1天，日期无效时不得补算。本人说“已发送”仍只是本人自述，不等于动作已获独立证实。逐字核对每个命题的说话者、限定强度与比较对象：“最容易理解”不能升级为“最佳形态”，第三方转述不能写成本人观点。判断矛盾或转向时，两边必须针对同一对象、同一条件的相互排斥命题；“工具加快工作且可保留品味”和“质疑别人是否使用工具”不是相反命题，不得硬造冲突；未列在该 finding.evidence 中的内容不能成为肯定判决的支持，缺少正式引用必须拒绝。不要因为中文流畅或先前已核验而放行；泛泛总结、额外结论与语义不一致一律拒绝。必须对 expectedIds 中每个 id 恰好返回一次 verdict，逐字复制 id，不能缩写、改写或新增；supported 为布尔值，并说明理由。若 partitionFeedback 非空，只说明先前响应的格式问题；仍须对本次完整 findings 和相同原文重新独立核验。不得沿用不完整判决、修改陈述或为了修复格式而放宽判断。`,{subject:input.subject,findings:selected,materials,findingChecks,expectedIds,protocolAttempt,partitionFeedback},chunkSchema);
    const checked=inspectPartition(value,expectedIds);verdicts=checked.verdicts;if(verdicts)break;partitionFeedback=checked.feedback;
   }
   if(!verdicts)throw new XVerificationPartitionExhaustedError();
@@ -208,12 +224,39 @@ async function organizeReport(input:XAccountAnalysisInput,findings:XAccountFindi
  }
  return [];
 }
+class ReportEvidenceError extends Error {constructor(readonly code:'invalid_selection'|'material_budget_exceeded'|'selection_limit'){super(code);this.name='ReportEvidenceError';}}
+const evidenceSchema={type:'object',additionalProperties:false,required:['ids'],properties:{ids:{type:'array',items:{type:'string'}}}};
+async function selectTopicEvidence(input:XAccountAnalysisInput,topic:ReportGroup,findings:XAccountFinding[],scope:string,planHash:string,topicIndex:number,bundle:(findings:XAccountFinding[])=>Record<string,unknown>):Promise<XAccountFinding[]>{
+ const byId=new Map(findings.map(f=>[f.id,f]));const posts=new Map(input.posts.map(p=>[p.sourceKey,p]));const cost=(chosen:XAccountFinding[])=>JSON.stringify({findings:chosen,...bundle(chosen)}).length;
+ const items=findings.map(f=>({id:f.id,statement:f.statement,kind:f.kind,sourceKeys:[...new Set(f.evidence.map(e=>e.sourceKey))],publicationDates:findingTiming(f,posts).citedPosts.map(p=>p.publishedAtUtc),materialChars:cost([f])}));
+ if(items.some(item=>JSON.stringify(item).length>MAX_BATCH))throw new ReportEvidenceError('selection_limit');
+ let pool=items;
+ for(let round=0;round<MAX_REPORT_MERGE_ROUNDS;round++){
+  const parts=pack(pool,MAX_BATCH,Number.MAX_SAFE_INTEGER);const results:string[][]=[];
+  // The outer topic workers already own the three-call concurrency budget.
+  for(const [index,part] of parts.entries()){
+   const allowed=new Set(part.map(item=>item.id));let feedback:{code:string;actualChars?:number}|null=null;
+   for(let attempt=0;attempt<=2;attempt++){
+    const raw=await model(input,'x-account-synthesize','专题选证 report-evidence/v1。先整体理解本主题，再只选最重要、互不重复且能共同形成论证的代表性原文索引。items都是线索，不是已核验事实；只输出其中的原id，不能造id或改变正文。兼顾有支持的时间变化、作品、观点、反证与赞助限定。普通问候、玩笑、重复偏好和无新增信息的主题返回空ids，表示评估后不占正文。不是每个索引都要写。选中原文窗口与必要直接父帖/引用闭包必须一起装入materialBudgetChars；materialChars是单项实际材料成本，重叠窗口可能共享，服务器会按真实合并材料复核。不得通过省略必要上下文规避预算。多分段候选须继续合并，maximumSelected是本次收敛边界而不是全账号事实条数上限。',{reportStage:'select',scope,planHash,topic:{section:topic.section,title:topic.title},topicIndex,round,part:index,parts:parts.length,items:part,materialBudgetChars:MAX_BATCH,maximumSelected:parts.length>1?Math.ceil(part.length/2):null,attempt,feedback},evidenceSchema);
+    let code:'invalid_selection'|'material_budget_exceeded'='invalid_selection';
+    if(record(raw)&&Array.isArray(raw.ids)&&raw.ids.every(id=>typeof id==='string'&&allowed.has(id))&&new Set(raw.ids).size===raw.ids.length&&(parts.length===1||raw.ids.length<=Math.ceil(part.length/2))){
+     const chosen=raw.ids.map(id=>byId.get(id as string)!);const chars=cost(chosen);if(chars<=MAX_BATCH){results[index]=raw.ids as string[];break;}code='material_budget_exceeded';feedback={code,actualChars:chars};
+    }else feedback={code};
+    if(attempt===2)throw new ReportEvidenceError(code);
+   }
+  }
+  const selected=[...new Set(results.flat())];if(parts.length===1)return selected.map(id=>byId.get(id)!);if(!selected.length)return[];if(selected.length>=pool.length)throw new ReportEvidenceError('selection_limit');
+  const keep=new Set(selected);pool=pool.filter(item=>keep.has(item.id));
+ }
+ throw new ReportEvidenceError('selection_limit');
+}
 export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>{
  guard(input);const pages=new Map(input.pages.map(p=>[p.sourceKey,p]));
  const signature=`corpus:v4:${hash(JSON.stringify([input.subject,input.question,input.posts,input.pages.map(p=>[p.sourceKey,p.text,p.textTruncated,p.retrieval])]))}`;
- if(!input.state.analysis.completedBatches.includes(signature)){input.state.analysis={completedBatches:[signature],findings:[],synthesisDone:false};input.state.gaps=input.state.gaps.filter(g=>!['analysis_synthesis_unverified','analysis_batch_protocol_unverified','analysis_report_unverified','analysis_report_plan_limit'].includes(g.code));input.save();}
+ if(!input.state.analysis.completedBatches.includes(signature)){input.state.analysis={completedBatches:[signature],findings:[],synthesisDone:false};input.state.gaps=input.state.gaps.filter(g=>!['analysis_synthesis_unverified','analysis_batch_protocol_unverified','analysis_report_unverified','analysis_report_plan_limit','analysis_report_evidence_budget','analysis_report_evidence_selection'].includes(g.code));input.save();}
  input.state.analysis.synthesisDone=false;
  const protocolGap=(key:string,error:unknown)=>{
+  if(error instanceof ReportEvidenceError){guard(input);const code=error.code==='material_budget_exceeded'?'analysis_report_evidence_budget':'analysis_report_evidence_selection';if(!input.state.gaps.some(g=>g.code===code&&g.target===key))input.state.gaps.push({code,target:key,detail:error.code==='material_budget_exceeded'?'专题选证在限定修正后仍超出完整原文及必要上下文预算，未退回分片堆叠成稿；索引与原文保留。':'专题选证未在既定协议或本地轮数边界内完成；原文与全部候选保留，未生成该主题正文。'});input.save();return;}
   if(error instanceof ReportPlanLimitError){guard(input);if(!input.state.gaps.some(g=>g.code==='analysis_report_plan_limit'&&g.target===key))input.state.gaps.push({code:'analysis_report_plan_limit',target:key,detail:'达到本轮全局规划上限，成稿未完成；全部研究索引与原文保留，未继续调用模型归并。'});input.save();return;}
   if(!(error instanceof DshProtocolRepairExhaustedError)&&!(error instanceof XVerificationPartitionExhaustedError)&&!(error instanceof ReportPlanRepairExhaustedError))throw error;
   guard(input);
@@ -257,7 +300,7 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  const pagesByKey=new Map(input.pages.map(p=>[p.sourceKey,p]));
  const batchFindings=input.state.analysis.findings.filter(f=>f.id.startsWith('batch:')&&originalEvidence(f,pagesByKey,postByKey,input.subject)).sort((a,b)=>a.id.localeCompare(b.id));
  const reportScope=hash(JSON.stringify([signature,batchFindings.map(({verified,...f})=>f)]));
- const completePrefix=`report:v1:complete:${reportScope}:`;
+ const completePrefix=`report:v2:complete:${reportScope}:`;
  const priorPlan=input.state.analysis.completedBatches.filter(k=>k.startsWith(`report-plan:v1:ready:${reportScope}:`)).at(-1)?.split(':').at(-1);
  if(priorPlan&&jobs.every(job=>input.state.analysis.completedBatches.includes(`batch:${hash(JSON.stringify(job))}`))&&input.state.analysis.completedBatches.includes(completePrefix+priorPlan)){input.state.analysis.synthesisDone=true;return;}
  let plan:ReportGroup[];
@@ -265,31 +308,36 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
  const planHash=hash(JSON.stringify(plan));const planMarker=`report-plan:v1:ready:${reportScope}:${planHash}`;
  if(!input.state.analysis.completedBatches.includes(planMarker)){input.state.analysis.completedBatches.push(planMarker);input.save();}
  const byId=new Map(batchFindings.map(f=>[f.id,f]));
- const reportJobs=plan.flatMap((topic,topicIndex)=>pack(topic.findingIds.map(id=>byId.get(id)!).map(f=>({finding:f,materials:originals([f],input)})),MAX_BATCH,12).map((chunk,part)=>({topic,topicIndex,part,chunk})));
- const reportKey=(job:typeof reportJobs[number])=>`report:v1:job:${hash(JSON.stringify([reportScope,planHash,job]))}`;
+ const nativePosts=new Map(input.posts.map(p=>[p.id,p]));
+ const bundle=(selected:XAccountFinding[])=>({materials:originalWindows(selected,pagesByKey,postByKey),...nativeContext(selected,pagesByKey,postByKey,nativePosts),publicationChecks:selected.map(f=>({findingId:f.id,...findingTiming(f,postByKey)}))});
+ const reportJobs=plan.map((topic,topicIndex)=>({topic,topicIndex}));
+ const reportKey=(job:typeof reportJobs[number])=>`report:v2:topic:${hash(JSON.stringify([reportScope,planHash,job]))}`;
+ const skippedKey=(key:string)=>key.replace('report:v2:topic:','report:v2:skipped:');
  await parallelJobs(reportJobs,async job=>{
-  guard(input);const key=reportKey(job),rejectedKey=key.replace('report:v1:job:','report:v1:rejected:');if(input.state.analysis.completedBatches.includes(key)||input.state.analysis.completedBatches.includes(rejectedKey))return;
-  const materials=job.chunk.flatMap(c=>c.materials),prefix=`report:${planHash}:${String(job.topicIndex).padStart(6,'0')}:${String(job.part).padStart(6,'0')}`;
+  guard(input);const key=reportKey(job),rejectedKey=key.replace('report:v2:topic:','report:v2:rejected:');if(input.state.analysis.completedBatches.includes(key)||input.state.analysis.completedBatches.includes(skippedKey(key))||input.state.analysis.completedBatches.includes(rejectedKey))return;
   try{
+   const selected=await selectTopicEvidence(input,job.topic,job.topic.findingIds.map(id=>byId.get(id)!),reportScope,planHash,job.topicIndex,bundle);guard(input);
+   if(!selected.length){input.state.gaps=input.state.gaps.filter(g=>!(g.target===key&&['analysis_batch_protocol_unverified','analysis_report_evidence_budget','analysis_report_evidence_selection'].includes(g.code)));input.state.analysis.completedBatches.push(skippedKey(key));input.save();return;}
+   const content=bundle(selected),materials=[...content.materials,...content.relationshipContext],prefix=`report:v2:${planHash}:${String(job.topicIndex).padStart(6,'0')}`;
    let final:XAccountFinding[]=[];let rejections:RejectedFinding[]=[];
    for(let attempt=0;attempt<=2&&!final.length;attempt++){
-    const raw=await model(input,'x-account-synthesize',`${RULES}\n全局成稿版本 report/v1。按已统一组织的主题写中文正文段落，而不是逐条翻译草稿或列评论。outline 仅为组织顺序，topic 是本段焦点；findings 均是不可信的研究索引，旧 verified 标签也不能代替事实支持。必须直接检查 materials 中真正原文，选择重要主线、作品、取舍、时间变化与反证，合并重复，不把每个草稿变成一条结论。每个正文段落仍须作为带逐字引文的 finding 返回，不能输出无引用的自由 body。保持实际说话者、比较对象与自述限定；不同命题不能硬造冲突；publicationChecks 仅验算发帖间隔，不能独立证实动作发生。材料同组不等于同批发布，发布时间仍看UTC；没有原文支持的内容不写。每条成稿将重新独立核验。若 rejections 非空，只据实际原文修正这些拒绝原因。`,{reportStage:'write',scope:reportScope,planHash,outline:plan.map(({section,title})=>({section,title})),topic:{section:job.topic.section,title:job.topic.title},part:job.part,findings:job.chunk.map(c=>c.finding),materials,publicationChecks:job.chunk.map(c=>({findingId:c.finding.id,...findingTiming(c.finding,postByKey)})),attempt,rejections},findingSchema);
-    const proposed=candidates(raw,materials,input,prefix).map((f,i)=>({...f,id:`${prefix}:${String(i).padStart(4,'0')}:${f.id.split(':').at(-1)}`}));rejections=[];
-    if(!proposed.length)rejections.push({statement:'',reason:'正文候选未通过原文、引用、作者归属或中文检查；不能补造结论。'});
+    const raw=await model(input,'x-account-synthesize',`${RULES}\n完整主题成稿 report/v2。一次写出本主题的连贯论证，不逐索引罗列，不跨主题重复同一偏好。outline只提供主线位置；topic.section是本次唯一允许的分类，所有finding.section必须严格相同。仅用selected原文与实际父帖/引用辅助原文形成少量有论证关系的中文段落，每段作为带精确证据的finding，不写自由body。普通问候和无信息玩笑不写。findings是未核验索引，旧verified标签无权威。relationships.available来自全语料，available=true就不能声称缺少对应父帖；未出现在当前引文窗口不等于资料不存在。辅助原文需要支持具体说法时应正式引用其sourceKey及逐字原文。自述不能升级为独立证实；时间范围两端必须由该段引用的真实UTC日期或原文明示日期支持，不能借未引材料凑跨度；材料同组不是同批发布。最终每段会独立核验。按rejections仅依据真正原文修正。`,{reportStage:'write',version:2,scope:reportScope,planHash,outline:plan.map(({section,title})=>({section,title})),topic:{section:job.topic.section,title:job.topic.title},findings:selected,...content,attempt,rejections},findingSchema);
+    const proposed=candidates(raw,materials,input,prefix).filter(f=>f.section===job.topic.section&&reportEvidenceValid(f,pagesByKey,postByKey,nativePosts)).map((f,i)=>({...f,id:`${prefix}:${String(i).padStart(4,'0')}:${f.id.split(':').at(-1)}`}));rejections=[];
+    if(!proposed.length)rejections.push({statement:'',reason:'正文未通过主题分类、实际父帖可用状态、所引日期边界或原文证据检查；不能补造结论。'});
     final=await verify(proposed,input,'synthesis',rejections);guard(input);
    }
    for(const f of final)if(!input.state.analysis.findings.some(old=>old.id===f.id))input.state.analysis.findings.push(f);
-   input.state.gaps=input.state.gaps.filter(g=>!(['analysis_batch_protocol_unverified','analysis_report_unverified'].includes(g.code)&&g.target===key));
+   input.state.gaps=input.state.gaps.filter(g=>!(['analysis_batch_protocol_unverified','analysis_report_unverified','analysis_report_evidence_budget','analysis_report_evidence_selection'].includes(g.code)&&g.target===key));
    if(final.length)input.state.analysis.completedBatches.push(key);
    else{input.state.gaps.push({code:'analysis_report_unverified',target:key,detail:'本主题正文在限定修订后仍未通过独立原文核验，最终报告尚未完成。'});input.state.analysis.completedBatches.push(rejectedKey);}
    input.save();
   }catch(error){protocolGap(key,error);}
  });
  guard(input);
- const allWritten=reportJobs.length>0&&reportJobs.every(job=>input.state.analysis.completedBatches.includes(reportKey(job)));
- const hasReport=input.state.analysis.findings.some(f=>f.verified&&f.id.startsWith(`report:${planHash}:`));
+ const allWritten=reportJobs.length>0&&reportJobs.every(job=>input.state.analysis.completedBatches.includes(reportKey(job))||input.state.analysis.completedBatches.includes(skippedKey(reportKey(job))));
+ const hasReport=input.state.analysis.findings.some(f=>f.verified&&f.id.startsWith(`report:v2:${planHash}:`));
  const reportReady=allRead&&allWritten&&hasReport;
- if(reportReady)input.state.gaps=input.state.gaps.filter(g=>!((g.code==='analysis_incomplete'&&g.target==='research')||['analysis_synthesis_unverified','analysis_report_unverified','analysis_batch_protocol_unverified','analysis_report_plan_limit'].includes(g.code)));
+ if(reportReady)input.state.gaps=input.state.gaps.filter(g=>!((g.code==='analysis_incomplete'&&g.target==='research')||['analysis_synthesis_unverified','analysis_report_unverified','analysis_batch_protocol_unverified','analysis_report_plan_limit','analysis_report_evidence_budget','analysis_report_evidence_selection'].includes(g.code)));
  input.state.analysis.synthesisDone=reportReady&&!input.state.gaps.some(g=>g.code.startsWith('analysis_'));
  if(input.state.analysis.synthesisDone)input.state.analysis.completedBatches.push(completePrefix+planHash);
  else if(!reportJobs.length&&!input.state.gaps.some(g=>g.code==='analysis_report_unverified'&&g.target===reportScope))input.state.gaps.push({code:'analysis_report_unverified',target:reportScope,detail:'全局组织尚未形成可由原文核验的正文；研究索引保留，不作为结论展示。'});
@@ -297,11 +345,12 @@ export async function analyzeXAccount(input:XAccountAnalysisInput):Promise<void>
 }
 export function projectXAccountReport(input:XAccountReportInput):XAccountProjection {
  const {state}=input;const pages=new Map(input.pages.map(p=>[p.sourceKey,p]));const posts=new Map(state.posts.map(p=>[p.sourceKey,p]));const sources=new Map(input.sources.map(s=>[s.key,s]));
- const verified=state.analysis.findings.filter(f=>f.verified);const valid=verified.filter(f=>!!state.profile&&originalEvidence(f,pages,posts,state.profile)&&f.evidence.every(e=>{const source=sources.get(e.sourceKey);return input.activeSourceKeys.has(e.sourceKey)&&source?.url===pages.get(e.sourceKey)?.url&&source?.fetchStatus==='ok'&&typeof source.excerpt==='string'&&hash(source.excerpt)===e.sourceContentHash&&source.excerpt.slice(e.quoteOffset,e.quoteOffset+e.quote.length)===e.quote;}));
+ const nativePosts=new Map(state.posts.map(p=>[p.id,p]));
+ const verified=state.analysis.findings.filter(f=>f.verified);const valid=verified.filter(f=>!!state.profile&&originalEvidence(f,pages,posts,state.profile)&&(!f.id.startsWith('report:v2:')||reportEvidenceValid(f,pages,posts,nativePosts))&&f.evidence.every(e=>{const source=sources.get(e.sourceKey);return input.activeSourceKeys.has(e.sourceKey)&&source?.url===pages.get(e.sourceKey)?.url&&source?.fetchStatus==='ok'&&typeof source.excerpt==='string'&&hash(source.excerpt)===e.sourceContentHash&&source.excerpt.slice(e.quoteOffset,e.quoteOffset+e.quote.length)===e.quote;}));
  const ready=state.analysis.completedBatches.filter(k=>k.startsWith('report-plan:v1:ready:')).at(-1)?.split(':');
- const finalPlan=state.analysis.synthesisDone&&ready&&state.analysis.completedBatches.includes(`report:v1:complete:${ready[3]}:${ready[4]}`)?ready[4]:undefined;
+ const finalPlan=state.analysis.synthesisDone&&ready&&state.analysis.completedBatches.includes(`report:v2:complete:${ready[3]}:${ready[4]}`)?ready[4]:undefined;
  const legacy=valid.filter(f=>!f.id.startsWith('report:'));const synthesisSections=new Set(legacy.filter(f=>f.id.startsWith('synthesis:')).map(f=>f.section));
- const findings=finalPlan?valid.filter(f=>f.id.startsWith(`report:${finalPlan}:`)).sort((a,b)=>a.id.localeCompare(b.id)):legacy.filter(f=>f.id.startsWith('synthesis:')||!synthesisSections.has(f.section));
+ const findings=finalPlan?valid.filter(f=>f.id.startsWith(`report:v2:${finalPlan}:`)).sort((a,b)=>a.id.localeCompare(b.id)):legacy.filter(f=>f.id.startsWith('synthesis:')||!synthesisSections.has(f.section));
  const unique=findings.filter((f,i)=>findings.findIndex(other=>other.statement===f.statement&&JSON.stringify(other.evidence)===JSON.stringify(f.evidence))===i);
  const sourceKeys=(f:XAccountFinding)=>[...new Set(f.evidence.map(e=>e.sourceKey))];
  const target=state.posts.filter(p=>p.role==='target');const dates=target.map(p=>p.publishedAt).filter((d):d is string=>!!d&&Number.isFinite(Date.parse(d))).sort((a,b)=>Date.parse(a)-Date.parse(b));

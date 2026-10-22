@@ -64,6 +64,7 @@ test('an independent X account publishes a verified Chinese account report and s
   const output=await runXAccountResearch({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>f.firstStep.scopeGuard(f.run.ownerId,f.run.id).assertCurrent(),model:async input=>{
    purposes.push(input.purpose);const data=JSON.parse(input.prompt.split('\nDATA\n')[1]!);
    if(data.organizationStage)return {groups:[{section:'work',title:'Synthetic work',ids:data.items.map((item:{id:string})=>item.id)}]};
+   if(data.reportStage==='select')return {ids:data.items.map((item:{id:string})=>item.id)};
   if(input.purpose.includes('verify'))return{verdicts:data.findings.map((finding:{id:string})=>({id:finding.id,supported:true,reason:'这条完整原文明确支持账号的自述。'}))};
    const material=data.materials.find((m:{text:string;role:string})=>m.role==='target'&&m.text.includes('I built a synthetic reading tool.'));
    return{findings:material?[{section:'work',statement:'该账号在这条原帖中自述制作了一个合成阅读工具。',kind:'attributed_statement',evidence:[{sourceKey:material.sourceKey,quote:'I built a synthetic reading tool.'}]}]:[]};
@@ -198,6 +199,7 @@ test('context billing refusal preserves pending work, drains an issued parent an
  const options={store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{},model:async(input:{purpose:string;prompt:string})=>{
   assert.ok(parentReturned,'analysis starts only after the already-issued parent read has drained');purposes.push(input.purpose);const data=JSON.parse(input.prompt.split('\nDATA\n')[1]!);
   if(data.organizationStage)return {groups:[{section:'work',title:'Synthetic work',ids:data.items.map((item:{id:string})=>item.id)}]};
+  if(data.reportStage==='select')return {ids:data.items.map((item:{id:string})=>item.id)};
   if(input.purpose.includes('verify'))return{verdicts:data.findings.map((finding:{id:string})=>({id:finding.id,supported:true,reason:'所引原文支持账号自述。'}))};
   const material=data.materials.find((m:{text:string})=>m.text===original);
   return{findings:material?[{section:'work',statement,kind:'attributed_statement',evidence:[{sourceKey:material.sourceKey,quote:original}]}]:[]};
