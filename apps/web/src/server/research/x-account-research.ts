@@ -299,7 +299,7 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
       return response;
      }}),
      usageOf:actionUsage,failureUsage:actionUsage,
-     failureResult:error=>{observed={...observed,code:error instanceof DshProtocolError?error.code:'model_failure_unknown'};return observed;},settleFailure:()=>!signal.aborted});
+     failureResult:error=>{const diagnostic=classifyDshFailure(error);observed={...observed,code:error instanceof DshProtocolError?error.code:'model_failure_unknown',...(diagnostic?{diagnostic}:{})};return observed;},settleFailure:()=>!signal.aborted});
     active();cp.steps++;return result;
    }catch(error){
     if(signal.aborted)throw signal.reason;
@@ -315,6 +315,23 @@ export function productionModel(options:XAccountResearchOptions,cp:ResearchCheck
 interface DshFailureMetadata {
  version:'dsh-failure/v1';code:DshProtocolCode|'model_failure_unknown';status:number|null;
  responseHash:string|null;bytes:number;messageStop:boolean;upstreamError:boolean;usageKnown:boolean;
+ diagnostic?:{errorName?:string;providerCode?:ProviderError['code'];providerStatus?:number;causeCode?:string};
+}
+/** Classifications only: never serialize error messages, stacks, requests or causes. */
+function classifyDshFailure(error:unknown):DshFailureMetadata['diagnostic'] {
+ if(!(error instanceof Error))return undefined;
+ const diagnostic:NonNullable<DshFailureMetadata['diagnostic']>={};
+ if(['Error','TypeError','RangeError','SyntaxError','ReferenceError','URIError','EvalError','AggregateError','AbortError','TimeoutError','ProviderError','DshProtocolError','DshProtocolRepairExhaustedError'].includes(error.name))diagnostic.errorName=error.name;
+ if(error instanceof ProviderError&&['provider_timeout','provider_rate_limited','provider_forbidden','provider_not_found','provider_billing','provider_response_too_large','provider_redirect','provider_bad_response','provider_error','provider_unavailable'].includes(error.code)){
+  diagnostic.providerCode=error.code;
+  if(Number.isInteger(error.status)&&error.status!>=100&&error.status!<=599)diagnostic.providerStatus=error.status;
+ }
+ const cause=error.cause;
+ if(cause&&typeof cause==='object'&&!Array.isArray(cause)){
+  const code=(cause as {code?:unknown}).code;
+  if(typeof code==='string'&&['ECONNRESET','ECONNREFUSED','ECONNABORTED','ETIMEDOUT','EPIPE','ENOTFOUND','EAI_AGAIN','ENETUNREACH','EHOSTUNREACH','ENETDOWN','EADDRNOTAVAIL','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET','UND_ERR_ABORTED','ERR_TLS_CERT_ALTNAME_INVALID','CERT_HAS_EXPIRED','CERT_NOT_YET_VALID','UNABLE_TO_VERIFY_LEAF_SIGNATURE','DEPTH_ZERO_SELF_SIGNED_CERT','SELF_SIGNED_CERT_IN_CHAIN'].includes(code))diagnostic.causeCode=code;
+ }
+ return Object.keys(diagnostic).length?diagnostic:undefined;
 }
 function emptyDshFailure():DshFailureMetadata {
  return{version:'dsh-failure/v1',code:'model_failure_unknown',status:null,responseHash:null,bytes:0,messageStop:false,upstreamError:false,usageKnown:false};

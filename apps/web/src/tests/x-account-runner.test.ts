@@ -10,7 +10,7 @@ import {renderMarkdown} from '../shared/canonical.js';
 import {renderReportHtml} from '../shared/report-html.js';
 import {collectXAccount,productionModel} from '../server/research/x-account-research.js';
 import {DshProtocolRepairExhaustedError} from '../server/research/dsh-decision.js';
-import type {HttpTransport} from '../server/adapters/types.js';
+import {ProviderError,type HttpTransport} from '../server/adapters/types.js';
 import {createHash} from 'node:crypto';
 
 const ACCOUNT={nativeId:'42',handle:'runner_fixture',name:'Synthetic account',description:'Synthetic public account description.',url:'https://x.com/runner_fixture'};
@@ -311,6 +311,47 @@ test('production model preserves unknown transport failures without repair or pr
  await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal));assert.equal(p.calls(),1);
  const receipt=p.f.store.research.receipts(p.f.run.id)[0]!;assert.equal((receipt.result as {code:string}).code,'model_failure_unknown');assert.doesNotMatch(JSON.stringify(receipt.result),/PRIVATE_|"prompt"|"body"/);assert.equal(receipt.usage!.unknownCost,true);
  await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal),/model_request_failed/);assert.equal(p.calls(),1);
+});
+
+test('production model retains bounded provider failure codes and status without allowing another request',async t=>{
+ for(const [code,status]of [['provider_timeout',504],['provider_response_too_large',413]]as const){
+  const p=productionPort(t,()=>{throw new ProviderError(code,'PRIVATE_PROVIDER_BODY synthetic-offline-only PRIVATE_SOURCE_TEXT',status);});
+  await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal));assert.equal(p.calls(),1);
+  const receipt=p.f.store.research.receipts(p.f.run.id)[0]!,metadata=receipt.result as Record<string,unknown>;
+  assert.deepEqual(metadata.diagnostic,{errorName:'ProviderError',providerCode:code,providerStatus:status});assert.equal(metadata.code,'model_failure_unknown');assert.equal(metadata.status,null);assert.equal(metadata.usageKnown,false);assert.equal(receipt.usage!.unknownCost,true);
+  assert.doesNotMatch(JSON.stringify(metadata),/PRIVATE_|synthetic-offline-only|"message"|"stack"|"prompt"|"body"/);
+  await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal),/model_request_failed/);assert.equal(p.calls(),1);assert.deepEqual(p.f.store.research.receipts(p.f.run.id)[0],receipt);
+ }
+});
+
+test('production model retains only allowlisted native network cause codes and known error names',async t=>{
+ for(const causeCode of ['ECONNRESET','EAI_AGAIN','UND_ERR_CONNECT_TIMEOUT','UND_ERR_SOCKET']){
+  const error=new TypeError('PRIVATE_FETCH_MESSAGE synthetic-offline-only',{cause:Object.assign(new Error('PRIVATE_CAUSE_MESSAGE'),{code:causeCode,hostname:'PRIVATE_HOST',request:{body:'PRIVATE_SOURCE_TEXT'}})});
+  const p=productionPort(t,()=>{throw error;});await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal));assert.equal(p.calls(),1);
+  const metadata=p.f.store.research.receipts(p.f.run.id)[0]!.result as Record<string,unknown>;
+  assert.deepEqual(metadata.diagnostic,{errorName:'TypeError',causeCode});assert.doesNotMatch(JSON.stringify(metadata),/PRIVATE_|synthetic-offline-only|"message"|"stack"|"cause"|"request"|"hostname"/);
+ }
+});
+
+test('provider failure classification omits non-HTTP and non-numeric status values',async t=>{
+ for(const status of [99,600,Number.NaN,Number.POSITIVE_INFINITY,'PRIVATE_STATUS_CREDENTIAL']){
+  const error=Object.assign(new ProviderError('provider_timeout','PRIVATE_PROVIDER_MESSAGE'),{status});
+  const p=productionPort(t,()=>{throw error;});await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal));
+  const metadata=p.f.store.research.receipts(p.f.run.id)[0]!.result as Record<string,unknown>;
+  assert.deepEqual(metadata.diagnostic,{errorName:'ProviderError',providerCode:'provider_timeout'});assert.doesNotMatch(JSON.stringify(metadata),/PRIVATE_|"providerStatus"/);
+ }
+});
+
+test('production model rejects arbitrary diagnostic fields even when they resemble error or network codes',async t=>{
+ for(const error of [
+  Object.assign(new ProviderError('provider_error','PRIVATE_PROVIDER_MESSAGE'),{name:'PRIVATE_ERROR_NAME',code:'provider_private_credential',status:9999,cause:{code:'ERR_PRIVATE_CREDENTIAL',message:'PRIVATE_CAUSE_MESSAGE'},body:'PRIVATE_BODY',request:{headers:{authorization:'PRIVATE_TOKEN'}}}),
+  Object.assign(new Error('PRIVATE_ERROR_MESSAGE'),{name:'PRIVATE_ERROR_NAME',cause:{code:'ECONNRESET PRIVATE_TOKEN'}}),
+  {name:'PRIVATE_ERROR_NAME',message:'PRIVATE_THROWN_TEXT',code:'PRIVATE_TOKEN',cause:{code:'UND_ERR_PRIVATE_TOKEN'}}
+ ]){
+  const p=productionPort(t,()=>{throw error;});await assert.rejects(p.model()(PORT_INPUT,new AbortController().signal));assert.equal(p.calls(),1);
+  const metadata=p.f.store.research.receipts(p.f.run.id)[0]!.result as Record<string,unknown>;
+  assert.equal(metadata.diagnostic,undefined);assert.doesNotMatch(JSON.stringify(metadata),/PRIVATE_|"message"|"stack"|"body"|"request"|"authorization"/);
+ }
 });
 
 test('production model repair attempts respect the existing shared model budget', {timeout:30_000},async t=>{
