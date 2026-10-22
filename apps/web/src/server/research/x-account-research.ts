@@ -186,23 +186,32 @@ export async function collectXAccount(options:XAccountResearchOptions){
   }
  }
  const taskKey=(task:typeof state.contextQueue[number])=>`${task.type}:${task.tweetId}:${task.rootId}:${task.relation}`;
- const contextTask=async(task:typeof state.contextQueue[number])=>{
-  active();const key=taskKey(task);
-  if(!state.contextDone.includes(key)){
+ const contextTask=async(tasks:typeof state.contextQueue)=>{
+  active();const pending=tasks.filter(task=>!state.contextDone.includes(taskKey(task)));const task=pending[0];
+  if(task){
    progress('x_context',`补读${task.relation==='target'?'帖子完整正文':task.type==='comments'?'讨论上下文':task.relation==='quoted_context'?'引用原文':'回复父链'}，待处理 ${state.contextQueue.length} 项`);
    try{
     const response=await read(task.type==='detail'?{type:'detail',tweetId:task.tweetId}:{type:'comments',tweetId:task.tweetId,cursor:null});
     if(task.type==='detail'&&(!response.posts.length||response.posts[0]!.id!==task.tweetId))gap('context_missing',task.tweetId,'单帖详情未返回请求的原生帖子，缺口保留。');
-    else for(const post of response.posts)savePage(post,task.relation,task.rootId,response.retrievedAt,response.inheritedFromRunId);
+    else for(const association of pending)for(const post of response.posts)savePage(post,association.relation,association.rootId,response.retrievedAt,response.inheritedFromRunId);
     if(task.type==='comments'&&response.cursorState!=='end')gap('comments_first_page',task.tweetId,'本帖讨论按默认首层一页读取；供应商后续评论或完整讨论树未穷尽。');
    }catch(error){if(!(error instanceof ProviderError))throw error;gap('context_read_failed',task.tweetId,'该条回复、引用或讨论上下文未读取成功，失败回执保留。');}
-   state.contextDone.push(key);
+   for(const association of pending)state.contextDone.push(taskKey(association));
   }
-  state.contextQueue=state.contextQueue.filter(item=>taskKey(item)!==key);save();
+  const completedKeys=new Set(tasks.map(taskKey));
+  state.contextQueue=state.contextQueue.filter(item=>!completedKeys.has(taskKey(item)));save();
  };
  while(state.contextQueue.length){
-  active();const requests=new Set<string>();const batch:typeof state.contextQueue=[];
-  for(const task of state.contextQueue){const key=`${task.type}:${task.tweetId}`;if(requests.has(key))continue;requests.add(key);batch.push(task);if(batch.length===3)break;}
+  active();const requests=new Set<string>();const batch:Array<typeof state.contextQueue>=[];
+  for(const task of state.contextQueue){
+   const key=`${task.type}:${task.tweetId}`;if(requests.has(key))continue;requests.add(key);
+   const group:typeof state.contextQueue=[];
+   if(task.type==='detail'){
+    // Bound synchronous relationship folding without repeating the native read and guards per root.
+    for(const association of state.contextQueue)if(association.type==='detail'&&association.tweetId===task.tweetId){group.push(association);if(group.length===100)break;}
+   }else group.push(task);
+   batch.push(group);if(batch.length===3)break;
+  }
   // Wait every dispatched read to settle before a stop can publish a report.
   // Same native requests never overlap, even when several roots need them.
   const outcomes=await Promise.allSettled(batch.map(contextTask));

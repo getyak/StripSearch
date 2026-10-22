@@ -136,3 +136,45 @@ test('newly read parent context remains covered by fresh revocation checks after
  }};
  try{await assert.rejects(collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{}}),/source_revoked/);assert.ok(!f.store.listSources(f.run.id).some(s=>s.url.endsWith('/901')));}finally{f.close();}
 });
+
+test('one shared detail fold checkpoints every queued root and keeps parent traversal separate from quoted context',async()=>{
+ const{f,binding}=setup();const detailCalls:string[]=[];
+ const provider:XAccountProvider={async execute(request){
+  if(request.type==='profile')return{...result(),account:profile};
+  if(request.type==='timeline')return result([post('101',{kind:'reply',parentId:'900'}),post('102',{kind:'reply',parentId:'900'}),post('103',{kind:'quote',quotedId:'900'})]);
+  if(request.type==='replies')return result();
+  if(request.type==='detail'){detailCalls.push(request.tweetId);return result([post(request.tweetId,{authorId:'99',authorHandle:'other',kind:'reply',parentId:request.tweetId==='900'?'901':null})]);}
+  throw Error('unexpected comments');
+ }};
+ const originalSave=f.store.research.save.bind(f.store.research);let stopped=false;
+ f.store.research.save=(runId,cp)=>{originalSave(runId,cp);if(!stopped&&cp.xAccountResearch?.contextDone.some(key=>key.startsWith('detail:900:'))){stopped=true;f.store.updateRun(runId,{state:'partial',stop_reason:'synthetic_maintenance_stop'});}};
+ try{
+  await assert.rejects(collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{}}),/run_inactive/);
+  const state=f.store.research.checkpoint(f.run.id)!.xAccountResearch!;
+  assert.deepEqual(state.posts.find(p=>p.id==='900')!.rootIds.slice().sort(),['101','102','103'],'first saved context fold must retain all three queued relationships');
+  assert.deepEqual(state.contextDone.filter(k=>k.startsWith('detail:900:')).sort(),['detail:900:101:parent_context','detail:900:102:parent_context','detail:900:103:quoted_context']);
+  assert.ok(!state.contextQueue.some(t=>t.tweetId==='900'));
+  assert.deepEqual(state.contextQueue.filter(t=>t.tweetId==='901').map(t=>({rootId:t.rootId,relation:t.relation})),[{rootId:'101',relation:'parent_context'},{rootId:'102',relation:'parent_context'}]);
+  assert.deepEqual(detailCalls,['900'],'the saved group can stop before dispatching its next parent');
+ }finally{f.close();}
+});
+
+test('350 roots sharing one detail use bounded checkpoint groups and one paid native read',async()=>{
+ const{f,binding}=setup();const rootIds=Array.from({length:350},(_,i)=>String(1001+i));let paidDetails=0;
+ const provider:XAccountProvider={async execute(request){
+  if(request.type==='profile')return{...result(),account:profile};
+  if(request.type==='timeline')return result(rootIds.map(id=>post(id,{kind:'reply',parentId:'900'})));
+  if(request.type==='replies')return result();
+  if(request.type==='detail'){assert.equal(request.tweetId,'900');paidDetails++;return result([post('900',{authorId:'99',authorHandle:'other'})]);}
+  throw Error('unexpected comments');
+ }};
+ const checkpoints:number[]=[];const originalSave=f.store.research.save.bind(f.store.research);
+ f.store.research.save=(runId,cp)=>{originalSave(runId,cp);const done=cp.xAccountResearch?.contextDone.filter(k=>k.startsWith('detail:900:')).length??0;if(done>(checkpoints.at(-1)??0)){checkpoints.push(done);assert.equal(cp.xAccountResearch!.posts.find(p=>p.id==='900')!.rootIds.length,done);}};
+ try{
+  const {state}=await collectXAccount({store:f.store,run:f.store.getRun(f.run.id)!,binding,provider,signal:new AbortController().signal,limits:unlimited,assertScope:()=>{}});
+  assert.deepEqual(checkpoints,[100,200,300,350],'each synchronous fold handles at most 100 queued relationships');
+  assert.equal(paidDetails,1,'later groups replay the same settled native read');
+  assert.deepEqual(state.posts.find(p=>p.id==='900')!.rootIds.slice().sort(),rootIds.slice().sort());
+  assert.equal(state.contextQueue.length,0);assert.equal(state.contextDone.length,350);
+ }finally{f.close();}
+});
