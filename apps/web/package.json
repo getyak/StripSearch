@@ -40,7 +40,7 @@
     "jsdom": "30.1.0",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
-    "vite": "8.3.0"
+    "vite": "8.3.3"
   },
   "allowScripts": {
     "better-sqlite3@13.0.3": true,
