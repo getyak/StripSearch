@@ -3,6 +3,8 @@ import { allocateSourceKey, rememberSourceKeys } from '../research/source-keys.j
 import { buildResearchReport, failedUsage, runResearch, scopeRefusalRecord, tagScopeRefusal, type ScopedResearchTools } from '../research/controller.js';
 import { createDshPlanner, type ResearchPlanner } from '../research/planner.js';
 import type { ResearchTools } from '../research/tool-contracts.js';
+import {runXAccountResearch} from '../research/x-account-research.js';
+import type {XAccountProvider,XAccountModel} from '../research/x-account-contracts.js';
 import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState, NeedsInputError } from '../../shared/types.js';
 import type { ProviderName, RunState, ProviderResult } from '../../shared/types.js';
@@ -13,8 +15,16 @@ import type { AppConfig } from '../config.js';
 import { RunTerminalError, Store, nowIso } from '../store.js';
 import type { RunRecord } from '../store.js';
 import { FirstStepStore, FirstStepSelectionError } from '../research/first-step-store.js';
-import { createFirstStepCheckedSearch, createFirstStepProposalModel, discoverFirstStep } from '../research/first-step-discovery.js';
+import {
+  createFirstStepCheckedSearch,
+  createFirstStepProposalModel,
+  discoverFirstStep,
+  firstStepAttemptId,
+  firstStepAttemptPolicy,
+  resolveFirstStepFlowStage
+} from '../research/first-step-discovery.js';
 import type { FirstStepCheckedSearch } from '../research/first-step-discovery.js';
+import type { PersonConfirmationStore } from '../research/person-confirmation.js';
 import { classifyFirstStepUrl, FIRST_STEP_DEFAULT_BUDGET } from '../../shared/first-step-discovery.js';
 import type { PlatformCatalogSnapshot } from '../../shared/platform-catalog.js';
 
@@ -32,8 +42,12 @@ export interface RunnerDeps {
   now?: () => number;
   researchTools?: ResearchTools;
   researchPlanner?: ResearchPlanner;
+  xAccountProvider?: XAccountProvider;
+  xAccountModel?: XAccountModel;
   /** First-step persistence; runs with a link use the new first-step flow. */
   firstStep?: FirstStepStore;
+  /** GET-213 staged person confirmation; its presence enables the staged name flow. */
+  personConfirmation?: PersonConfirmationStore;
   /** Bound platform catalog for first-step obligation freezing. */
   discoveryCatalog?: PlatformCatalogSnapshot | null;
 }
@@ -323,22 +337,41 @@ export class Runner {
     };
     if (!binding) {
       const link = firstStep.link(runId)!;
-      const input = {
+      const legacyInput = {
         kind: (initial.seedUrl ? 'homepage_url' : 'name_query') as 'homepage_url' | 'name_query',
         value: (link.hint ?? initial.seedUrl ?? initial.question).trim(),
         question: initial.question
       };
+      const priorPolicy = firstStepAttemptPolicy(this.deps.store, runId, firstStepAttemptId(link, legacyInput, link.hint));
+      // Preserve the exact input/receipt namespace of frozen legacy attempts.
+      // New staged name attempts keep the actual name; a clue is separate
+      // query context and must never become the person label or subject.
+      const input = legacyInput.kind === 'name_query' && this.deps.personConfirmation && priorPolicy !== 'v9' && priorPolicy !== 'v10'
+        ? { ...legacyInput, value: initial.question.trim() }
+        : legacyInput;
+      // GET-213 staged name flow: bounded general-web overview first, then the
+      // explicit person confirmation, then account discovery. Old attempts and
+      // explicit profile input keep their existing full flow unchanged.
+      const confirmation = this.deps.personConfirmation?.active(runId) ?? null;
+      const staged = input.kind === 'name_query' && this.deps.personConfirmation !== undefined;
+      const requestedStage = staged ? (confirmation ? 'accounts' : 'overview') : undefined;
+      // ONE frozen attempt identity and stage decision BEFORE constructing the
+      // checked surface AND the coordinator — they can never disagree, and a
+      // prefrozen v9/v10 attempt keeps its full legacy flow everywhere.
+      const attemptId = firstStepAttemptId(link, input, link.hint);
+      const flowStage = resolveFirstStepFlowStage(firstStepAttemptPolicy(this.deps.store, runId, attemptId), requestedStage);
       const search: FirstStepCheckedSearch = createFirstStepCheckedSearch({
         tools,
         store: this.deps.store,
         runId,
-        attemptId: `input-${String(link.inputRevision)}`,
+        attemptId,
         budget: FIRST_STEP_DEFAULT_BUDGET,
         // The OPERATOR's real ceilings: discovery never raises configured caps.
         limits: this.deps.store.research.checkpoint(runId)?.limits ?? this.deps.config.researchLimits,
-        modelName: this.deps.config.deepseekModel
+        modelName: this.deps.config.deepseekModel,
+        stage: flowStage
       });
-      await discoverFirstStep({
+      const discovered = await discoverFirstStep({
         store: this.deps.store,
         firstStep,
         ownerId: initial.ownerId,
@@ -350,6 +383,10 @@ export class Runner {
         catalog: this.deps.discoveryCatalog ?? null,
         hint: link.hint,
         firecrawlAvailable: Boolean(this.deps.config.firecrawlApiKey),
+        stage: flowStage,
+        confirmedPerson: confirmation
+          ? { candidateId: confirmation.candidateId, confirmedAt: confirmation.confirmedAt, sourceDeps: confirmation.sourceDeps }
+          : null,
         // The restricted first-step model role runs on the PRODUCT model
         // provider (same configured DeepSeek credential as research); metered
         // through the checked ledger and fully server-verified.
@@ -364,7 +401,10 @@ export class Runner {
               })
             : undefined
       });
-      // Wait for the one scope confirmation; the projection carries the rest.
+      // Wait for the one confirmation step the projection reports: person
+      // confirmation first, then the one account scope confirmation.
+      const awaitingPerson = discovered.phase === 'awaiting_person_confirmation';
+      const prompt = awaitingPerson ? '请确认人物候选，再展开公开账号。' : '请确认人物与研究账号范围。';
       this.deps.store.updateRunIfActive(runId, {
         state: 'needs_input',
         revision: (this.deps.store.getRun(runId)?.revision ?? initial.revision) + 1,
@@ -373,19 +413,24 @@ export class Runner {
           handle: null,
           profileUrl: null,
           status: 'needs_input',
-          note: '请在第一步确认人物与研究账号范围。',
+          note: awaitingPerson ? '请先确认人物候选，再选择研究账号范围。' : '请在第一步确认人物与研究账号范围。',
           candidates: []
         }),
         error_code: null,
         error_message: null
       });
-      this.deps.store.addEvent(runId, 'needs_input', { prompt: '请确认人物与研究账号范围。', firstStep: true });
+      this.deps.store.addEvent(runId, 'needs_input', { prompt, firstStep: true, personConfirmation: awaitingPerson });
       this.deps.store.addEvent(runId, 'state', { state: 'needs_input' satisfies RunState });
       return;
     }
     // Scope-limited fetch: every dispatch AND ingestion re-checks the live
     // scope; excluded/unselected/later-discovered accounts are refused.
     const guard = firstStep.scopeGuard(initial.ownerId, runId);
+    const single=binding.accounts.length===1?classifyFirstStepUrl(binding.accounts[0]!.profileUrl):null;
+    if(this.deps.xAccountProvider&&single?.ok&&single.ref.platform==='x'&&binding.accounts[0]!.allowedScope==='public_history'){
+      const result=await runXAccountResearch({store:this.deps.store,run:initial,binding,provider:this.deps.xAccountProvider,signal:controller.signal,limits:this.deps.config.researchLimits,assertScope:()=>guard.assertCurrent(),model:this.deps.xAccountModel,transport:this.deps.transport,apiKey:this.deps.config.deepseekApiKey,modelName:this.deps.config.deepseekModel});
+      this.finishWithResult(runId,initial,result,startedAt);return;
+    }
     const independentAccountKeys = new Set(
       Object.entries(binding.accountKeys)
         .filter(([, accountId]) => binding.independentAccountIds.includes(accountId))
@@ -478,6 +523,15 @@ export class Runner {
           return { type: 'read', url: account.profileUrl };
         })();
         const requestKey = `firststep:fetch:${seedAttempt}:${account.accountId}`;
+        const recordSeedGap = (message: string): void => {
+          checkpoint.unknowns.push(message);
+          this.deps.store.research.save(runId, checkpoint);
+          this.deps.store.addEvent(runId, 'stage', {
+            index: binding.accounts.indexOf(account) + 1, total: binding.accounts.length,
+            key: `selected-${account.accountId}`, label: `所选账号资料未取得：${account.profileUrl}`,
+            status: 'unavailable', detail: '已保存读取缺口；其他允许读取的账号继续，未取得资料不代表没有资料。'
+          });
+        };
         let result: Awaited<ReturnType<ResearchTools['execute']>> | null = null;
         try {
           // Predispatch refusal stops BEFORE any reservation: never billed.
@@ -487,7 +541,7 @@ export class Runner {
           if (old) {
             if (old.state !== 'completed') {
               // Known settled failure: kept inspectable, never re-executed.
-              checkpoint.unknowns.push(`所选账号初始读取曾失败，保留失败回执不重放：${account.profileUrl}`);
+              recordSeedGap(`所选账号初始读取曾失败，保留失败回执不重放：${account.profileUrl}`);
               continue;
             }
             // Same-attempt recovery: reuse the exact saved output, no re-read.
@@ -509,23 +563,24 @@ export class Runner {
             }
           }
         } catch (error) {
+          if (controller.signal.aborted) throw error;
           if (error instanceof ResearchStop && error.code === 'unknown_inflight') {
-            checkpoint.unknowns.push(`所选账号初始读取结果未知（不重放）：${account.profileUrl}`);
+            recordSeedGap(`所选账号初始读取结果未知（不重放）：${account.profileUrl}`);
             continue;
           }
           if (error instanceof ResearchStop && error.code === 'budget_exhausted') {
-            checkpoint.unknowns.push('操作员总预算上限已到，剩余所选账号初始材料未读取；缺口保留，不自动重试。');
+            recordSeedGap('操作员总预算上限已到，剩余所选账号初始材料未读取；缺口保留，不自动重试。');
             break;
           }
           if (error instanceof ProviderError) {
             // A failed initial read is a real gap for this account, not absence.
-            checkpoint.unknowns.push(`所选账号初始材料未读取成功（${error.code}）：${account.profileUrl}；不代表无资料。`);
+            recordSeedGap(`所选账号初始材料未读取成功（${error.code}）：${account.profileUrl}；不代表无资料。`);
             continue;
           }
           if (error instanceof FirstStepSelectionError && error.code === 'out_of_scope') {
             // Fail-closed per-account refusal: an honest gap, never a fetch;
             // the remaining selected accounts keep their initial material.
-            checkpoint.unknowns.push(`所选账号初始材料被范围守卫拒绝（${error.detail}）；${scopeRefusalRecord(error)?.dispatched?'请求已发生，实际用量保留，返回材料未入库':'未发送请求'}，缺口保留，已读材料不变。`);
+            recordSeedGap(`所选账号初始材料被范围守卫拒绝（${error.detail}）；${scopeRefusalRecord(error)?.dispatched?'请求已发生，实际用量保留，返回材料未入库':'未发送请求'}，缺口保留，已读材料不变。`);
             continue;
           }
           if (error instanceof FirstStepSelectionError && error.code === 'scope_changed') {
@@ -538,6 +593,10 @@ export class Runner {
           }
           throw error;
         }
+        // A provider may ignore abort. Settle actual usage above, then refuse
+        // every publishing write from a cancelled or no longer writable run.
+        controller.signal.throwIfAborted();
+        this.assertWritable(runId);
         for (const page of result.pages) {
             const url = page.url;
             if (checkpoint.pages.some((existing) => existing.url === url)) continue;
@@ -577,6 +636,7 @@ export class Runner {
               },
               checkpoint.pages.length - 1
             );
+            this.deps.store.addEvent(runId, 'source', this.deps.store.getSource(runId, sourceKey));
           }
       }
       this.deps.store.research.save(runId, checkpoint);

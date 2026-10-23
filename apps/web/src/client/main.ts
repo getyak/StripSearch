@@ -1,4 +1,4 @@
-import { isTerminalState } from '../shared/types.js';
+import { isTerminalState, isActiveState } from '../shared/types.js';
 import type { CanonicalView, RunEventRecord, RunSummary, SessionUser } from '../shared/types.js';
 import { stateLabel } from '../shared/canonical.js';
 import {
@@ -16,6 +16,7 @@ import { clearFirstStepDrafts } from './first-step-draft-storage.js';
 import type { FirstStepPanel } from './first-step.js';
 import { createHomeMotion } from './home-motion.js';
 import { createLocalSearch } from './local-search.js';
+import { createResearchLoadingSurface, deriveResearchLoading, researchGapText } from './research-loading.js';
 import { createMobileNavigation } from './mobile-navigation.js';
 import type { LocalSearchItem } from './local-search.js';
 import { createReviewWorkbench } from './review.js';
@@ -60,6 +61,7 @@ interface AppState {
   submitBusy: boolean;
   submitAttempt: { ownerId: string; input: string; key: string } | null;
   resumeBusy: boolean;
+  followupAttempt: { ownerId: string; runId: string; epoch: number; question: string; key: string; busy: boolean } | null;
   activeRunId: string | null;
   signOutBusy: boolean;
 }
@@ -88,6 +90,7 @@ const state: AppState = {
   submitBusy: false,
   submitAttempt: null,
   resumeBusy: false,
+  followupAttempt: null,
   activeRunId: null,
   signOutBusy: false
 };
@@ -118,6 +121,7 @@ const els = {
   clearQuestion: byId<HTMLButtonElement>('clear-question'),
   submit: byId<HTMLButtonElement>('submit-research'),
   candidates: byId('identity-candidates'),
+  requestMessage: document.querySelector<HTMLElement>('#work-body .request-message') as HTMLElement,
   statusSummary: byId('run-status-summary'),
   researchDetails: byId('research-details'),
   historyRail: byId('history-list'),
@@ -174,6 +178,17 @@ const els = {
   fetch: byId('view-fetch'),
   openFetch: byId<HTMLButtonElement>('open-fetch')
 };
+
+/**
+ * GET-214: the single live research surface. Created once and inserted before
+ * the old status summary; every render path ends in syncResearchPresentation()
+ * so partial event updates can never resurrect the duplicate request/status/
+ * activity shells or a busy state that needs_input already stopped.
+ */
+const researchLoading = createResearchLoadingSurface({
+  onInspectSource: (sourceKey, row) => focusSource(sourceKey, 'list', row)
+});
+els.statusSummary.before(researchLoading.element);
 
 /** Web Fetch panel (GET-99 real GitHub public slice), integrated in-app. */
 const fetchPanel = createFetchPanel({
@@ -314,6 +329,7 @@ function clearPrivateState(): void {
   state.pendingSubmit = false;
   state.submitBusy = false;
   state.submitAttempt = null;
+  state.followupAttempt = null;
   state.resumeBusy = false;
   els.submit.disabled = false;
   els.form.removeAttribute('aria-busy');
@@ -509,9 +525,9 @@ function handleAuthSuccess(user: SessionUser): void {
   // Invalidate anything queued for a previous session.
   state.runEpoch += 1;
   renderUserNav(user);
-  void loadRuns();
   if (state.pendingSubmit) state.pendingSubmit = false;
   route();
+  void loadRuns();
 }
 
 async function signOut(): Promise<void> {
@@ -557,11 +573,12 @@ async function loadRuns(): Promise<void> {
   renderHistoryRail();
 }
 
-async function selectRun(runId: string): Promise<void> {
+async function selectRun(runId: string, initialRun?: CanonicalView): Promise<void> {
   byId<HTMLDetailsElement>('more-menu').open = false;
   const epoch = ++state.runEpoch;
   state.activeRunId = runId;
   state.resumeBusy = false;
+  state.followupAttempt = null;
   state.selectedSourceKey = null;
   state.filter = 'all';
   state.messages = [];
@@ -577,7 +594,7 @@ async function selectRun(runId: string): Promise<void> {
   localSearch.refresh();
   let snapshot: { run: CanonicalView; events: RunEventRecord[]; latestSeq: number };
   try {
-    snapshot = await api.getRun(runId);
+    snapshot = initialRun?.runId === runId ? { run: initialRun, events: [], latestSeq: 0 } : await api.getRun(runId);
   } catch (error) {
     if (state.runEpoch !== epoch) return;
     showToast(error instanceof ApiError ? error.message : '读取研究失败。', 'error');
@@ -657,11 +674,16 @@ function openStream(runId: string, since: number, epoch: number): void {
     if (state.runEpoch !== epoch || state.stream !== source) return;
     state.streamState = 'open';
     state.reconnectAttempts = 0;
+    // Stream notices update on reconnect/open as well as on disconnect.
+    syncResearchPresentation();
   };
   for (const type of ['state', 'stage', 'source', 'observation', 'answer', 'needs_input', 'error', 'interrupted', 'revision', 'identity', 'person', 'usage', 'first_step_discovery', 'first_step_selection', 'first_step_ready']) {
     source.addEventListener(type, (event) => {
       if (state.runEpoch !== epoch || state.stream !== source) return;
       const message = event as MessageEvent<string>;
+      // A native connection error has no data; onerror handles reconnection.
+      // Only a server-sent MessageEvent may report a research failure.
+      if (type === 'error' && typeof message.data !== 'string') return;
       let payload: unknown = null;
       try {
         payload = JSON.parse(message.data);
@@ -685,6 +707,7 @@ function openStream(runId: string, since: number, epoch: number): void {
     if (state.runEpoch !== epoch) return;
     state.streamState = 'reconnecting';
     updateStreamHint();
+    syncResearchPresentation();
     scheduleReconnect(runId, epoch);
   };
 }
@@ -730,10 +753,13 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       // is preserved inside the panel and never overwritten by these pushes.
       syncFirstStep(runId);
       break;
-    case 'stage':
+    case 'stage': {
       state.stages = stagesFromEvents(state.events);
       renderActivityPanel();
+      const status = (payload as { status?: unknown } | null)?.status;
+      if (status === 'unavailable' || status === 'error') scheduleSnapshotRefresh(runId, epoch);
       break;
+    }
     case 'source': {
       const source = payload as CanonicalView['sources'][number] | null;
       if (source && !state.run.sources.some((item) => item.sourceKey === source.sourceKey)) {
@@ -781,6 +807,7 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       const next = (payload as { state?: CanonicalView['state'] } | null)?.state;
       if (next) state.run.state = next;
       renderHeader();
+      renderNeedsPanel();
       renderRunSummary();
       renderActivityPanel();
       renderReportView();
@@ -797,6 +824,10 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       renderHeader();
       renderRunSummary();
       renderNeedsPanel();
+      // Stale active stage events must stop looking busy the moment the run
+      // asks for a decision.
+      renderActivityPanel();
+      renderReportView();
       break;
     }
     case 'error': {
@@ -949,16 +980,20 @@ function renderHeader(): void {
   els.downloadHtml.disabled = !ready;
   els.downloadPdf.disabled = !ready;
   const chatEnabled = Boolean(run && isTerminalState(run.state) && ready && chatSupported(run));
-  els.chatInput.disabled = !chatEnabled;
-  els.chatSend.disabled = !chatEnabled;
+  const followupPending = Boolean(state.followupAttempt?.busy && state.followupAttempt.runId === run?.runId && state.followupAttempt.epoch === state.runEpoch);
+  els.chatInput.disabled = !chatEnabled || followupPending;
+  els.chatSend.disabled = !chatEnabled || followupPending || !els.chatInput.value.trim();
+  els.chatForm.setAttribute('aria-busy', String(followupPending));
+  setText(els.chatSend, followupPending ? '提交中…' : '发送');
   setText(els.chatHint, chatHint(run, chatEnabled));
 }
 
 function chatHint(run: CanonicalView | null, chatEnabled: boolean): string {
+  if (state.followupAttempt?.busy && state.followupAttempt.runId === run?.runId && state.followupAttempt.epoch === state.runEpoch) return '正在创建追问，已保留本次问题…';
   if (state.streamState === 'reconnecting') return '实时连接中断，正在重连；报告内容不会丢失。';
   if (!run) return '报告完成后可以继续追问。';
   if (!chatSupported(run)) return '这份旧资料只包含账号与作品记录。可返回首页开始新的完整研究。';
-  if (chatEnabled) return '继续了解感兴趣的细节；新的研究会单独保存。';
+  if (chatEnabled) return '追问会单独保存；本次材料的读取限制仍然适用。';
   return '报告完成后可以继续追问。';
 }
 
@@ -985,6 +1020,7 @@ function syncFirstStep(runId: string): void {
       runId,
       ownerId: state.user?.id,
       onAfterExpand: () => { void selectRun(runId); },
+      onAfterPersonConfirm: () => { void selectRun(runId); },
       onAfterSubmit: () => {
         void selectRun(runId);
       }
@@ -1014,13 +1050,9 @@ function renderNeedsPanel(): void {
   show(els.needsPanel, needs && !firstStep);
   show(els.firstStepPanel, firstStep);
   els.workBody.classList.toggle('choosing-target', firstStep);
-  // The whole chat dock (followups, form, hint) is inactive during the scope
-  // confirmation — hidden entirely so no blank row remains.
-  show(els.chatDock, !firstStep);
+  // The follow-up dock, report and status shells are composed once in
+  // syncResearchPresentation(); only the decision/footer hosts belong here.
   show(els.firstStepActions, firstStep);
-  show(els.chatForm, !firstStep);
-  show(els.chatHint, !firstStep);
-  show(els.report, !firstStep);
   if (firstStep && run) {
     syncFirstStep(run.runId);
   } else {
@@ -1049,6 +1081,7 @@ function renderNeedsPanel(): void {
     }
   }
   els.resumeRun.disabled = state.resumeBusy;
+  syncResearchPresentation();
 }
 
 // Optional fields keep historical reports readable while the research contract evolves.
@@ -1073,16 +1106,21 @@ function renderRunSummary(): void {
     cancelled: '研究已停止，已有资料仍可查看。'
   };
   const stopReason = research?.stopReason ?? run?.stopReason;
+  const unresolved = [...new Set(run?.research?.unresolved ?? [])].map(researchGapText);
+  // While research is active (or waiting for a person decision) the live
+  // research surface owns the current action; this line keeps only truthful
+  // stop/outcome context for the settled states, with a generic fallback for
+  // unknown stop codes instead of inventing a specific claim.
   let message = stopReason ? messages[stopReason] ?? '' : '';
   if (!message && run?.state === 'partial') message = '已保留目前找到的资料，部分内容尚未完成。';
   if (!message && run?.state === 'failed') message = '这次研究未能完成。你的输入已保留，可以重试或补充线索。';
-  if (run?.state === 'needs_input') message = '';
-  if (!message && run?.state === 'queued') message = '研究已保存，正在等待开始。';
-  if (!message && research && run?.state === 'researching') {
-    const phases: Record<string, string> = { resolving: '正在核对人物身份。', identity: '正在核对人物身份。', identity_resolution: '正在核对人物身份。', searching: '正在发现原作、账号线索与反证。', planning: '正在按研究问题安排下一批资料。', reading: '正在读取原文与讨论上下文。', verifying: '正在独立核验断言与出处。', researching: '正在阅读公开资料，核对相关证据。', collecting: '正在阅读公开资料，核对相关证据。', synthesizing: '正在整理有出处的发现。', validating: '正在核对报告与出处。' };
-    message = phases[research.phase] ?? '正在阅读与核对公开资料。';
+  if (!message && run?.state === 'cancelled') message = '研究已停止，已有资料仍可查看。';
+  if (run?.interrupted) {
+    const note = '服务重启，这份报告被标记为中断，可以手动重试。';
+    message = message ? `${message}${note}` : note;
   }
-  if (!message && run?.state === 'researching') message = '正在查找和核对公开资料。';
+  if (run && (isActiveState(run.state) || run.state === 'needs_input')) message = '';
+  else if (unresolved.length > 0) message = `${message} 有 ${unresolved.length} 项读取限制与核对记录。${unresolved[0]}`.trim();
   setText(els.statusSummary, message);
   show(els.statusSummary, Boolean(message));
   if (research?.coverage) {
@@ -1105,32 +1143,66 @@ function renderRunSummary(): void {
     details.appendChild(make('p', { text: `${estimatedCost}。${budget.unknownCost ? '部分费用尚未确认，实际金额可能更高。' : '以服务商的实际账单为准。'}` }));
     els.researchDetails.appendChild(details);
   }
-  if (run?.limitations.length) {
+  const limitations = [...new Set([...(run?.limitations ?? []).map(researchGapText), ...unresolved])];
+  if (limitations.length) {
     const details = make('details', {});
     details.appendChild(make('summary', { text: '本次读取的范围与限制' }));
     const list = make('ul', {});
-    for (const limit of run.limitations) list.appendChild(make('li', { text: limit }));
+    for (const limit of limitations) list.appendChild(make('li', { text: limit }));
     details.appendChild(list);
     els.researchDetails.appendChild(details);
   }
+  syncResearchPresentation();
 }
 
 function renderActivityPanel(): void {
   const run = state.run;
   const hasStages = state.stages.length > 0 || els.researchDetails.childElementCount > 0 || Boolean(run && (run.state === 'queued' || run.state === 'researching'));
-  show(els.activityPanel, hasStages);
-  if (!hasStages) return;
-  renderActivity(
-    els.stageList,
-    els.runProgressFill,
-    els.runProgress,
-    els.runProgressText,
-    els.activityState,
-    els.runIndicator,
-    state.stages,
-    run?.state ?? 'queued',
-    String(run?.provider) === 'research'
-  );
+  if (hasStages) {
+    renderActivity(
+      els.stageList,
+      els.runProgressFill,
+      els.runProgress,
+      els.runProgressText,
+      els.activityState,
+      els.runIndicator,
+      state.stages,
+      run?.state ?? 'queued',
+      String(run?.provider) === 'research'
+    );
+  }
+  syncResearchPresentation();
+}
+
+/**
+ * GET-214 presentation sync: one model, one layout. Owns the live surface, the
+ * old duplicate shells, the report's active composition and the follow-up dock
+ * visibility, so every render path (full or partial) lands on the same UI.
+ */
+function syncResearchPresentation(): void {
+  const run = state.run;
+  const model = deriveResearchLoading({ run, stages: state.stages, streamState: state.streamState });
+  researchLoading.update(model);
+  const firstStep = Boolean(run && run.state === 'needs_input' && run.provider === 'research');
+  const live = model.mode === 'active';
+  const deciding = model.mode === 'needs_input';
+  els.workBody.classList.toggle('live-research', live);
+  els.workBody.classList.toggle('awaiting-decision', deciding);
+  // While the live surface owns the composition, the old request/status/
+  // activity shells and any empty report stay hidden.
+  show(els.requestMessage, !live && !firstStep);
+  const processShell = state.stages.length > 0
+    || els.researchDetails.childElementCount > 0
+    || Boolean(run && isActiveState(run.state));
+  show(els.activityPanel, !live && !deciding && processShell);
+  show(els.report, !firstStep && (!live || model.compact));
+  // Irrelevant disabled follow-up controls stay hidden until a report (or an
+  // actual conversation) supports them.
+  const hasAnswer = Boolean(run && run.answer.some((section) => section.body.trim() || section.bullets.length > 0));
+  const dockVisible = Boolean(run && !firstStep && (state.messages.length > 0 || (isTerminalState(run.state) && hasAnswer)));
+  show(els.chatDock, dockVisible);
+  show(els.chatForm, dockVisible && chatSupported(run));
+  show(els.chatHint, dockVisible);
 }
 
 function renderReportView(): void {
@@ -1156,9 +1228,10 @@ function renderReportView(): void {
   renderReport(els.report, state.run, {
     onCitation: (sourceKey, button) => focusSource(sourceKey, 'citation', button)
   });
+  syncResearchPresentation();
 }
 
-function renderSourcePanels(): void {
+function renderSourcePanels(revealSelected = false): void {
   const anchor = captureFocusAnchor();
   const run = state.run;
   const entry = citationReturn.entry();
@@ -1186,10 +1259,11 @@ function renderSourcePanels(): void {
     });
   filters(els.sourceFilters);
   filters(els.drawerSourceFilters);
-  renderSourceList(els.inspectorSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect);
-  renderSourceList(els.drawerSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect);
+  renderSourceList(els.inspectorSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect, {revealSelected});
+  renderSourceList(els.drawerSourceList, run, state.selectedSourceKey, state.filter, handlers.onSelect, {revealSelected});
   renderSourceDetail(els.inspectorDetail, run, state.selectedSourceKey, handlers);
   renderSourceDetail(els.drawerSourceDetail, run, state.selectedSourceKey, handlers);
+  syncResearchPresentation();
   restoreFocusAnchor(anchor);
 }
 
@@ -1238,7 +1312,7 @@ function focusSource(sourceKey: string, origin: SourceOrigin = 'citation', trigg
     citationReturn.enterViaCitation(sourceKey, trigger?.dataset.citationAnchor ?? '', trigger);
   } else if (origin === 'search') citationReturn.enterViaSearch(sourceKey, els.openSearch);
   else citationReturn.enterViaList(sourceKey, trigger);
-  renderSourcePanels();
+  renderSourcePanels(true);
   const detail = narrow ? els.drawerSourceDetail : els.inspectorDetail;
   citationReturn.emphasize(detail);
   if (narrow && !els.sourceDrawer.open) openDrawer(els.sourceDrawer);
@@ -1297,12 +1371,19 @@ async function sendFollowup(question: string): Promise<void> {
   const epoch = state.runEpoch;
   const userId = state.user?.id ?? null;
   const trimmed = question.trim();
-  if (trimmed.length === 0) return;
+  if (trimmed.length === 0 || !userId) return;
+  const previous = state.followupAttempt;
+  if (previous?.busy && previous.ownerId === userId && previous.runId === runId && previous.epoch === epoch) return;
+  const attempt = previous && previous.ownerId === userId && previous.runId === runId && previous.epoch === epoch && previous.question === trimmed
+    ? previous : { ownerId: userId, runId, epoch, question: trimmed, key: `followup-${crypto.randomUUID()}`, busy: false };
+  state.followupAttempt = attempt;
+  attempt.busy = true;
+  renderHeader();
   state.messages.push({ role: 'user', label: '你', text: trimmed });
   renderMessages(els.chatLog, state.messages);
   let child: CanonicalView;
   try {
-    child = await api.followup(runId, trimmed);
+    child = await api.followup(runId, trimmed, attempt.key);
   } catch (error) {
     if (!isCurrentRun(runId, epoch)) return;
     state.messages.push({
@@ -1313,6 +1394,9 @@ async function sendFollowup(question: string): Promise<void> {
     renderMessages(els.chatLog, state.messages);
     els.chatInput.value = trimmed;
     return;
+  } finally {
+    attempt.busy = false;
+    if (state.followupAttempt === attempt && isCurrentRun(runId, epoch)) renderHeader();
   }
   if (!isCurrentUser(userId) || !isCurrentRun(runId, epoch)) return;
   state.messages.push({
@@ -1321,9 +1405,12 @@ async function sendFollowup(question: string): Promise<void> {
     text: `已创建子研究「${child.question}」并开始查看。`
   });
   renderMessages(els.chatLog, state.messages);
-  await loadRuns();
-  if (!isCurrentUser(userId)) return;
-  await selectRun(child.runId);
+  state.followupAttempt = null;
+  // The creation response is already an owned canonical snapshot. Open it
+  // directly: a subsequent GET failure must not turn navigation into a second
+  // billable creation attempt. SSE resumes from the beginning for live updates.
+  await selectRun(child.runId, child);
+  if (isCurrentUser(userId)) void loadRuns();
 }
 
 /* ---------------- actions ---------------- */
@@ -1623,8 +1710,10 @@ function wire(): void {
     element.addEventListener('click', () => closeDrawer(els.sourceDrawer, true));
   }
 
+  els.chatInput.addEventListener('input', () => renderHeader());
   els.chatForm.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (els.chatInput.disabled || els.chatSend.disabled) return;
     const value = els.chatInput.value.trim();
     if (value.length === 0) return;
     els.chatInput.value = '';
@@ -1679,6 +1768,7 @@ async function boot(): Promise<void> {
     els.footer.hidden = true;
     document.getElementById('main')?.appendChild(opening);
   }
+  let restoredUserId: string | null = null;
   try {
     try {
       const health = await api.health();
@@ -1689,8 +1779,8 @@ async function boot(): Promise<void> {
     const session = await api.session();
     if (session) {
       state.user = session.user;
+      restoredUserId = session.user.id;
       renderUserNav(session.user);
-      await loadRuns();
     }
   } catch {
     showToast('暂时无法恢复登录，请刷新页面后重试。', 'error');
@@ -1699,6 +1789,12 @@ async function boot(): Promise<void> {
     opening?.remove();
     route();
     renderAll();
+    if (restoredUserId && isCurrentUser(restoredUserId)) {
+      const ownerId = restoredUserId, epoch = state.runEpoch;
+      void loadRuns().then(() => {
+        if (isCurrentUser(ownerId) && state.runEpoch === epoch && window.location.hash === '#/app' && !state.activeRunId) route();
+      });
+    }
   }
 }
 

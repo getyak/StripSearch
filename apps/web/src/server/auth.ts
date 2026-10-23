@@ -1,6 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
-import { SESSION_EXPIRES_SECONDS } from '../shared/limits.js';
+import { LIMITS, SESSION_EXPIRES_SECONDS } from '../shared/limits.js';
 import type { AppConfig } from './config.js';
 import type { DB } from './db/index.js';
 
@@ -28,8 +28,8 @@ export function createAuth(db: DB, config: AppConfig) {
       enabled: true,
       disableSignUp: false,
       requireEmailVerification: false,
-      minPasswordLength: 8,
-      maxPasswordLength: 128
+      minPasswordLength: LIMITS.passwordMin,
+      maxPasswordLength: LIMITS.passwordMax
     },
     session: {
       expiresIn: SESSION_EXPIRES_SECONDS,

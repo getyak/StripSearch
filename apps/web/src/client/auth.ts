@@ -76,7 +76,7 @@ export function createAuthController(api: ApiClient): AuthController {
     submit.textContent = signup ? '注册并继续' : '登录并继续';
     nameField.hidden = !signup;
     nameInput.required = signup;
-    // New signups keep the 8–128 rule; existing accounts may hold older
+    // New signups keep the 6–128 rule; existing accounts may hold older
     // shorter passwords, so signin only requires a non-empty value and defers
     // authenticity to the server hash check.
     passwordInput.required = true;

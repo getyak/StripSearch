@@ -28,6 +28,8 @@ test('DSH official adapter returns a structured tool receipt through one budgete
       assert.equal(body.stream, true);
       assert.equal(body.max_tokens, 8192);
       assert.deepEqual(body.tool_choice, { type: 'tool', name: 'submit_decision' });
+      assert.deepEqual(body.thinking,{type:'disabled'});
+      assert.equal(body.output_config,undefined);
       assert.equal(signal.aborted, false);
       assert.deepEqual((body.tools as Array<{ name: string }>).map(tool => tool.name), ['submit_decision']);
       assert.equal('dsh_session_log' in body, false);
@@ -75,7 +77,7 @@ test('DSH never forwards a second model request after an invented unavailable to
   await assert.rejects(runDshDecision({
     prompt, signal: new AbortController().signal, model: 'deepseek-flash', timeoutMs: 15_000,
     invoke: async () => { count++; return { status: 200, body: response({ command: 'must-not-execute' }, 'bash') }; },
-  }), /without a structured decision/);
+  }), /DSH decision tool failed/);
   assert.equal(count, 1);
 });
 
@@ -98,4 +100,35 @@ test('DSH rejects recursively encoded or non-object decisions', { timeout: 30_00
       invoke: async () => ({ status: 200, body: response(value) }),
     }), /decision must be a JSON object/);
   }
+});
+
+test('DSH exposes only safe typed codes for returned structured-protocol failures', { timeout: 45_000 }, async () => {
+  for (const [value,tool,code] of [
+    ['SYNTHETIC_PRIVATE_OUTPUT','submit_decision','invalid_decision_json'],
+    [null,'submit_decision','non_object_decision'],
+    [{ command:'SYNTHETIC_PRIVATE_OUTPUT' },'bash','tool_error']
+  ] as const) {
+    await assert.rejects(runDshDecision({prompt,signal:new AbortController().signal,model:'deepseek-flash',timeoutMs:15_000,
+      invoke:async()=>({status:200,body:response(value,tool)})}),error=>{
+      assert.equal((error as {name?:string}).name,'DshProtocolError');
+      assert.equal((error as {code?:string}).code,code);
+      assert.doesNotMatch(String(error),/SYNTHETIC_PRIVATE_OUTPUT/);
+      return true;
+    });
+  }
+});
+
+test('DSH classifies a prose end turn as a missing structured decision', {timeout:30_000},async()=>{
+ const events=[{type:'message_start',message:{id:'offline',type:'message',role:'assistant',model:'deepseek-flash',content:[],usage:{input_tokens:2,output_tokens:0}}},{type:'content_block_start',index:0,content_block:{type:'text',text:'synthetic prose'}},{type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:2}},{type:'message_stop'}];
+ await assert.rejects(runDshDecision({prompt,signal:new AbortController().signal,model:'deepseek-flash',timeoutMs:15_000,invoke:async()=>({status:200,body:events.map(e=>`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join('')})}),error=>(error as {code?:string}).code==='missing_structured_decision');
+});
+
+test('DSH high reasoning reaches the constrained Messages request without another model call', {timeout:30_000},async()=>{
+ let calls=0;
+ const result=await runDshDecision({prompt,model:'deepseek-flash',signal:new AbortController().signal,reasoningEffort:'high',maxTokens:16384,timeoutMs:240000,
+  invoke:async({body})=>{
+   calls++;assert.deepEqual(body.thinking,{type:'enabled'});assert.deepEqual(body.output_config,{effort:'high'});assert.deepEqual(body.tool_choice,{type:'auto'});assert.equal(body.max_tokens,16384);assert.equal('budget_tokens' in (body.thinking as object),false);
+   return {status:200,body:response({findings:[]}),headers:{'content-type':'text/event-stream'}};
+  }});
+ assert.deepEqual(result,{findings:[]});assert.equal(calls,1);
 });

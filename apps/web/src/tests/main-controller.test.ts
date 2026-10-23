@@ -7,6 +7,9 @@ import { installDom, installFetch, jsonResponse, textResponse } from './dom-env.
 import { deferred } from './fakes.js';
 
 const env = installDom();
+function el<T extends HTMLElement = HTMLElement>(id: string): T {
+  return env.document.getElementById(id) as T;
+}
 
 function user(id: string): SessionUser {
   return { id, email: `${id}@example.test`, name: id };
@@ -261,6 +264,64 @@ test('a followup response for an abandoned run is ignored', async () => {
   await pending;
   assert.equal(state.run?.runId, 'runB');
   assert.equal(state.messages.filter((message) => message.label === '子研究').length, 0);
+});
+
+test('followup pending feedback prevents duplicate requests and opens the child before slow history', async () => {
+  await freshUser('u-followup-pending');
+  state.run = makeView('parent-pending', { provider: 'research' });
+  const gate = deferred<void>();
+  const history = deferred<void>();
+  let posts = 0;
+  route = url => {
+    if (url.includes('/parent-pending/followup')) { posts++; return gate.promise.then(() => jsonResponse({ run: makeView('child-pending', { provider: 'research' }) })); }
+    if (url.includes('/child-pending?')) return jsonResponse({ run: makeView('child-pending', { provider: 'research' }), events: [], latestSeq: 0 });
+    if (url.endsWith('/api/runs')) return history.promise.then(() => jsonResponse({ runs: [] }));
+    return jsonResponse({});
+  };
+  const pending = sendFollowup('只核对已有证据');
+  await settle();
+  try {
+    assert.match(el('chat-hint').textContent!, /提交|创建/);
+    assert.equal(el<HTMLButtonElement>('chat-send').disabled, true);
+    await sendFollowup('只核对已有证据');
+    assert.equal(posts, 1);
+    gate.resolve(); await settle();
+    assert.equal(state.run?.runId, 'child-pending', 'history loading must not hold the child transition');
+  } finally { gate.resolve(); history.resolve(); await pending; }
+});
+
+test('an uncertain followup retry reuses its request key and retains the draft', async () => {
+  await freshUser('u-followup-retry');
+  state.run = makeView('parent-retry', { provider: 'research' });
+  const keys: Array<string | null> = [];
+  route = (url, init) => {
+    if (url.includes('/parent-retry/followup')) {
+      keys.push(new Headers(init?.headers).get('idempotency-key'));
+      if (keys.length === 1) throw new TypeError('Synthetic disconnected response');
+      return jsonResponse({ run: makeView('child-retry', { provider: 'research' }) });
+    }
+    if (url.includes('/child-retry?')) return jsonResponse({ run: makeView('child-retry', { provider: 'research' }), events: [], latestSeq: 0 });
+    return jsonResponse({ runs: [] });
+  };
+  await sendFollowup('保留这个追问');
+  assert.equal(el<HTMLInputElement>('chat-input').value, '保留这个追问');
+  await sendFollowup('保留这个追问');
+  assert.equal(keys.length, 2); assert.ok(keys[0]); assert.equal(keys[1], keys[0]);
+  assert.equal(state.run?.runId, 'child-retry');
+});
+
+test('a created followup opens its canonical response even when further GETs fail', async () => {
+  await freshUser('u-followup-created');
+  state.run = makeView('parent-created', { provider: 'research' });
+  let posts = 0;
+  route = url => {
+    if (url.includes('/parent-created/followup')) { posts++; return jsonResponse({ run: makeView('child-created', { provider: 'research' }) }); }
+    if (url.includes('/child-created?')) throw new TypeError('Synthetic read failure');
+    return jsonResponse({ runs: [] });
+  };
+  await sendFollowup('继续核对');
+  assert.equal(posts, 1);
+  assert.equal(state.run?.runId, 'child-created');
 });
 
 test('stubRun keeps a completed run selected without opening a stream', async () => {

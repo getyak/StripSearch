@@ -11,6 +11,7 @@ import {
 } from '../server/adapters/github.js';
 import type { HttpResponseLike, HttpTransport, ProviderContext } from '../server/adapters/types.js';
 import { ProviderError } from '../server/adapters/types.js';
+import {readBoundedBody,safeFetchJson} from '../server/adapters/http.js';
 
 function bodyStream(text: string): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(text);
@@ -297,6 +298,70 @@ test('githubProvider rejects redirects, timeouts and oversized responses', async
       return true;
     }
   );
+});
+
+async function rejectsBeforeWatchdog(pending:Promise<unknown>,check:(error:unknown)=>boolean):Promise<void> {
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  const watchdog=new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>reject(new Error('request still pending after its deadline')),250);});
+  try {await assert.rejects(Promise.race([pending,watchdog]),check);} finally {clearTimeout(timer);}
+}
+const isTimeout=(error:unknown)=>error instanceof ProviderError&&error.code==='provider_timeout';
+const isTooLarge=(error:unknown)=>error instanceof ProviderError&&error.code==='provider_response_too_large';
+const safeOptions=(transport:HttpTransport,signal=new AbortController().signal)=>({transport,url:'https://synthetic.invalid/api',signal,timeoutMs:10,maxBytes:1000});
+
+test('HTTP deadline rejects a stubborn fetch and consumes its later rejection without retrying',async()=>{
+  let rejectFetch!:(error:Error)=>void;let calls=0;
+  const transport:HttpTransport={fetch(){calls++;return new Promise((_resolve,reject)=>{rejectFetch=reject;});}};
+  await rejectsBeforeWatchdog(safeFetchJson(safeOptions(transport)),isTimeout);
+  rejectFetch(new Error('late upstream failure'));
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(calls,1);
+});
+
+test('HTTP deadline covers stubborn body reads and the response.text fallback',async()=>{
+  for(const mode of ['reader','text']as const){
+    const response=jsonResponse(200,{});
+    if(mode==='reader')response.body={getReader:()=>({read:()=>new Promise(()=>{}),cancel:async()=>{}})} as unknown as ReadableStream<Uint8Array>;
+    else {response.body=null;response.text=()=>new Promise(()=>{});}
+    await rejectsBeforeWatchdog(safeFetchJson(safeOptions({fetch:async()=>response})),isTimeout);
+  }
+});
+
+test('caller abort releases stubborn fetch or body waits with the original cancellation reason',async()=>{
+  for(const mode of ['fetch','body']as const){
+    const controller=new AbortController();const reason=new Error('original caller cancellation');
+    let dispatched!:()=>void;const started=new Promise<void>(resolve=>{dispatched=resolve;});
+    const response=jsonResponse(200,{});
+    response.body={getReader:()=>({read:()=>{dispatched();return new Promise(()=>{});},cancel:async()=>{}})} as unknown as ReadableStream<Uint8Array>;
+    const transport:HttpTransport={fetch(){if(mode==='body')return Promise.resolve(response);dispatched();return new Promise(()=>{});}};
+    const pending=safeFetchJson({...safeOptions(transport,controller.signal),timeoutMs:1000});
+    await started;controller.abort(reason);
+    await rejectsBeforeWatchdog(pending,error=>error===reason);
+  }
+});
+
+test('an already aborted caller never starts an HTTP request',async()=>{
+  const controller=new AbortController();const reason=new Error('already cancelled');controller.abort(reason);let calls=0;
+  const pending=safeFetchJson(safeOptions({fetch(){calls++;return new Promise(()=>{});}},controller.signal));
+  await rejectsBeforeWatchdog(pending,error=>error===reason);assert.equal(calls,0);
+});
+
+test('an oversized body fails promptly even when reader.cancel hangs or throws',async()=>{
+  for(const mode of ['hang','throw']as const){
+    let cancels=0;const response=jsonResponse(200,{});
+    response.body={getReader:()=>({read:async()=>({done:false,value:new Uint8Array(8)}),cancel:()=>{cancels++;if(mode==='throw')throw new Error('cancel failure');return new Promise(()=>{});}})} as unknown as ReadableStream<Uint8Array>;
+    await rejectsBeforeWatchdog(readBoundedBody(response,2),isTooLarge);assert.equal(cancels,1);
+  }
+});
+
+test('a fetch that resolves after the deadline cannot start reading or publish its body',async()=>{
+  let release!:(response:HttpResponseLike)=>void;let bodyReads=0;
+  const pending=safeFetchJson(safeOptions({fetch:()=>new Promise(resolve=>{release=resolve;})}));
+  await rejectsBeforeWatchdog(pending,isTimeout);
+  const response=jsonResponse(200,{late:true});
+  response.body={getReader:()=>{bodyReads++;return bodyStream('{"late":true}').getReader();}} as ReadableStream<Uint8Array>;
+  release(response);await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(bodyReads,0);
 });
 
 test('buildGitHubResult marks a profile-only result partial', () => {

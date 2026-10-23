@@ -9,11 +9,11 @@ import type { AppConfig } from '../server/config.js';
 import { openDatabase } from '../server/db/index.js';
 import { migrateDatabase } from '../server/db/migrate.js';
 
-// Existing accounts may hold passwords created before the 8-character signup
-// rule (down to a synthetic six-character legacy case). This file proves the
+// Existing accounts may hold passwords created before the 6-character signup
+// rule (down to a synthetic five-character legacy case). This file proves the
 // bounded compatibility fix end to end: a mode-aware client that hands short
 // existing passwords to the unchanged Better Auth server, while new signups
-// stay 8–128 characters in both the client and the real server handler.
+// stay 6–128 characters in both the client and the real server handler.
 
 // Install a throwaway DOM before importing the controller module, exactly like
 // auth-controller.test.ts. Every scenario below installs its own fresh DOM.
@@ -114,22 +114,22 @@ function clickOn(env: DomEnv, element: HTMLElement): void {
 }
 
 const LEGACY_EMAIL = 'legacy@example.test';
-const LEGACY_SIX = 'a1B2c3';
+const LEGACY_FIVE = 'a1B2c';
 
-test('signin dispatches an existing six-character password unchanged and closes on success', async () => {
+test('signin dispatches an existing five-character password unchanged and closes on success', async () => {
   const { env, fake, controller, els } = scenario();
   let success = 0;
   controller.open('signin', () => {
     success += 1;
   });
   els.email.value = LEGACY_EMAIL;
-  els.password.value = LEGACY_SIX;
+  els.password.value = LEGACY_FIVE;
   submitForm(env, els.form);
   await tick();
   assert.equal(fake.calls.length, 1);
   assert.equal(fake.calls[0]?.type, 'signin');
   assert.equal(fake.calls[0]?.payload.email, LEGACY_EMAIL);
-  assert.equal(fake.calls[0]?.payload.password, LEGACY_SIX, 'the exact six-character password must reach signIn');
+  assert.equal(fake.calls[0]?.payload.password, LEGACY_FIVE, 'the exact five-character password must reach signIn');
   assert.equal(success, 0, 'success only fires after the response');
   fake.pending[0]?.resolve({ user: { id: 'u-legacy', email: LEGACY_EMAIL, name: 'Legacy' } });
   await tick();
@@ -137,8 +137,8 @@ test('signin dispatches an existing six-character password unchanged and closes 
   assert.equal(controller.isOpen(), false);
 });
 
-test('signin sends one- and seven-character passwords instead of pre-rejecting the signup bound', async () => {
-  for (const password of ['x', 'seven77']) {
+test('signin sends one- and five-character passwords instead of pre-rejecting the signup bound', async () => {
+  for (const password of ['x', 'fives']) {
     const { env, fake, controller, els } = scenario();
     controller.open('signin', () => undefined);
     els.email.value = LEGACY_EMAIL;
@@ -160,7 +160,7 @@ test('a wrong short password is really sent and only surfaces the generic 401 me
     success += 1;
   });
   els.email.value = LEGACY_EMAIL;
-  els.password.value = 'a1B2c4';
+  els.password.value = 'a1B2d';
   submitForm(env, els.form);
   await tick();
   assert.equal(fake.calls.length, 1, 'the request must leave the client; the server hash check decides');
@@ -170,7 +170,7 @@ test('a wrong short password is really sent and only surfaces the generic 401 me
   assert.equal(els.emailError.textContent, '邮箱或密码不正确，请重试。');
   assert.equal(els.email.getAttribute('aria-invalid'), 'true');
   assert.equal(els.submit.disabled, false, 'the form must stay retryable');
-  els.password.value = LEGACY_SIX;
+  els.password.value = LEGACY_FIVE;
   submitForm(env, els.form);
   await tick();
   assert.equal(fake.calls.length, 2);
@@ -207,16 +207,16 @@ test('signin→signup→signin keeps minLength/autocomplete and the short-passwo
   assert.equal(els.password.autocomplete, 'current-password');
 
   clickOn(env, els.tabSignup);
-  assert.equal(els.password.minLength, 8);
-  assert.equal(els.password.getAttribute('minlength'), '8');
+  assert.equal(els.password.minLength, 6);
+  assert.equal(els.password.getAttribute('minlength'), '6');
   assert.equal(els.password.autocomplete, 'new-password');
 
   els.nameInput.value = 'Synthetic User';
   els.email.value = LEGACY_EMAIL;
-  els.password.value = LEGACY_SIX;
+  els.password.value = LEGACY_FIVE;
   submitForm(env, els.form);
   await tick();
-  assert.equal(fake.calls.length, 0, 'signup mode must block the six-character password');
+  assert.equal(fake.calls.length, 0, 'signup mode must block the five-character password');
   assert.ok((els.passwordError.textContent ?? '').length > 0);
   assert.equal(els.password.getAttribute('aria-invalid'), 'true');
 
@@ -229,17 +229,17 @@ test('signin→signup→signin keeps minLength/autocomplete and the short-passwo
 
   submitForm(env, els.form);
   await tick();
-  assert.equal(fake.calls.length, 1, 'the same six-character password must send in signin mode');
+  assert.equal(fake.calls.length, 1, 'the same five-character password must send in signin mode');
   assert.equal(fake.calls[0]?.type, 'signin');
-  assert.equal(fake.calls[0]?.payload.password, LEGACY_SIX);
+  assert.equal(fake.calls[0]?.payload.password, LEGACY_FIVE);
   fake.pending[0]?.resolve({ user: { id: 'u-legacy', email: LEGACY_EMAIL, name: 'Legacy' } });
   await tick();
 });
 
-test('signup blocks 7/129 characters, sends 8/128 and keeps the display-name rule', async () => {
+test('signup blocks 5/129 characters, sends 6/128 and keeps the display-name rule', async () => {
   const cases: { password: string; sends: boolean }[] = [
-    { password: 'x'.repeat(7), sends: false },
-    { password: 'x'.repeat(8), sends: true },
+    { password: 'x'.repeat(5), sends: false },
+    { password: 'x'.repeat(6), sends: true },
     { password: 'x'.repeat(128), sends: true },
     { password: 'x'.repeat(129), sends: false }
   ];
@@ -294,11 +294,11 @@ test('passwords are validated and dispatched byte-exact without trimming', async
     await tick();
   }
 
-  // Signup: length uses the raw value, so a string that is only 7 characters
-  // when trimmed still counts as its raw 9 characters and is sent unchanged.
-  const padded = ' x1Y2z34 ';
-  assert.equal(padded.trim().length, 7);
-  assert.equal(padded.length, 9);
+  // Signup: length uses the raw value, so a string that is only 5 characters
+  // when trimmed still counts as its raw 7 characters and is sent unchanged.
+  const padded = ' x1Y2z ';
+  assert.equal(padded.trim().length, 5);
+  assert.equal(padded.length, 7);
   const { env, fake, controller, els } = scenario();
   controller.open('signup', () => undefined);
   els.nameInput.value = 'Synthetic User';
@@ -321,7 +321,7 @@ test('pending submission, close and reopen keep duplicate and late-response guar
     first += 1;
   });
   els.email.value = 'first@example.test';
-  els.password.value = LEGACY_SIX;
+  els.password.value = LEGACY_FIVE;
   submitForm(env, els.form);
   await tick();
   assert.equal(fake.calls.length, 1);
@@ -446,7 +446,7 @@ function makeHandlerFixture(
   };
 }
 
-test('the unchanged better auth handler signs in a synthetic legacy short password and keeps signup at 8–128', async (t) => {
+test('the unchanged better auth handler signs in a synthetic legacy short password and keeps signup at 6–128', async (t) => {
   const config = syntheticConfig();
   const db = openDatabase(':memory:');
   t.after(() => db.close());
@@ -454,31 +454,31 @@ test('the unchanged better auth handler signs in a synthetic legacy short passwo
   await migrateDatabase(db, auth);
   const { post, counts, seedLegacyPassword, currentHash } = makeHandlerFixture(db, config, auth);
 
-  // Normal fixture signup under the current >= 8 rule.
+  // Normal fixture signup under the current >= 6 rule.
   let res = await post('/api/auth/sign-up/email', {
     name: 'Synthetic Legacy',
     email: LEGACY_EMAIL,
     password: 'fixture-password-1234'
   });
   assert.equal(res.status, 200);
-  const legacyHash = await seedLegacyPassword(LEGACY_EMAIL, LEGACY_SIX);
+  const legacyHash = await seedLegacyPassword(LEGACY_EMAIL, LEGACY_FIVE);
 
   // The correct short password authenticates through the real handler.
-  res = await post('/api/auth/sign-in/email', { email: LEGACY_EMAIL, password: LEGACY_SIX });
+  res = await post('/api/auth/sign-in/email', { email: LEGACY_EMAIL, password: LEGACY_FIVE });
   assert.equal(res.status, 200);
   const signInBody = (await res.json()) as { user?: { email?: string } };
   assert.equal(signInBody.user?.email, LEGACY_EMAIL);
   assert.ok(cookieCount(res) > 0, 'a successful sign-in must set a session cookie');
 
   // A wrong short password is rejected and creates no session.
-  res = await post('/api/auth/sign-in/email', { email: LEGACY_EMAIL, password: 'a1B2c4' });
+  res = await post('/api/auth/sign-in/email', { email: LEGACY_EMAIL, password: 'a1B2d' });
   assert.equal(res.status, 401);
   assert.equal(((await res.json()) as { code?: string }).code, 'INVALID_EMAIL_OR_PASSWORD');
   assert.equal(cookieCount(res), 0, 'a wrong password must not create a session');
 
-  // Direct new signups with 6 and 7 characters fail and create nothing.
+  // Direct new signups with 1 and 5 characters fail and create nothing.
   const beforeShort = counts();
-  for (const password of ['sixsix', 'seven77']) {
+  for (const password of ['x', 'fives']) {
     res = await post('/api/auth/sign-up/email', {
       name: 'Synthetic Short',
       email: `short-${password.length}@example.test`,
@@ -489,8 +489,8 @@ test('the unchanged better auth handler signs in a synthetic legacy short passwo
   }
   assert.deepEqual(counts(), beforeShort, 'rejected short signups must not grow user/account rows');
 
-  // The 8 and 128 character signups succeed; 129 fails without inserting rows.
-  res = await post('/api/auth/sign-up/email', { name: 'Synthetic Eight', email: 'eight@example.test', password: 'eight88x' });
+  // The 6 and 128 character signups succeed; 129 fails without inserting rows.
+  res = await post('/api/auth/sign-up/email', { name: 'Synthetic Six', email: 'six@example.test', password: 'abcdef' });
   assert.equal(res.status, 200);
   res = await post('/api/auth/sign-up/email', { name: 'Synthetic Max', email: 'max128@example.test', password: 'y'.repeat(128) });
   assert.equal(res.status, 200);
@@ -502,7 +502,7 @@ test('the unchanged better auth handler signs in a synthetic legacy short passwo
 
   // The legacy hash is never re-hashed or migrated by signing in.
   assert.equal(currentHash(LEGACY_EMAIL), legacyHash);
-  res = await post('/api/auth/sign-in/email', { email: LEGACY_EMAIL, password: LEGACY_SIX });
+  res = await post('/api/auth/sign-in/email', { email: LEGACY_EMAIL, password: LEGACY_FIVE });
   assert.equal(res.status, 200);
   assert.equal(currentHash(LEGACY_EMAIL), legacyHash, 'the legacy hash must survive sign-in untouched');
 });
@@ -527,9 +527,9 @@ test('a hosted allowlist config still signs in the legacy short password and ref
     password: 'fixture-password-1234'
   });
   assert.equal(res.status, 200);
-  await seedLegacyPassword('hosted-legacy@example.test', LEGACY_SIX);
+  await seedLegacyPassword('hosted-legacy@example.test', LEGACY_FIVE);
 
-  res = await post('/api/auth/sign-in/email', { email: 'hosted-legacy@example.test', password: LEGACY_SIX });
+  res = await post('/api/auth/sign-in/email', { email: 'hosted-legacy@example.test', password: LEGACY_FIVE });
   assert.equal(res.status, 200);
   assert.ok(cookieCount(res) > 0, 'the hosted sign-in must set a session cookie');
 

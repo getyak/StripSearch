@@ -180,3 +180,27 @@ test('retry lineage retains later exclusions from the retried run and its follow
   expectOut(() => guard.assertDispatch({ type: 'read', url: 'https://x.com/selected_author' }), 'scope_changed');
   expectOut(() => guard.assertIngest([{ url: 'https://x.com/selected_author/status/2' }]), 'scope_changed');
 });
+
+test('scope checks read current frozen bindings without loading retained corpus checkpoints', () => {
+  const seeded = seedSelected();
+  try {
+    const research = seeded.store.research;
+    assert.equal(typeof research.firstStepBinding, 'function', 'scope lookup needs a binding-only database projection');
+    const binding = research.firstStepBinding(seeded.run.id)!;
+    assert.equal(binding.caseId, seeded.caseId);
+    assert.equal(binding.scopeVersion, 2);
+    assert.equal(research.firstStepBinding('missing-run'), null);
+    const guard = seeded.firstStep.scopeGuard('user-owner', seeded.run.id);
+    // A retained corpus is intentionally unavailable to these narrow authority checks.
+    research.checkpoint = () => assert.fail('authority checks must not load the retained corpus');
+    guard.assertCurrent();
+    assert.equal(seeded.store.isResearchScopeActive(seeded.run.id, 'user-owner'), true);
+    seeded.db.prepare("UPDATE research_checkpoints SET data_json=json_set(data_json,'$.firstStep.scopeVersion',3) WHERE run_id=?").run(seeded.run.id);
+    assert.equal(research.firstStepBinding(seeded.run.id)!.scopeVersion, 3, 'binding changes are read live, never cached');
+    expectOut(() => guard.assertCurrent(), 'scope_changed');
+    assert.equal(seeded.store.isResearchScopeActive(seeded.run.id, 'user-owner'), false);
+    seeded.db.prepare("UPDATE research_checkpoints SET data_json=json_remove(data_json,'$.firstStep') WHERE run_id=?").run(seeded.run.id);
+    assert.equal(research.firstStepBinding(seeded.run.id), null);
+    expectOut(() => guard.assertCurrent(), 'not_first_step');
+  } finally { seeded.close(); }
+});

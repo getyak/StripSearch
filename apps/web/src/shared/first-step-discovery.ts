@@ -33,6 +33,11 @@ import { ACCOUNT_KEY_PREFIX, urlFallbackAccountKey } from './discovery-plan.js';
 import { isLiteralIpHost, matchesNonPublicHostSuffix, normalizeSchemeHost } from './url-policy.js';
 import type { NativeWebsiteDeclaration } from './native-website.js';
 import type { DiscoveredAccountIdentity } from './discovery-plan.js';
+import type {
+  FirstStepFailureView,
+  PersonConfirmationStateView,
+  PersonOverviewView
+} from './person-confirmation.js';
 
 export const FIRST_STEP_SCHEMA_VERSION = 'stripsearch/first-step-discovery/v1';
 export const FIRST_STEP_ACCOUNT_KEY_PREFIX = 'ssfsack/1';
@@ -859,9 +864,10 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
     case 'douban': {
       const id = segments[0] === 'people' ? segments[1] ?? '' : '';
       if (id) {
+        const canonicalHost = known === 'zhihu' ? 'www.zhihu.com' : 'www.douban.com';
         return {
           ok: true,
-          ref: refOf(known, `https://www.${host}/people/${id}`, {
+          ref: refOf(known, `https://${canonicalHost}/people/${id}`, {
             handle: id,
             materialUse: 'expression',
             accountKind: 'person',
@@ -1566,6 +1572,8 @@ export type FirstStepRouteState =
   | 'access_limited'
   | 'rate_limited'
   | 'timeout'
+  | 'network_failed'
+  | 'provider_billing'
   | 'deferred'
   | 'skipped_budget'
   | 'unknown';
@@ -1579,6 +1587,8 @@ export interface FirstStepRouteStatusView {
   note: string | null;
   /** Real request receipt keys for this route; empty = nothing was requested. */
   receiptKeys: string[];
+  /** Safe structured failure fact of this route, when one was observed. */
+  failure?: FirstStepFailureView | null;
 }
 
 export interface FirstStepReceiptView {
@@ -1591,6 +1601,8 @@ export interface FirstStepReceiptView {
   observedAt: string;
   estimatedUsd: number | null;
   unknownCost: boolean;
+  /** Safe structured failure code of a failed receipt; legacy rows stay null. */
+  error?: FirstStepFailureView | null;
 }
 
 export type FirstStepPhase =
@@ -1598,6 +1610,7 @@ export type FirstStepPhase =
   | 'finding_home'
   | 'expanding_accounts'
   | 'verifying_attribution'
+  | 'awaiting_person_confirmation'
   | 'ready_for_choice'
   | 'awaiting_selection'
   | 'fetching'
@@ -1647,6 +1660,10 @@ export interface FirstStepDiscoveryView {
     unknownCost: boolean;
   };
   selection: FirstStepSelectionStateView;
+  /** Staged name attempts: immutable source-backed person overview snapshot. */
+  personOverview?: PersonOverviewView | null;
+  /** Staged name attempts: explicit person-confirmation state. */
+  personConfirmation?: PersonConfirmationStateView | null;
   updatedAt: string;
 }
 
@@ -1746,7 +1763,8 @@ export const FIRST_STEP_QUERY_FAMILIES: ReadonlyArray<{ family: string; build: (
 export function firstStepQueryPlan(
   input: FirstStepInput,
   budget: FirstStepBudgetPolicy,
-  observedAliases: readonly string[] = []
+  observedAliases: readonly string[] = [],
+  preferConfirmedContext = false
 ): Array<{ query: string; family: string; includeDomains?: readonly string[]; provider?: 'bluesky' }> {
   const value = input.value.trim();
   if (value.length === 0) return [];
@@ -1775,7 +1793,12 @@ export function firstStepQueryPlan(
   }
   let aliasSlots = 0;
   const providedAliases = input.kind === 'name_query' ? value.split(/\s*[\/／]\s*/).slice(1) : [];
-  for (const alias of [...providedAliases, ...observedAliases]) {
+  // New staged account attempts reserve the first alias slot for the selected
+  // source context. Legacy callers retain their exact supplied-alias ordering.
+  const aliases = preferConfirmedContext && observedAliases.length > 0
+    ? [observedAliases[0]!, ...providedAliases, ...observedAliases.slice(1)]
+    : [...providedAliases, ...observedAliases];
+  for (const alias of aliases) {
     if (plan.length >= max || aliasSlots >= 2) break;
     const trimmed = alias.trim();
     if (trimmed.length < 2 || trimmed.length > 120) continue;

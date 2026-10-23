@@ -891,4 +891,29 @@ CREATE TABLE IF NOT EXISTS first_step_exclusions (
 );
 CREATE INDEX IF NOT EXISTS first_step_exclusions_account
   ON first_step_exclusions(run_id, account_id, recorded_at);
+
+-- GET-213 person confirmation: owner/revision-bound, idempotent, revocable
+-- user intent for one immutable candidate of a persisted person overview.
+CREATE TABLE IF NOT EXISTS first_step_person_confirmations (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  case_id TEXT NOT NULL,
+  candidate_id TEXT NOT NULL,
+  discovery_revision INTEGER NOT NULL,
+  input_revision INTEGER NOT NULL,
+  expected_run_revision INTEGER NOT NULL,
+  expected_scope_version INTEGER NOT NULL,
+  fingerprint TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  idempotency_key TEXT,
+  confirmed_at TEXT NOT NULL,
+  revoked_at TEXT,
+  revoke_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS first_step_person_confirmations_run
+  ON first_step_person_confirmations(run_id, confirmed_at);
+CREATE UNIQUE INDEX IF NOT EXISTS first_step_person_confirmations_idem
+  ON first_step_person_confirmations(owner_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 `;

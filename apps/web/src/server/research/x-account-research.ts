@@ -1,0 +1,429 @@
+/** Durable single-X-account workflow. Paid reads are cursor-addressed receipts;
+ * account analysis never becomes a claim about an unverified cross-platform person. */
+import {createHash} from 'node:crypto';
+import type {Store,RunRecord} from '../store.js';
+import type {HttpTransport} from '../adapters/types.js';
+import {ProviderError} from '../adapters/types.js';
+import {FirstStepSelectionError} from './first-step-store.js';
+import {ResearchStop,remainingOf,type FirstStepBinding,type ResearchCheckpoint} from './research-store.js';
+import type {ProviderResult,ResearchBudgetLimits,SourceDraft} from '../../shared/types.js';
+import type {XAccountProvider,XAccountResearchState,XAccountModel,XNativePost,XReadRequest,XReadResult} from './x-account-contracts.js';
+import {allocateSourceKey,rememberSourceKeys} from './source-keys.js';
+import {meteredInvoke} from './metered.js';
+import {runDshDecision,DshProtocolError,DshProtocolRepairExhaustedError,isDshProtocolCode,type DshProtocolCode} from './dsh-decision.js';
+import {invokeDeepSeek,parseMessagesUsage,estimateModelUsd} from './planner.js';
+import {analyzeXAccount,projectXAccountReport} from './x-account-analysis.js';
+import {xSourceDrafts} from './x-account-projection.js';
+
+const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const sourceExpectations=(pages:ResearchCheckpoint['pages'])=>JSON.stringify(pages.map(({sourceKey,url,text})=>({sourceKey,url,text})));
+const unlimited:ResearchBudgetLimits={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0};
+export interface XAccountResearchOptions {
+ store:Store;run:RunRecord;binding:FirstStepBinding;provider:XAccountProvider;signal:AbortSignal;
+ limits?:ResearchBudgetLimits;assertScope:()=>void;
+ /** Injected model ports own their own metering. Production uses the bridge below. */
+ model?:XAccountModel;transport?:HttpTransport;apiKey?:string|null;modelName?:string;
+}
+function initialState(accountId:string):XAccountResearchState {
+ const feed=()=>({started:false,cursor:null,done:false,pages:0,cursors:[],pageHashes:[]});
+ return{version:'x-account/v1',accountId,profile:null,history:{timeline:feed(),replies:feed()},posts:[],contextQueue:[],contextDone:[],gaps:[],analysis:{completedBatches:[],findings:[],synthesisDone:false}};
+}
+function nativeHandle(binding:FirstStepBinding):string {
+ if(binding.accounts.length!==1||binding.accounts[0]!.allowedScope!=='public_history')throw new ResearchStop('x_account_scope_required');
+ const url=new URL(binding.accounts[0]!.profileUrl);
+ if(!['x.com','www.x.com','twitter.com','www.twitter.com'].includes(url.hostname)||!/^\/[A-Za-z0-9_]{1,15}\/?$/.test(url.pathname))throw new ResearchStop('x_account_scope_required');
+ return url.pathname.split('/')[1]!;
+}
+function sourceDraft(cp:ResearchCheckpoint,state:XAccountResearchState,key:string):SourceDraft {
+ const page=cp.pages.find(p=>p.sourceKey===key)!;
+ const post=state.posts.find(p=>p.sourceKey===key);
+ return{key,retrievedAt:page.retrievedAt,url:page.url,title:page.title,kind:page.kind,publishedAt:page.publishedAt,excerpt:page.text,
+  excerptLocator:post?`X 原生帖子 ${post.id}；正文字段 ${post.textField}`:'X 原生账号资料',
+  identityLabel:post&&post.role!=='target'?'第三方或线程上下文，作者单独记录':`所选 X 账号 @${state.profile?.handle??''}，不确认跨平台身份`,identityConfirmed:false,fetchStatus:page.text?'ok':'inaccessible',limits:page.limitations};
+}
+function setup(options:XAccountResearchOptions){
+ const {store,run}=options;const handle=nativeHandle(options.binding);
+ let checkpoint=store.research.checkpoint(run.id);
+ const limits=checkpoint?.limits??options.limits??unlimited;
+ const launched=Date.now(),priorElapsed=checkpoint?.elapsedMs??0;
+ if(!checkpoint)checkpoint={phase:'x_history',steps:0,startedAt:launched,elapsedMs:0,anchorUrl:options.binding.accounts[0]!.profileUrl,identity:null,candidates:[],pages:[],claims:[],unknowns:[],stopReason:null,firstStep:options.binding,limits};
+ if(!checkpoint.xAccountResearch){
+  // Existing discovery remains in immutable receipts; account analysis starts
+  // with a clean, explicitly selected corpus, not arbitrary search previews.
+  checkpoint.pages=[];checkpoint.claims=[];checkpoint.pendingClaims=[];checkpoint.independentMaterials=[];
+  checkpoint.unknowns=[];checkpoint.coverageGaps=[];checkpoint.notes=[];
+  checkpoint.xAccountResearch=initialState(options.binding.accounts[0]!.accountId);
+ }
+ const cp=checkpoint,state=cp.xAccountResearch!;
+ // An explicit retry is a new run, but successful paid reads are immutable
+ // evidence and need not be bought again under the exact same live scope.
+ const ancestors:Array<{run:RunRecord;checkpoint:ResearchCheckpoint;expectedPages:string}>=[];
+ const visited=new Set([run.id]);let parentId=run.retryOf;
+ while(parentId&&!visited.has(parentId)){
+  visited.add(parentId);const parent=store.getRunForOwner(parentId,run.ownerId);const parentCp=parent?store.research.checkpoint(parent.id):null;
+  if(!parent||!parentCp?.xAccountResearch||parentCp.firstStep?.caseId!==options.binding.caseId||parentCp.firstStep.scopeVersion!==options.binding.scopeVersion||parentCp.xAccountResearch.accountId!==state.accountId||parentCp.firstStep.accounts.length!==1||parentCp.firstStep.accounts[0]!.profileUrl!==options.binding.accounts[0]!.profileUrl)break;
+  ancestors.push({run:parent,checkpoint:parentCp,expectedPages:sourceExpectations(parentCp.pages)});parentId=parent.retryOf;
+ }
+ const checkParent=()=>{
+  for(const ancestor of ancestors){
+   if(!store.research.areSourcePagesCurrent(ancestor.run.id,ancestor.expectedPages))throw new ResearchStop('source_revoked');
+  }
+ };
+ const assertModelReady=()=>{if(ancestors.some(a=>store.research.hasInflightModel(a.run.id)))throw new ResearchStop('unknown_inflight');};
+ const inheritedPage=(fromRunId:string|undefined,url:string)=>{
+  if(!fromRunId)return undefined;const page=ancestors.find(a=>a.run.id===fromRunId)?.checkpoint.pages.find(p=>p.url===url);
+  return page?{runId:fromRunId,sourceKey:page.sourceKey}:undefined;
+ };
+
+ rememberSourceKeys(cp,store.listSources(run.id).map(source=>source.sourceKey));
+ if(state.accountId!==options.binding.accounts[0]!.accountId)throw new ResearchStop('scope_changed');
+ cp.firstStep=options.binding;cp.limits=limits;store.research.save(run.id,cp);
+ let expectedPages='[]',corpusDirty=true;
+ const corpusChanged=()=>{corpusDirty=true;};
+ const active=()=>{
+  options.signal.throwIfAborted();store.research.assertActive(run.id);options.assertScope();checkParent();
+  if(!store.isResearchScopeActive(run.id,run.ownerId))throw new FirstStepSelectionError('scope_changed','单账号研究范围已变更或撤回。');
+  // Cache only our immutable expectations; live evidence is queried on every check.
+  if(corpusDirty){expectedPages=sourceExpectations(cp.pages);corpusDirty=false;}
+  if(!store.research.areSourcePagesCurrent(run.id,expectedPages))throw new ResearchStop('source_revoked');
+  if(limits.elapsedMs>0&&priorElapsed+Date.now()-launched>=limits.elapsedMs)throw new ResearchStop('budget_exhausted');
+ };
+ const save=()=>{active();cp.elapsedMs=priorElapsed+Date.now()-launched;store.research.save(run.id,cp);};
+ const gap=(code:string,target:string,detail:string)=>{if(!state.gaps.some(g=>g.code===code&&g.target===target))state.gaps.push({code,target,detail});};
+ const progress=(key:string,label:string)=>{
+  cp.phase=key;save();store.addEvent(run.id,'stage',{index:cp.steps,total:0,key,label,status:'active'});
+ };
+ const read=async(request:XReadRequest):Promise<XReadResult>=>{
+  // Cached receipts resolve as microtasks; yield to HTTP/cancel handlers before dispatch.
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  active();const key='x-account:tool:v1:'+digest({accountId:state.accountId,scopeVersion:options.binding.scopeVersion,request});
+  const inherited=(()=>{for(const ancestor of ancestors){const cached=store.research.receipt(ancestor.run.id,key);if(cached)return{ancestor,cached};}return undefined;})();
+  const ancestor=inherited?.ancestor,cached=inherited?.cached;
+  if(cached?.state==='inflight')throw new ResearchStop('unknown_inflight');
+  const reused=cached?.state==='completed';
+  const result=await meteredInvoke<XReadResult>({ledger:store.research,runId:run.id,key,kind:'tool',request:{...request,type:`x_${request.type}`,...(reused?{reusedFromRunId:ancestor!.run.id}:{})},reservation:{inputTokens:0,outputTokens:0},limits,allowSettledFailure:true,
+   replayFailure:()=>new ProviderError('provider_bad_response','该请求已有失败回执，未自动重复付费。'),
+   execute:async()=>reused?{...cached.result as XReadResult,retrievedAt:(cached.result as XReadResult).retrievedAt??cached.createdAt,inheritedFromRunId:ancestor!.run.id}:{...await options.provider.execute(request,options.signal),retrievedAt:new Date().toISOString()},usageOf:r=>reused?{estimatedUsd:0,bytes:0,unknownCost:false}:({estimatedUsd:r.estimatedUsd,bytes:r.bytes,unknownCost:r.estimatedUsd===null}),
+   failureUsage:()=>({estimatedUsd:null,unknownCost:true}),settleFailure:()=>!options.signal.aborted});
+  active();if(result.requests!==1)throw new ResearchStop('tool_contract_violation');cp.steps++;
+  return result;
+ };
+ return{cp,state,limits,handle,active,save,gap,progress,read,inheritedPage,assertModelReady,corpusChanged};
+}
+
+/** Exported so pagination/recovery and cancellation can be tested without a model. */
+export async function collectXAccount(options:XAccountResearchOptions){
+ const s=setup(options);const{cp,state,handle,active,save,gap,progress,read,inheritedPage,corpusChanged}=s;const{store,run}=options;
+ const queue=(type:'detail'|'comments',tweetId:string,rootId:string,relation:typeof state.contextQueue[number]['relation'])=>{
+  if(!/^\d+$/.test(tweetId))return;
+  const key=`${type}:${tweetId}:${rootId}:${relation}`;
+  if(!state.contextDone.includes(key)&&!state.contextQueue.some(q=>`${q.type}:${q.tweetId}:${q.rootId}:${q.relation}`===key))state.contextQueue.push({type,tweetId,rootId,relation});
+ };
+ const savePage=(post:XNativePost,role:typeof state.posts[number]['role'],rootId:string,retrievedAt?:string,fromRunId?:string)=>{
+  options.signal.throwIfAborted();const existing=state.posts.find(p=>p.id===post.id);
+  const isTarget=post.authorId===state.profile!.nativeId;
+  if(role==='target'&&!isTarget){gap('author_mismatch',post.id,'详情作者与所选账号的原生 ID 不一致，未作为本人发言。');return;}
+  const actualRole=isTarget?'target':role;
+  if(existing){
+   if(!existing.rootIds.includes(rootId))existing.rootIds.push(rootId);
+   // Replies feed can contain shorter previews of a long post already read.
+   if((!existing.truncated&&post.truncated)||existing.text.length>post.text.length&&post.truncated){
+    if(isTarget&&post.kind!=='repost')queue('detail',post.id,post.id,'target');
+    return;
+   }
+  }
+  const sourceKey=existing?.sourceKey??allocateSourceKey(cp);
+  const root=state.posts.find(p=>p.id===rootId);
+  const record={...post,sourceKey,role:actualRole,rootIds:[...new Set([...(existing?.rootIds??[]),rootId])]};
+  if(existing)state.posts[state.posts.indexOf(existing)]=record;else state.posts.push(record);
+  const dependencies=actualRole==='target'?[]:[...new Set([...(cp.pages.find(p=>p.sourceKey===sourceKey)?.discoveredFrom??[]),...(root&&root.sourceKey!==sourceKey?[root.sourceKey]:[])])];
+  const inheritedFrom=inheritedPage(fromRunId,post.url);
+  const page={sourceKey,...(inheritedFrom?{inheritedFrom}:{}),url:post.url,title:actualRole==='target'?`@${state.profile!.handle} 的${post.kind==='repost'?'转发记录':'公开帖子'}`:`@${post.authorHandle||'未知作者'} 的上下文原文`,text:post.text,kind:actualRole==='target'?'work' as const:'third_party' as const,publishedAt:post.publishedAt,author:post.authorHandle||null,retrievedAt:retrievedAt??new Date().toISOString(),retrieval:'read' as const,account:{platform:'x' as const,handle:post.authorHandle,id:post.authorId,profileUrl:`https://x.com/${post.authorHandle}`},links:[],limitations:[...(post.quotedUnavailable?['被引用原文不可访问；未补造引用对象、作者或内容。']:[]),...(post.truncated?['供应商列表返回节选，需以单帖详情补读正文。']:[]),...(actualRole!=='target'?['第三方上下文仅保留实际作者，不作为目标账号本人观点或独立事实核实。']:[]),...(post.kind==='repost'?['转发记录不表示原文由目标账号创作，也不自动表示赞同。']:[])],textTruncated:post.truncated,...(dependencies.length?{discoveredFrom:dependencies}:{})};
+  const old=cp.pages.find(p=>p.sourceKey===sourceKey);if(old)cp.pages[cp.pages.indexOf(old)]=page;else cp.pages.push(page);
+  corpusChanged();
+  store.addSource(run.id,sourceDraft(cp,state,sourceKey),cp.pages.indexOf(page));store.addEvent(run.id,'source',store.getSource(run.id,sourceKey));
+  if(post.quotedUnavailable)gap('quoted_context_unavailable',post.id,'被引用原文不可访问；外层账号正文保留，引用对象与内容不能补造。');
+  if(actualRole==='target'){
+   if(post.truncated&&post.kind!=='repost')queue('detail',post.id,post.id,'target');
+   if(post.parentId)queue('detail',post.parentId,post.id,'parent_context');
+   else if(post.kind==='reply'&&post.conversationId&&post.conversationId!==post.id)queue('detail',post.conversationId,post.id,'parent_context');
+   if(post.quotedId)queue('detail',post.quotedId,post.id,'quoted_context');
+   if(post.kind==='repost'&&post.originalPostId)queue('detail',post.originalPostId,post.id,'quoted_context');
+   if(post.replyCount!==null&&post.replyCount>0)queue('comments',post.id,post.id,'reply_context');
+  }else if(role==='parent_context'&&post.parentId)queue('detail',post.parentId,rootId,'parent_context');
+ };
+ if(!state.profile){
+  progress('x_profile',`核对所选 X 账号 @${handle}`);
+  const response=await read({type:'profile',handle});
+  if(!response.account||response.account.handle.toLowerCase()!==handle.toLowerCase()||!/^\d+$/.test(response.account.nativeId))throw new ResearchStop('x_account_identity_mismatch');
+  state.profile=response.account;cp.anchorUrl=response.account.url;
+  cp.identity={displayName:`@${response.account.handle} · X 账号研究`,handle:response.account.handle,profileUrl:response.account.url,status:'resolved',note:'研究主体是此 X 账号，不据此确认真人身份或合并其它平台。',candidates:[]};
+  const sourceKey=allocateSourceKey(cp);
+  const inheritedFrom=inheritedPage(response.inheritedFromRunId,response.account.url);
+  cp.pages.push({sourceKey,...(inheritedFrom?{inheritedFrom}:{}),url:response.account.url,title:`@${handle} 的公开账号资料`,text:response.account.description,kind:'profile',publishedAt:null,author:handle,account:{platform:'x',handle,id:response.account.nativeId,profileUrl:response.account.url},links:[],limitations:['账号资料为自述，不等于独立身份核验。'],retrieval:'profile',retrievedAt:response.retrievedAt??new Date().toISOString()});
+  corpusChanged();
+  store.addSource(run.id,sourceDraft(cp,state,sourceKey),0);save();
+ }
+ for(const feed of ['timeline','replies'] as const){
+  const cursor=state.history[feed];
+  while(!cursor.done&&!cursor.blocked){
+   active();progress(`x_history_${feed}`,`读取${feed==='timeline'?'历史帖子':'账号回复'}第 ${cursor.pages+1} 页，已保留 ${state.posts.filter(p=>p.role==='target').length} 条账号记录`);
+   let response:XReadResult;
+   try{response=await read({type:feed,handle:state.profile!.handle,nativeId:state.profile!.nativeId,cursor:cursor.cursor});}
+   catch(error){if(!(error instanceof ProviderError))throw error;cursor.blocked='history_read_failed';gap('history_read_failed',feed,`${feed==='timeline'?'帖子':'回复'}历史有读取失败，失败回执保留，未自动重试。`);save();break;}
+   const pageHash=digest(response.posts.map(p=>[p.id,p.text]));
+   cursor.started=true;cursor.pages++;
+   for(const post of response.posts)if(post.authorId===state.profile!.nativeId)savePage(post,'target',post.id,response.retrievedAt,response.inheritedFromRunId);
+   if(response.recordCount>0&&cursor.pageHashes.includes(pageHash)){
+    cursor.blocked='repeated_page';gap('repeated_page',feed,'供应商重复返回同一历史页，不能将重复页当作历史结束。');save();break;
+   }
+   if(response.recordCount>0)cursor.pageHashes.push(pageHash);
+   if(response.cursorState==='end'){cursor.done=true;cursor.cursor=null;save();break;}
+   if(response.cursorState!=='more'||!response.nextCursor){cursor.blocked='cursor_unknown';gap('cursor_unknown',feed,'供应商未给出可验证的历史结束或下一页状态。');save();break;}
+   if(response.nextCursor===cursor.cursor||cursor.cursors.includes(response.nextCursor)){cursor.blocked='cursor_cycle';gap('cursor_cycle',feed,'供应商历史游标循环，已停止重复读取并保留覆盖缺口。');save();break;}
+   cursor.emptyRawPages=response.recordCount===0?(cursor.emptyRawPages??0)+1:0;
+   if(cursor.emptyRawPages>=3){cursor.blocked='empty_history_pages';gap('empty_history_pages',feed,'供应商连续 3 个原始页面没有任何记录，却仍返回新游标；已暂停此入口的无效翻页，历史边界仍未知，其它入口与已取得材料继续处理。');save();break;}
+   cursor.cursors.push(response.nextCursor);cursor.cursor=response.nextCursor;save();
+  }
+ }
+ let contextBillingBlocked=state.gaps.some(g=>g.code==='provider_billing'&&g.target==='context');
+ const taskKey=(task:typeof state.contextQueue[number])=>`${task.type}:${task.tweetId}:${task.rootId}:${task.relation}`;
+ const contextTask=async(tasks:typeof state.contextQueue)=>{
+  active();const pending=tasks.filter(task=>!state.contextDone.includes(taskKey(task)));const task=pending[0];
+  if(task){
+   progress('x_context',`补读${task.relation==='target'?'帖子完整正文':task.type==='comments'?'讨论上下文':task.relation==='quoted_context'?'引用原文':'回复父链'}，待处理 ${state.contextQueue.length} 项`);
+   try{
+    const response=await read(task.type==='detail'?{type:'detail',tweetId:task.tweetId}:{type:'comments',tweetId:task.tweetId,cursor:null});
+    if(task.type==='detail'&&(!response.posts.length||response.posts[0]!.id!==task.tweetId))gap('context_missing',task.tweetId,'单帖详情未返回请求的原生帖子，缺口保留。');
+    else for(const association of pending)for(const post of response.posts)savePage(post,association.relation,association.rootId,response.retrievedAt,response.inheritedFromRunId);
+    if(task.type==='comments'&&response.cursorState!=='end')gap('comments_first_page',task.tweetId,'本帖讨论按默认首层一页读取；供应商后续评论或完整讨论树未穷尽。');
+   }catch(error){
+    if(!(error instanceof ProviderError))throw error;
+    if(error.code==='provider_billing'){
+     contextBillingBlocked=true;
+     gap('provider_billing','context','供应商因计费或额度问题拒绝读取；后续上下文补读已暂停，未读关联保留，已读取的材料继续分析与核验。');
+     // Keep this entire unread group queued; peers already dispatched still drain normally.
+     save();return;
+    }
+    gap('context_read_failed',task.tweetId,'该条回复、引用或讨论上下文未读取成功，失败回执保留。');
+   }
+   for(const association of pending)state.contextDone.push(taskKey(association));
+  }
+  const completedKeys=new Set(tasks.map(taskKey));
+  state.contextQueue=state.contextQueue.filter(item=>!completedKeys.has(taskKey(item)));save();
+ };
+ while(state.contextQueue.length&&!contextBillingBlocked){
+  active();const requests=new Set<string>();const batch:Array<typeof state.contextQueue>=[];
+  for(const task of state.contextQueue){
+   const key=`${task.type}:${task.tweetId}`;if(requests.has(key))continue;requests.add(key);
+   const group:typeof state.contextQueue=[];
+   if(task.type==='detail'){
+    // Bound synchronous relationship folding without repeating the native read and guards per root.
+    for(const association of state.contextQueue)if(association.type==='detail'&&association.tweetId===task.tweetId){group.push(association);if(group.length===100)break;}
+   }else group.push(task);
+   batch.push(group);if(batch.length===3)break;
+  }
+  // Wait every dispatched read to settle before a stop can publish a report.
+  // Same native requests never overlap, even when several roots need them.
+  const outcomes=await Promise.allSettled(batch.map(contextTask));
+  const failure=outcomes.find((outcome):outcome is PromiseRejectedResult=>outcome.status==='rejected');if(failure)throw failure.reason;
+ }
+ progress('x_analysis',`已保留 ${state.posts.filter(p=>p.role==='target').length} 条账号记录，开始分批分析与独立核验`);
+ return{checkpoint:cp,state,active,save,assertModelReady:s.assertModelReady};
+}
+
+function modelRecovery(options:XAccountResearchOptions,cp:ResearchCheckpoint,key:string,purpose:string){
+ const plan=cp.xAccountResearch?.modelRecovery,binding=options.binding,frozen=cp.firstStep;
+ if(!plan||plan.version!=='x-model-recovery/v1'||!['x-account-synthesize','x-account-write','x-account-verify-synthesis'].includes(purpose)||
+  !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(plan.id)||
+  plan.runId!==options.run.id||plan.caseId!==binding.caseId||plan.scopeVersion!==binding.scopeVersion||
+  binding.accounts.length!==1||plan.accountId!==binding.accounts[0]!.accountId||plan.accountId!==cp.xAccountResearch?.accountId||
+  frozen?.caseId!==plan.caseId||frozen.scopeVersion!==plan.scopeVersion||frozen.accounts.length!==1||frozen.accounts[0]!.accountId!==plan.accountId||
+  typeof plan.reason!=='string'||!plan.reason.trim()||plan.reason.length>1000||typeof plan.localFixRevision!=='string'||!/^[a-f0-9]{40}$/.test(plan.localFixRevision)||
+  typeof plan.createdAt!=='string'||!Number.isFinite(Date.parse(plan.createdAt))||!Array.isArray(plan.entries)||!plan.entries.length||plan.entries.length>3||
+  plan.entries.some(e=>!e||typeof e.failedKey!=='string'||!/^x-account:model:v1:[a-f0-9]{64}$/.test(e.failedKey)||typeof e.settledAt!=='string'||!Number.isFinite(Date.parse(e.settledAt)))||
+  new Set(plan.entries.map(e=>e.failedKey)).size!==plan.entries.length)return null;
+ const entry=plan.entries.find(e=>e.failedKey===key);if(!entry||Date.parse(plan.createdAt)<Date.parse(entry.settledAt))return null;
+ const old=options.store.research.receipt(options.run.id,key);
+ if(old?.kind!=='model'||old.state!=='failed'||old.settledAt!==entry.settledAt||!old.request||typeof old.request!=='object'||(old.request as {purpose?:unknown}).purpose!==purpose)return null;
+ return {key:'x-account:model-recovery:v1:'+digest({recoveryPlanId:plan.id,retryOf:key,settledAt:entry.settledAt}),retryOf:key,recoveryPlanId:plan.id};
+}
+
+function matchesModelRequest(request:unknown,input:Parameters<XAccountModel>[0],route:Record<string,unknown>):boolean {
+ if(!request||typeof request!=='object'||Array.isArray(request))return false;
+ const saved=request as Record<string,unknown>,expected:Record<string,unknown>={purpose:input.purpose,prompt:input.prompt,schema:input.schema,...route};
+ return ['purpose','prompt','schema','generationMode','reasoningEffort','toolChoice','outputCap','timeoutMs','decisionTimeoutMs'].every(key=>JSON.stringify(saved[key])===JSON.stringify(expected[key]));
+}
+function completedModelRecovery(options:XAccountResearchOptions,cp:ResearchCheckpoint,key:string,input:Parameters<XAccountModel>[0],route:Record<string,unknown>){
+ const binding=options.binding,frozen=cp.firstStep,accountId=cp.xAccountResearch?.accountId;
+ if(!['x-account-synthesize','x-account-write','x-account-verify-synthesis'].includes(input.purpose)||binding.accounts.length!==1||
+  accountId!==binding.accounts[0]!.accountId||frozen?.caseId!==binding.caseId||frozen.scopeVersion!==binding.scopeVersion||
+  frozen.accounts.length!==1||frozen.accounts[0]!.accountId!==accountId)return null;
+ const original=options.store.research.receipt(options.run.id,key);
+ if(original?.kind!=='model'||original.state!=='failed'||typeof original.settledAt!=='string'||!Number.isFinite(Date.parse(original.settledAt))||!matchesModelRequest(original.request,input,route))return null;
+ for(const child of options.store.research.completedModelRecoveryCandidates(options.run.id,key)){
+  if(!child.request||typeof child.request!=='object'||Array.isArray(child.request))continue;
+  const request=child.request as Record<string,unknown>,recoveryPlanId=request.recoveryPlanId;
+  if(typeof recoveryPlanId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(recoveryPlanId)||request.retryOf!==key||
+   child.key!=='x-account:model-recovery:v1:'+digest({recoveryPlanId,retryOf:key,settledAt:original.settledAt})||!matchesModelRequest(request,input,route))continue;
+  return {key:child.key,retryOf:key,recoveryPlanId};
+ }
+ return null;
+}
+
+export function productionModel(options:XAccountResearchOptions,cp:ResearchCheckpoint,active:()=>void):XAccountModel {
+ if(!options.transport||!options.apiKey)throw new ResearchStop('model_unavailable');
+ const limits=cp.limits??options.limits??unlimited;
+ return async(input,signal)=>{
+  const boundedWriter=input.purpose==='x-account-write';
+  const highReasoning=input.purpose.startsWith('x-account-verify-')||input.purpose==='x-account-synthesize';
+  const outputCap=highReasoning?16384:Math.min(input.maxTokens,boundedWriter?6500:16384);
+  const upstreamTimeoutMs=highReasoning?210000:boundedWriter?150000:45000;
+  const decisionTimeoutMs=highReasoning?240000:boundedWriter?180000:120000;
+  const route=highReasoning?{reasoningEffort:'high',toolChoice:'auto',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:boundedWriter?{generationMode:'bounded-structured/v1',toolChoice:'submit_decision',outputCap,timeoutMs:upstreamTimeoutMs,decisionTimeoutMs}:{};
+  let feedback:DshProtocolCode|null=null;
+  for(let attempt=0;attempt<=2;attempt++){
+   signal.throwIfAborted();active();
+   // Repair is a new, deterministic request over the identical material/schema.
+   // Never put provider output or raw error text into a repair instruction.
+   const prompt=attempt===0?input.prompt:`${input.prompt}\n\nStructured decision repair ${attempt}/2. Local protocol code: ${feedback}. Call submit_decision exactly once with one JSON object matching the same schema. Keep all supplied material and evidence rules; do not treat this protocol feedback as evidence.`;
+   const attemptInput={...input,prompt};
+   // Preserve generation's historical key. Thinking is a substantively new
+   // verification plan and must never reuse an old non-thinking verdict.
+   const originalKey='x-account:model:v1:'+digest({input:attemptInput,model:options.modelName,...route});
+   const historical=completedModelRecovery(options,cp,originalKey,attemptInput,route);
+   const recovery=historical??modelRecovery(options,cp,originalKey,input.purpose),key=recovery?.key??originalKey;
+   const existing=options.store.research.receipt(options.run.id,key);
+   if(recovery&&existing?.state==='completed'&&!historical)throw new ResearchStop('model_request_failed');
+   const budget=options.store.research.budget(options.run.id,limits);
+   const remaining=remainingOf(limits.outputTokens,budget.outputTokens);
+   const requested=Math.min(outputCap,remaining??outputCap);
+   // Cached receipts consume no new allowance, even when the budget is now spent.
+   const maxTokens=existing?Math.max(1,requested):requested;
+   if(maxTokens<1)throw new ResearchStop('budget_exhausted');
+   let usage={inputTokens:0,outputTokens:0,known:false},dispatched=false;
+   let observed:DshFailureMetadata=emptyDshFailure();
+   const actionUsage=()=>{
+    const estimatedUsd=usage.known?estimateModelUsd(options.modelName??'deepseek-flash',usage.inputTokens,usage.outputTokens):dispatched?null:0;
+    return{inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedUsd,unknownCost:dispatched&&estimatedUsd===null};
+   };
+   try{
+    const result=await meteredInvoke<unknown>({ledger:options.store.research,runId:options.run.id,key,kind:'model',request:{purpose:input.purpose,prompt,schema:input.schema,maxTokens,...route,...(recovery?{retryOf:recovery.retryOf,recoveryPlanId:recovery.recoveryPlanId}:{})},reservation:{inputTokens:Math.ceil(Buffer.byteLength(prompt,'utf8')/2),outputTokens:maxTokens},limits,allowSettledFailure:true,
+     replayFailure:receipt=>{
+      observed=readDshFailure(receipt.result)??emptyDshFailure();
+      return !recovery&&repairableDshFailure(observed)?new DshProtocolError(observed.code as DshProtocolCode):new ResearchStop('model_request_failed');
+     },
+     execute:()=>runDshDecision({prompt,schema:input.schema,model:options.modelName??'deepseek-flash',maxTokens,timeoutMs:decisionTimeoutMs,...(highReasoning?{reasoningEffort:'high' as const}:{}),signal,invoke:async request=>{
+      active();dispatched=true;
+      const response=await invokeDeepSeek(options.transport!,options.apiKey!,request,upstreamTimeoutMs);
+      usage=parseMessagesUsage(response.body);
+      observed={...emptyDshFailure(),status:response.status,responseHash:createHash('sha256').update(response.body).digest('hex'),bytes:Buffer.byteLength(response.body,'utf8'),messageStop:false,upstreamError:false,usageKnown:usage.known};
+      for(const line of response.body.split('\n'))if(line.startsWith('data:')){
+       try{const event=JSON.parse(line.slice(5).trim()) as {type?:unknown};if(event?.type==='message_stop')observed.messageStop=true;if(event?.type==='error')observed.upstreamError=true;}catch{/* Keepalive/non-JSON data never establishes a complete response. */}
+      }
+      return response;
+     }}),
+     usageOf:actionUsage,failureUsage:actionUsage,
+     failureResult:error=>{const diagnostic=classifyDshFailure(error);observed={...observed,code:error instanceof DshProtocolError?error.code:'model_failure_unknown',...(diagnostic?{diagnostic}:{})};return observed;},settleFailure:()=>!signal.aborted});
+    active();cp.steps++;return result;
+   }catch(error){
+    if(signal.aborted)throw signal.reason;
+    if(recovery||!(error instanceof DshProtocolError)||!repairableDshFailure(observed))throw error;
+    active();feedback=error.code;
+    if(attempt===2)throw new DshProtocolRepairExhaustedError(error.code,3);
+   }
+  }
+  throw new ResearchStop('model_request_failed');
+ };
+}
+
+interface DshFailureMetadata {
+ version:'dsh-failure/v1';code:DshProtocolCode|'model_failure_unknown';status:number|null;
+ responseHash:string|null;bytes:number;messageStop:boolean;upstreamError:boolean;usageKnown:boolean;
+ diagnostic?:{errorName?:string;providerCode?:ProviderError['code'];providerStatus?:number;causeCode?:string};
+}
+/** Classifications only: never serialize error messages, stacks, requests or causes. */
+function classifyDshFailure(error:unknown):DshFailureMetadata['diagnostic'] {
+ if(!(error instanceof Error))return undefined;
+ const diagnostic:NonNullable<DshFailureMetadata['diagnostic']>={};
+ if(['Error','TypeError','RangeError','SyntaxError','ReferenceError','URIError','EvalError','AggregateError','AbortError','TimeoutError','ProviderError','DshProtocolError','DshProtocolRepairExhaustedError'].includes(error.name))diagnostic.errorName=error.name;
+ if(error instanceof ProviderError&&['provider_timeout','provider_rate_limited','provider_forbidden','provider_not_found','provider_billing','provider_response_too_large','provider_redirect','provider_bad_response','provider_error','provider_unavailable'].includes(error.code)){
+  diagnostic.providerCode=error.code;
+  if(Number.isInteger(error.status)&&error.status!>=100&&error.status!<=599)diagnostic.providerStatus=error.status;
+ }
+ const cause=error.cause;
+ if(cause&&typeof cause==='object'&&!Array.isArray(cause)){
+  const code=(cause as {code?:unknown}).code;
+  if(typeof code==='string'&&['ECONNRESET','ECONNREFUSED','ECONNABORTED','ETIMEDOUT','EPIPE','ENOTFOUND','EAI_AGAIN','ENETUNREACH','EHOSTUNREACH','ENETDOWN','EADDRNOTAVAIL','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET','UND_ERR_ABORTED','ERR_TLS_CERT_ALTNAME_INVALID','CERT_HAS_EXPIRED','CERT_NOT_YET_VALID','UNABLE_TO_VERIFY_LEAF_SIGNATURE','DEPTH_ZERO_SELF_SIGNED_CERT','SELF_SIGNED_CERT_IN_CHAIN'].includes(code))diagnostic.causeCode=code;
+ }
+ return Object.keys(diagnostic).length?diagnostic:undefined;
+}
+function emptyDshFailure():DshFailureMetadata {
+ return{version:'dsh-failure/v1',code:'model_failure_unknown',status:null,responseHash:null,bytes:0,messageStop:false,upstreamError:false,usageKnown:false};
+}
+function readDshFailure(value:unknown):DshFailureMetadata|null {
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const item=value as Record<string,unknown>;
+ if(item.version!=='dsh-failure/v1'||(!isDshProtocolCode(item.code)&&item.code!=='model_failure_unknown')||
+  !(item.status===null||Number.isInteger(item.status)&&Number(item.status)>=200&&Number(item.status)<=599)||
+  !(item.responseHash===null||typeof item.responseHash==='string'&&/^[a-f0-9]{64}$/.test(item.responseHash))||
+  !Number.isSafeInteger(item.bytes)||Number(item.bytes)<0||Number(item.bytes)>2*1024*1024||
+  typeof item.messageStop!=='boolean'||typeof item.upstreamError!=='boolean'||typeof item.usageKnown!=='boolean')return null;
+ return{version:'dsh-failure/v1',code:item.code as DshFailureMetadata['code'],status:item.status as number|null,responseHash:item.responseHash as string|null,bytes:item.bytes as number,messageStop:item.messageStop,upstreamError:item.upstreamError,usageKnown:item.usageKnown};
+}
+function repairableDshFailure(value:DshFailureMetadata):boolean {
+ return isDshProtocolCode(value.code)&&value.status!==null&&value.status>=200&&value.status<300&&value.messageStop&&!value.upstreamError&&value.usageKnown&&value.responseHash!==null&&value.bytes>0&&value.bytes<=2*1024*1024;
+}
+
+export async function runXAccountResearch(options:XAccountResearchOptions):Promise<ProviderResult>{
+ let cp:ResearchCheckpoint|undefined,stopped:string|null=null;
+ try{
+  const collected=await collectXAccount(options);cp=collected.checkpoint;
+  const {state,active,save}=collected;collected.assertModelReady();
+  const invoke=options.model??productionModel(options,cp,active);
+  const model:XAccountModel=async(input,signal)=>{
+   active();const phases:Record<string,[string,string]>={'x-account-analyze':['x_analysis','分批分析账号原文'],'x-account-verify-batch':['x_verify','逐条核验本批分析'],'x-account-synthesize':['x_synthesis','整理中文专题报告'],'x-account-write':['x_synthesis','撰写中文专题正文'],'x-account-verify-synthesis':['x_verify_synthesis','核验专题报告与引用']};
+   const [key,label]=phases[input.purpose]??['x_analysis','分析账号原文'];
+   if(cp!.phase!==key){cp!.phase=key;save();options.store.addEvent(options.run.id,'stage',{index:cp!.steps,total:0,key,label,status:'active'});}
+   return invoke(input,signal);
+  };
+  await analyzeXAccount({subject:state.profile!,question:options.run.question,pages:cp.pages,posts:state.posts,state,model,modelConcurrency:state.modelRecovery===undefined?3:1,signal:options.signal,save,active});
+  active();
+ }catch(error){
+  // Cancellation/process shutdown keeps the durable inflight receipt for the
+  // existing recovery flow. Ordinary research stops retain a reviewable report.
+  if(options.signal.aborted||error instanceof ResearchStop&&error.code==='run_inactive')throw error;
+  stopped=error instanceof ResearchStop||error instanceof FirstStepSelectionError?error.code:error instanceof ProviderError?error.code:'analysis_incomplete';
+  // Never publish a late model/provider response after authority was withdrawn.
+  // Only the most recent saved checkpoint is eligible for partial projection.
+  cp=options.store.research.checkpoint(options.run.id)??undefined;
+  if(!cp?.xAccountResearch)throw error;
+ }
+ if(!cp?.xAccountResearch)throw new ResearchStop('x_account_checkpoint_missing');
+ const state=cp.xAccountResearch;
+ if(stopped){
+  const messages:Record<string,string>={
+   budget_exhausted:'本次研究额度已用完；已读取的原文与已核验结论保留，历史或分析尚未完成。',
+   unknown_inflight:'上次请求的供应商结算状态未知，已暂停以避免重复付费；先前读取的材料保留。',
+   source_revoked:'原文已被撤回或变更；依赖这些材料的结论停止使用，已读材料保留待复核。',
+   scope_changed:'所选账号研究范围已变更或撤回；当前结果保留待复核，不继续读取或分析。',
+   model_unavailable:'分析模型当前不可用；已读取的账号原文保留，尚未完成分析与独立核验。'
+  };
+  if(!state.gaps.some(g=>g.code===stopped&&g.target==='research'))state.gaps.push({code:stopped,target:'research',detail:messages[stopped]??'读取、分析或独立核验尚未完成；已读取的资料与有效结论保留。'});
+ }
+ const scopeActive=stopped!=='scope_changed'&&options.store.isResearchScopeActive(options.run.id,options.run.ownerId);
+ const liveSources=options.store.listSources(options.run.id);
+ const keys=scopeActive?options.store.activeXAccountSourceKeys(options.run.id,options.run.ownerId):new Set<string>();
+ // The live source is authoritative: never restore withdrawn or edited text
+ // from the immutable collection checkpoint during terminal finalization.
+ const corpusKeys=new Set(cp.pages.map(page=>page.sourceKey));
+ const sources=xSourceDrafts(liveSources.filter(source=>corpusKeys.has(source.sourceKey)));
+ const projection=projectXAccountReport({state,pages:cp.pages,sources,activeSourceKeys:keys});
+ const complete=!stopped&&state.history.timeline.done&&state.history.replies.done&&state.analysis.synthesisDone&&projection.findings.length>0&&!state.gaps.some(g=>g.code!=='comments_first_page');
+ cp.phase='done';cp.stopReason=stopped??(complete?'x_account_research_complete':'x_account_research_partial');cp.unknowns=state.gaps.filter(g=>g.code!=='comments_first_page').map(g=>g.detail);
+ // This is a terminal review checkpoint, so it must survive a revoked scope.
+ // ResearchStore still enforces run cancellation/deletion/terminal-state guards.
+ options.store.research.save(options.run.id,cp);
+ const usage=options.store.research.receiptUsageSummary(options.run.id);
+ return{state:complete?'completed':'partial',identity:cp.identity??{displayName:'X 账号研究',handle:null,profileUrl:options.binding.accounts[0]!.profileUrl,status:'needs_input',note:'原生账号资料尚未核对完成，当前不能确认账号标识。',candidates:[]},sources,answer:projection.answer,observations:projection.observations,limitations:projection.limitations,usage,stopReason:cp.stopReason};
+}

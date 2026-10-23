@@ -2,6 +2,7 @@ import type { ResearchFacet, ClaimAuthorialBasis } from '../../shared/research-d
 import type { DB } from '../db/index.js';
 import type { IdentityCandidate, IdentityDraft, ResearchBudget, ResearchBudgetLimits, IndependentAccountMaterial } from '../../shared/types.js';
 import type { ResearchPage, ResearchToolAction } from './tool-contracts.js';
+import type { XAccountResearchState } from './x-account-contracts.js';
 
 /**
  * Legacy finite totals for direct controller calls and historical replay
@@ -45,6 +46,8 @@ export interface ClaimGenreReview {
  quoteOffset:number;contextOffset:number;contextLength:number;
 }
 export interface ResearchCheckpoint {
+ /** Separate single-account subject; never promoted into person claims. */
+ xAccountResearch?: XAccountResearchState;
  /** Highest historical source ordinal, retained when pages leave the corpus. */
  sourceKeyHighWatermark?: number;
  /** Same-source genre context is exclusion-only, never extra fact support. */
@@ -89,7 +92,11 @@ export interface ResearchCheckpoint {
  pages: StoredPage[]; claims: ResearchClaim[]; pendingClaims?: ResearchClaim[]; unknowns: string[]; stopReason: string | null;
 }
 export interface ActionUsage { inputTokens?: number; outputTokens?: number; estimatedUsd?: number | null; credits?: number | null; bytes?: number; unknownCost?: boolean }
-export interface ActionReceipt { key: string; kind:'tool'|'model'; state:'inflight'|'completed'|'failed'; request:unknown; result:unknown; usage:ActionUsage|null; reservedInput:number; reservedOutput:number; createdAt:string }
+export interface ActionReceipt { key: string; kind:'tool'|'model'; state:'inflight'|'completed'|'failed'; request:unknown; result:unknown; usage:ActionUsage|null; reservedInput:number; reservedOutput:number; createdAt:string; settledAt?:string|null }
+interface ActionReceiptRow {action_key:string;kind:ActionReceipt['kind'];state:ActionReceipt['state'];request_json:string;result_json:string|null;usage_json:string|null;reserved_input:number;reserved_output:number;created_at:string;settled_at:string|null}
+function decodeReceipt(r:ActionReceiptRow):ActionReceipt {
+ return {key:r.action_key,kind:r.kind,state:r.state,request:JSON.parse(r.request_json),result:r.result_json?JSON.parse(r.result_json):null,usage:r.usage_json?JSON.parse(r.usage_json):null,reservedInput:r.reserved_input,reservedOutput:r.reserved_output,createdAt:r.created_at,settledAt:r.settled_at};
+}
 export class ResearchStop extends Error { constructor(readonly code:string){super(code);this.name='ResearchStop';} }
 
 export class ResearchStore {
@@ -102,24 +109,63 @@ export class ResearchStore {
   const row=this.db.prepare('SELECT data_json FROM research_checkpoints WHERE run_id=?').get(runId) as {data_json:string}|undefined;
   return row?JSON.parse(row.data_json) as ResearchCheckpoint:null;
  }
+ /** Live authority projection; do not load retained source bodies for a scope check. */
+ firstStepBinding(runId:string):FirstStepBinding|null {
+  const row=this.db.prepare("SELECT json_extract(data_json,'$.firstStep') AS binding_json FROM research_checkpoints WHERE run_id=?").get(runId) as {binding_json:string|null}|undefined;
+  return row?.binding_json?JSON.parse(row.binding_json) as FirstStepBinding:null;
+ }
+ /**
+  * Internal expectedJSON is a serialized Array<{sourceKey:string;url:string;text:string}>.
+  * Compare live rows on every call without returning source bodies/metadata to JavaScript.
+  * This checks corpus correspondence only; the caller still checks run/scope authority.
+  */
+ areSourcePagesCurrent(runId:string,expectedJSON:string):boolean {
+  return !this.db.prepare(`SELECT 1 AS invalid FROM json_each(?) AS expected
+   LEFT JOIN sources AS source ON source.run_id=? AND source.source_key=json_extract(expected.value,'$.sourceKey')
+   WHERE source.id IS NULL OR source.excluded<>0
+    OR source.url IS NOT json_extract(expected.value,'$.url')
+    OR source.excerpt IS NOT json_extract(expected.value,'$.text') LIMIT 1`).get(expectedJSON,runId);
+ }
  save(runId:string,checkpoint:ResearchCheckpoint):void {
   this.assertActive(runId);
   this.db.prepare('INSERT INTO research_checkpoints(run_id,data_json,updated_at) VALUES(?,?,?) ON CONFLICT(run_id) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at').run(runId,JSON.stringify(checkpoint),new Date().toISOString());
  }
  receipts(runId:string):ActionReceipt[] {
-  const rows=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<{action_key:string;kind:'tool'|'model';state:'inflight'|'completed'|'failed';request_json:string;result_json:string|null;usage_json:string|null;reserved_input:number;reserved_output:number;created_at:string}>;
-  return rows.map(r=>({key:r.action_key,kind:r.kind,state:r.state,request:JSON.parse(r.request_json),result:r.result_json?JSON.parse(r.result_json):null,usage:r.usage_json?JSON.parse(r.usage_json):null,reservedInput:r.reserved_input,reservedOutput:r.reserved_output,createdAt:r.created_at}));
+  const rows=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as ActionReceiptRow[];
+  return rows.map(decodeReceipt);
  }
- receipt(runId:string,key:string):ActionReceipt|undefined{return this.receipts(runId).find(row=>row.key===key);}
+ /** Traffic reporting needs usage only; retain the same JSON errors and byte defaults. */
+ receiptUsageSummary(runId:string):{requests:number;bytes:number} {
+  const rows=this.db.prepare('SELECT usage_json FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<Pick<ActionReceiptRow,'usage_json'>>;
+  return{requests:rows.length,bytes:rows.reduce((bytes,row)=>{const usage:ActionUsage|null=row.usage_json?JSON.parse(row.usage_json):null;return bytes+(usage?.bytes??0);},0)};
+ }
+ /** Inflight model authority is metadata, never a reason to decode provider payloads. */
+ hasInflightModel(runId:string):boolean {
+  return !!this.db.prepare("SELECT 1 FROM research_actions WHERE run_id=? AND kind='model' AND state='inflight' LIMIT 1").get(runId);
+ }
+ receipt(runId:string,key:string):ActionReceipt|undefined {
+  const row=this.db.prepare('SELECT * FROM research_actions WHERE run_id=? AND action_key=?').get(runId,key) as ActionReceiptRow|undefined;
+  return row?decodeReceipt(row):undefined;
+ }
+ /** Read only completed recovery request metadata; unrelated bodies never leave SQLite. */
+ completedModelRecoveryCandidates(runId:string,retryOf:string):Array<Pick<ActionReceipt,'key'|'request'>> {
+  const rows=this.db.prepare(`SELECT action_key,request_json FROM research_actions
+   WHERE run_id=? AND action_key GLOB 'x-account:model-recovery:v1:*' AND kind='model' AND state='completed' AND settled_at IS NOT NULL
+    AND CASE WHEN json_valid(request_json) THEN json_extract(request_json,'$.retryOf') END=?
+   ORDER BY created_at,action_key`).all(runId,retryOf) as Array<Pick<ActionReceiptRow,'action_key'|'request_json'>>;
+  return rows.map(row=>({key:row.action_key,request:JSON.parse(row.request_json)}));
+ }
  budget(runId:string,limits:ResearchBudgetLimits=RESEARCH_LIMITS):ResearchBudget {
   const budget:ResearchBudget={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,estimatedUsd:0,firecrawlCredits:0,unknownCost:false,limits:{...limits}};
-  for(const row of this.receipts(runId)){
+  const rows=this.db.prepare('SELECT kind,usage_json,reserved_input,reserved_output FROM research_actions WHERE run_id=? ORDER BY created_at,action_key').all(runId) as Array<Pick<ActionReceiptRow,'kind'|'usage_json'|'reserved_input'|'reserved_output'>>;
+  for(const row of rows){
+   const usage:ActionUsage|null=row.usage_json?JSON.parse(row.usage_json):null;
    if(row.kind==='tool')budget.toolCalls++;else budget.modelCalls++;
-   budget.inputTokens+=row.usage?.inputTokens??row.reservedInput;
-   budget.outputTokens+=row.usage?.outputTokens??row.reservedOutput;
-   budget.estimatedUsd+=row.usage?.estimatedUsd??0;
-   budget.firecrawlCredits+=row.usage?.credits??0;
-   if(!row.usage||row.usage.estimatedUsd===null||row.usage.unknownCost)budget.unknownCost=true;
+   budget.inputTokens+=usage?.inputTokens??row.reserved_input;
+   budget.outputTokens+=usage?.outputTokens??row.reserved_output;
+   budget.estimatedUsd+=usage?.estimatedUsd??0;
+   budget.firecrawlCredits+=usage?.credits??0;
+   if(!usage||usage.estimatedUsd===null||usage.unknownCost)budget.unknownCost=true;
   }
   return budget;
  }

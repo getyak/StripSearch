@@ -15,6 +15,7 @@ import { DiscoveryRunner } from './services/discovery-runner.js';
 import { ReviewStore } from './review-store.js';
 import { DiscoveryStore } from './discovery-store.js';
 import { FirstStepStore } from './research/first-step-store.js';
+import { PersonConfirmationStore } from './research/person-confirmation.js';
 import { BUILTIN_PLATFORM_REGISTRY } from './platforms/registry.js';
 import {
   defaultCatalogDataDir,
@@ -27,6 +28,8 @@ import { Store } from './store.js';
 import { FetchGithubRunner } from './research/fetch-github-runner.js';
 import type { ResearchTools } from './research/tool-contracts.js';
 import { createResearchTools } from './research/toolkit.js';
+import {createXAccountProvider} from './research/x-account-provider.js';
+import type {XAccountProvider,XAccountModel} from './research/x-account-contracts.js';
 import { LIMITS } from '../shared/limits.js';
 import type { ResearchPlanner } from './research/planner.js';
 import type { DB } from './db/index.js';
@@ -44,6 +47,9 @@ export interface BootstrapOverrides {
   discoveryCatalog?: PlatformCatalogSnapshot | null;
   researchTools?: ResearchTools;
   researchPlanner?: ResearchPlanner;
+  /** Embedders overriding the legacy toolkit also supply their account port. */
+  xAccountProvider?: XAccountProvider|null;
+  xAccountModel?: XAccountModel;
 }
 
 export interface BootstrappedApp {
@@ -53,6 +59,7 @@ export interface BootstrappedApp {
   reviewStore: ReviewStore;
   discoveryStore: DiscoveryStore;
   firstStep: FirstStepStore;
+  personConfirmation: PersonConfirmationStore;
   discoveryRunner: DiscoveryRunner;
   runner: Runner;
   fetchRunner: FetchGithubRunner;
@@ -74,6 +81,7 @@ export async function bootstrap(
   const reviewStore = new ReviewStore(db);
   const discoveryStore = new DiscoveryStore(db);
   const firstStep = new FirstStepStore(db, store);
+  const personConfirmation = new PersonConfirmationStore(db, store, firstStep);
   const interrupted = store.recoverInterruptedRuns();
   const interruptedDiscovery = discoveryStore.recoverInterruptedTasks();
   const providerFactory: ProviderFactory =
@@ -90,7 +98,10 @@ export async function bootstrap(
     providerFactory,
     transport,
     firstStep,
+    personConfirmation,
     discoveryCatalog,
+    xAccountProvider:overrides.xAccountProvider===null?undefined:overrides.xAccountProvider??(!overrides.researchTools&&config.tikhubApiKey?createXAccountProvider({transport,apiKey:config.tikhubApiKey,timeoutMs:LIMITS.providerTimeoutMs,maxBytes:LIMITS.providerMaxBytes}):undefined),
+    xAccountModel:overrides.xAccountModel,
     researchTools: overrides.researchTools ?? createResearchTools({
       transport, exaApiKey: config.exaApiKey,
       firecrawlApiKey: config.firecrawlApiKey ?? null, tikhubApiKey: config.tikhubApiKey ?? null,
@@ -132,11 +143,12 @@ export async function bootstrap(
     runner,
     fetchRunner,
     firstStep,
+    personConfirmation,
     clientDir
   });
   void runner.pump();
   return {
-    config, db, store, reviewStore, discoveryStore, firstStep, discoveryRunner, runner, fetchRunner, app,
+    config, db, store, reviewStore, discoveryStore, firstStep, personConfirmation, discoveryRunner, runner, fetchRunner, app,
     interrupted, interruptedDiscovery, interruptedFetch
   };
 }

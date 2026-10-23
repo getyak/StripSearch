@@ -687,3 +687,88 @@ test('a later profile biography cannot clear a failed native posts-history read'
  planner:{async decide(input){if(input.mode==='verify')return {supported:[0],rejected:[]};plans++;if(plans===1)return {action:'social_posts',url:accountUrl};if(plans===2)return {action:'read',url:accountUrl};assert.ok(input.checkpoint.unknowns.some(n=>n.includes('social_posts')));return {action:'finish',claims:[{sourceKey:'S1',quote:profile.text,statement:'页面说明该账号开发编译器。',kind:'page_statement',section:'expression'}]};}}});
  assert.ok(result.limitations.some(n=>n.includes('当前未取得相应原文')&&n.includes('social_posts')));assert.equal(store.research.checkpoint(run.id)!.actionFailures!.length,1);db.close();
 });
+
+test('one receipt lookup never decodes unrelated action payloads', () => {
+ const {db,store,run}=setup();
+ try {
+  const limits={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0};
+  store.research.reserve(run.id,'wanted','tool',{type:'read'},{inputTokens:0,outputTokens:0},limits);
+  store.research.settle(run.id,'wanted',{synthetic:'retained original'},{bytes:20,estimatedUsd:0});
+  store.research.reserve(run.id,'unrelated','tool',{type:'read'},{inputTokens:0,outputTokens:0},limits);
+  store.research.settle(run.id,'unrelated',{synthetic:'unrelated original'},{bytes:30,estimatedUsd:0});
+  db.prepare('UPDATE research_actions SET result_json=? WHERE run_id=? AND action_key=?').run('not decoded by a different receipt lookup',run.id,'unrelated');
+  const receipt=store.research.receipt(run.id,'wanted');
+  assert.equal(receipt?.key,'wanted');assert.equal(receipt?.state,'completed');
+  assert.deepEqual(receipt?.request,{type:'read'});assert.deepEqual(receipt?.result,{synthetic:'retained original'});assert.deepEqual(receipt?.usage,{bytes:20,estimatedUsd:0});
+  assert.equal(store.research.receipt(run.id,'missing'),undefined);
+ } finally { db.close(); }
+});
+
+test('receipt traffic summary ignores unrelated payloads and retains every state and missing-byte default', () => {
+ const {db,store,run}=setup();
+ try {
+  const limits={toolCalls:0,modelCalls:0,inputTokens:0,outputTokens:0,elapsedMs:0};
+  for(let i=0;i<6;i++){
+   store.research.reserve(run.id,`traffic-${i}`,'tool',{type:'read'},{inputTokens:1,outputTokens:2},limits);
+   if(i!==2)store.research.settle(run.id,`traffic-${i}`,{retained:true},{...(i<2?{bytes:i===0?37:13}:{}),estimatedUsd:i===1?null:0,unknownCost:i===1},i===1?'failed':'completed');
+  }
+  db.prepare('UPDATE research_actions SET usage_json=? WHERE run_id=? AND action_key=?').run('null',run.id,'traffic-4');
+  db.prepare('UPDATE research_actions SET usage_json=? WHERE run_id=? AND action_key=?').run('',run.id,'traffic-5');
+  const unrelated='{"unused":"'+'x'.repeat(256*1024);db.prepare('UPDATE research_actions SET request_json=?,result_json=? WHERE run_id=?').run(unrelated,unrelated,run.id);
+  const snapshot=()=>db.prepare('SELECT * FROM research_actions WHERE run_id=? ORDER BY action_key').all(run.id);const before=snapshot();
+  assert.deepEqual(store.research.receiptUsageSummary(run.id),{requests:6,bytes:50});assert.deepEqual(store.research.receiptUsageSummary('missing-run'),{requests:0,bytes:0});
+  assert.deepEqual(snapshot(),before,'raw payload bytes, usage and unsettled or failed accounting remain unchanged');
+ } finally {db.close();}
+});
+
+test('receipt traffic summary still rejects malformed usage JSON without rewriting the ledger', () => {
+ const {db,store,run}=setup();
+ try {
+  store.research.reserve(run.id,'invalid-usage','tool',{type:'read'},{inputTokens:1,outputTokens:2});store.research.settle(run.id,'invalid-usage',{retained:true},{bytes:37,estimatedUsd:null,unknownCost:true},'failed');
+  db.prepare('UPDATE research_actions SET usage_json=? WHERE run_id=?').run('{"bytes":',run.id);const snapshot=()=>db.prepare('SELECT * FROM research_actions WHERE run_id=?').all(run.id);const before=snapshot();
+  assert.throws(()=>store.research.receiptUsageSummary(run.id),SyntaxError);assert.deepEqual(snapshot(),before);
+ } finally {db.close();}
+});
+
+test('budget reads financial columns only and retains settled and reserved accounting semantics', () => {
+ const {db,store,run}=setup();
+ try {
+  const limits={toolCalls:4,modelCalls:4,inputTokens:100,outputTokens:100,elapsedMs:0};
+  store.research.reserve(run.id,'tool','tool',{type:'read'},{inputTokens:0,outputTokens:0},limits);
+  store.research.settle(run.id,'tool',{synthetic:'original'},{estimatedUsd:0.125,credits:2,inputTokens:3,outputTokens:4});
+  store.research.reserve(run.id,'failed','model',{purpose:'verify'},{inputTokens:7,outputTokens:11},limits);
+  store.research.settle(run.id,'failed',null,{estimatedUsd:null,unknownCost:true},'failed');
+  store.research.reserve(run.id,'pending','model',{purpose:'analyze'},{inputTokens:13,outputTokens:17},limits);
+  db.prepare('UPDATE research_actions SET result_json=?,request_json=? WHERE run_id=?').run('unread result payload','unread request payload',run.id);
+  assert.deepEqual(store.research.budget(run.id,limits),{toolCalls:1,modelCalls:2,inputTokens:23,outputTokens:32,estimatedUsd:0.125,firecrawlCredits:2,unknownCost:true,limits});
+  store.research.settle(run.id,'pending',{synthetic:'completed result'},{inputTokens:5,outputTokens:6,estimatedUsd:0.25});
+  assert.deepEqual(store.research.budget(run.id,limits),{toolCalls:1,modelCalls:2,inputTokens:15,outputTokens:21,estimatedUsd:0.375,firecrawlCredits:2,unknownCost:true,limits});
+ } finally { db.close(); }
+});
+
+test('source page checks use current rows on every call and ignore unrelated sources', () => {
+ const {db,store,run}=setup();
+ try {
+  assert.equal(typeof store.research.areSourcePagesCurrent,'function','source checks need a live SQL comparison');
+  const source={key:'S1',url:'https://synthetic.invalid/one',title:'Synthetic source',kind:'work' as const,publishedAt:null,excerpt:'Synthetic original text.',excerptLocator:null,identityLabel:'Synthetic account',identityConfirmed:false,fetchStatus:'ok' as const,limits:[]};
+  const expected=JSON.stringify([{sourceKey:'S1',url:source.url,text:source.excerpt}]);
+  const current=()=>store.research.areSourcePagesCurrent(run.id,expected);
+  assert.equal(store.research.areSourcePagesCurrent(run.id,'[]'),true);
+  assert.equal(current(),false,'missing expected source is invalid');
+  store.addSource(run.id,source,0);assert.equal(current(),true);
+  store.addSource(run.id,{...source,key:'unrelated',excerpt:null},1,true);
+  assert.equal(current(),true,'extra excluded/null sources outside the expected corpus do not matter');
+  store.setSourceExcluded(run.id,'S1',true);assert.equal(current(),false,'exclusion applies immediately');
+  store.setSourceExcluded(run.id,'S1',false);assert.equal(current(),true);
+  store.addSource(run.id,{...source,url:'https://synthetic.invalid/changed'},0);assert.equal(current(),false,'URL changes invalidate the existing expectation');
+  store.addSource(run.id,source,0);assert.equal(current(),true);
+  store.addSource(run.id,{...source,excerpt:'Changed synthetic original.'},0);assert.equal(current(),false,'text edits apply immediately');
+  store.addSource(run.id,source,0);assert.equal(current(),true);
+  store.addSource(run.id,{...source,excerpt:null},0);assert.equal(current(),false,'NULL is different from the expected text');
+  assert.equal(store.research.areSourcePagesCurrent(run.id,JSON.stringify([{sourceKey:'S1',url:source.url,text:''}])),false,'NULL is also different from an empty original');
+  store.addSource(run.id,{...source,excerpt:''},0);assert.equal(store.research.areSourcePagesCurrent(run.id,JSON.stringify([{sourceKey:'S1',url:source.url,text:''}])),true);
+  store.addSource(run.id,source,0);assert.equal(current(),true);
+  assert.equal(store.research.areSourcePagesCurrent('another-run',expected),false,'a matching key in another run cannot satisfy the check');
+  db.prepare('DELETE FROM sources WHERE run_id=? AND source_key=?').run(run.id,'S1');assert.equal(current(),false,'deletion invalidates the expectation without refreshing the caller');
+ } finally { db.close(); }
+});
