@@ -477,7 +477,7 @@ export function createFirstStepPanel(deps: FirstStepPanelDeps): FirstStepPanel {
     // boundary. The checkbox is a reading scope, never an ownership claim.
     cardsBox.appendChild(make('p', {
       className: 'first-step-scope-note',
-      text: '勾选只决定本轮读取范围，不代表归属已确认；待核对或不属于目标分组的账号将单独研究。'
+      text: '勾选只决定本轮读取范围，不代表归属已确认；待核对或不属于目标分组的账号将单独研究。可读仅指主页资料，不代表已读帖子、视频或评论。'
     }));
     if (mainAccounts.length === 0 && view.clusters.length > 0) {
       cardsBox.appendChild(make('p', { className: 'muted', text: '请先确认目标人物；这个人的公开账号会显示在这里。' }));

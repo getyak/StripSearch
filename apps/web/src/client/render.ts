@@ -1,8 +1,13 @@
 import {
   KIND_LABELS,
-  SOURCE_KIND_LABELS,
   stateLabel
 } from '../shared/canonical.js';
+import {
+  historyPreviewLabel,
+  platformCoverageFromSources,
+  sourceFetchStatusLabel,
+  sourcePresentation
+} from '../shared/source-presentation.js';
 import { isTerminalState } from '../shared/types.js';
 import type {
   CanonicalSource,
@@ -13,7 +18,7 @@ import type {
   RunSummary,
   SourceKind
 } from '../shared/types.js';
-import { byId, clear, formatDate, formatDateTime, hostnameOf, make } from './dom.js';
+import { byId, clear, formatDate, formatDateTime, make } from './dom.js';
 import { readableSourceText } from './source-text.js';
 
 export type SourceFilter = 'all' | 'profile' | 'work' | 'third_party' | 'excluded';
@@ -303,6 +308,7 @@ export function renderSourceList(
 
   function draw(focusKey:string|null=null,focusPage?:string,revealFocus=false):void {
     clear(container);
+    appendSourceCoverage(container, view);
     if(!sources.length){container.appendChild(make('p',{className:'empty-state',text:filter==='excluded'?'没有已排除的来源。':'这一筛选下没有来源。'}));return;}
     const start=paging.page*SOURCE_PAGE_SIZE;
     const visible=sources.slice(start,start+SOURCE_PAGE_SIZE);
@@ -324,9 +330,11 @@ export function renderSourceList(
     for(const [offset,source] of visible.entries()){
       const row=make('button',{className:'source-row',attrs:{type:'button',role:'option',tabindex:source.sourceKey===tabKey?'0':'-1','aria-selected':source.sourceKey===selectedKey?'true':'false','aria-posinset':start+offset+1,'aria-setsize':sources.length,'data-source-key':source.sourceKey},on:{click:()=>onSelect(source.sourceKey,row),focus:()=>{paging.focusKey=source.sourceKey;for(const item of list.querySelectorAll<HTMLButtonElement>('button.source-row'))item.tabIndex=item===row?0:-1;}}});
       row.dataset.status=source.excluded?'excluded':'ok';
+      const presentation=sourcePresentation(source);
+      row.dataset.platform=presentation.id;
       row.appendChild(make('span',{className:'source-code',text:source.sourceKey}));
       const body=make('span',{});body.appendChild(make('strong',{text:source.title}));
-      body.appendChild(make('span',{text:`${SOURCE_KIND_LABELS[source.kind]} · ${formatDate(source.publishedAt)}${source.excluded?' · 已排除':''}`}));
+      body.appendChild(make('span',{className:'source-row-meta',text:`${presentation.label} · ${presentation.hostLabel} · ${presentation.kindLabel} · ${formatDate(source.publishedAt)} · ${source.excluded?'已排除':presentation.statusLabel}`}));
       row.appendChild(body);list.appendChild(row);
     }
     container.appendChild(list);
@@ -354,6 +362,31 @@ function detailRow(label: string, value: string): HTMLElement {
   return wrapper;
 }
 
+/**
+ * Compact coverage over the actual run sources only: never the first-step
+ * platform selection, never the discovery catalog and never the active source
+ * filter (see docs/design/platform-source-reading-2026-10-23.md).
+ */
+function appendSourceCoverage(container: HTMLElement, view: CanonicalView | null): void {
+  if (!view || view.sources.length === 0) return;
+  const summary = platformCoverageFromSources(view.sources);
+  const counts = summary.entries
+    .map((entry) => `${entry.label} ${entry.total} 条${entry.obtained < entry.total ? `（已取得 ${entry.obtained}）` : ''}`)
+    .join(' · ');
+  container.appendChild(
+    make('p', {
+      className: 'source-coverage-line',
+      text: `来源平台覆盖（按本次实际来源）：${counts} · 共 ${summary.totalSources} 条来源，${summary.obtainedSources} 条已取得材料`
+    })
+  );
+  container.appendChild(make('p', { className: 'limit-note', text: summary.note }));
+}
+
+export function renderSourceCoverage(container: HTMLElement, view: CanonicalView | null): void {
+  clear(container);
+  appendSourceCoverage(container, view);
+}
+
 export function renderSourceDetail(
   container: HTMLElement,
   view: CanonicalView | null,
@@ -368,8 +401,15 @@ export function renderSourceDetail(
     container.appendChild(make('p', { className: 'source-placeholder', text: '选择一条来源查看原文、状态与操作。' }));
     return;
   }
-  container.appendChild(make('span', { className: 'source-label', text: `${source.sourceKey} · ${SOURCE_KIND_LABELS[source.kind]}` }));
+  const presentation = sourcePresentation(source);
+  container.appendChild(make('span', { className: 'source-label', text: `${source.sourceKey} · ${presentation.kindLabel}` }));
   container.appendChild(make('h3', { text: source.title }));
+  container.appendChild(
+    make('p', {
+      className: 'source-platform-note',
+      text: `${presentation.label} · ${presentation.hostLabel}${presentation.contentFormLabel ? ` · ${presentation.contentFormLabel}` : ''}`
+    })
+  );
   if (handlers.canReturnToCitation && handlers.onReturnToCitation) {
     container.appendChild(
       make('button', {
@@ -400,15 +440,29 @@ export function renderSourceDetail(
   } else {
     container.appendChild(make('p', { className: 'source-placeholder', text: '这份来源没有可用于展示的短摘录。' }));
   }
+  container.appendChild(make('p', { className: 'limit-note', text: presentation.materialNote }));
 
   const list = make('dl', {});
-  const link = make('a', { text: source.url, attrs: { href: source.url, target: '_blank', rel: 'noopener noreferrer', 'data-source-focus': 'url' } });
   const linkRow = make('div', {});
   linkRow.appendChild(make('dt', { text: '链接' }));
   const linkDd = make('dd', {});
-  linkDd.appendChild(link);
+  if (presentation.safeHref) {
+    linkDd.appendChild(
+      make('a', { text: source.url, attrs: { href: presentation.safeHref, target: '_blank', rel: 'noopener noreferrer', 'data-source-focus': 'url' } })
+    );
+  } else {
+    linkDd.appendChild(make('span', { text: source.url }));
+    linkDd.appendChild(make('span', { className: 'limit-note', text: '链接不是可安全展示的 http(s) 地址，只按原文显示，不生成可点击链接。' }));
+  }
   linkRow.appendChild(linkDd);
   list.appendChild(linkRow);
+  list.appendChild(detailRow('平台', presentation.matched ? `${presentation.label}（按链接主机推断）` : '未匹配已知平台，按网站展示'));
+  list.appendChild(detailRow('域名', presentation.hostLabel));
+  if (presentation.contentFormLabel) {
+    list.appendChild(
+      detailRow('内容形态', `${presentation.contentFormLabel}${presentation.contentFormNote ? ` · ${presentation.contentFormNote}` : ''}`)
+    );
+  }
   list.appendChild(detailRow('发表时间', formatDate(source.publishedAt)));
   list.appendChild(detailRow('获取时间', formatDateTime(source.retrievedAt)));
   list.appendChild(
@@ -417,11 +471,12 @@ export function renderSourceDetail(
   list.appendChild(
     detailRow(
       '状态',
-      sourceStatusLabel(source)
+      `${sourceStatusLabel(source)}${presentation.obtainedMaterial ? ' · 已取得材料' : ''}`
     )
   );
+  const limits = [...source.limits, ...presentation.limits];
   list.appendChild(
-    detailRow('已知限制', source.limits.length > 0 ? source.limits.join('；') : '没有额外限制记录。')
+    detailRow('已知限制', limits.length > 0 ? limits.join('；') : '没有额外限制记录。')
   );
   container.appendChild(list);
 
@@ -455,7 +510,10 @@ export function renderSourceDetail(
   );
   container.appendChild(actions);
   container.appendChild(
-    make('p', { className: 'limit-note', text: `URL 主机：${hostnameOf(source.url)}` })
+    make('p', {
+      className: 'limit-note',
+      text: presentation.limits.length > 0 ? presentation.limits.join('') : `URL 主机：${presentation.hostLabel}`
+    })
   );
 }
 
@@ -537,13 +595,9 @@ export function renderHistory(
     return;
   }
   for (const run of runs) {
-    let title = run.question;
-    try {
-      const url = new URL(run.question);
-      if (url.protocol === 'https:' || url.protocol === 'http:') {
-        title = url.hostname.replace(/^www\./, '') + (url.pathname === '/' ? '' : url.pathname);
-      }
-    } catch { /* A research question remains exactly as entered. */ }
+    // Preview-only compression: a question of URL plus prose never renders an
+    // enormous percent-encoded path; the full question stays in aria/title.
+    const title = historyPreviewLabel(run.question);
     const metadata = `${stateLabel(run.state)}${run.sourceCount > 0 ? ` · ${run.sourceCount} 个来源` : ''}${run.reviewCount > 0 ? ` · ${run.reviewCount} 处待复核` : ''}`;
     const button = make('button', {
       className: 'history-item',
@@ -606,10 +660,7 @@ export function renderFollowupRail(
 
 export function sourceStatusLabel(source: CanonicalSource): string {
   if (source.excluded) return '已不采用';
-  if (source.fetchStatus === 'ok') return '已读取';
-  if (source.fetchStatus === 'truncated') return '被截断';
-  if (source.fetchStatus === 'inaccessible') return '未能读取';
-  return '已不采用';
+  return sourceFetchStatusLabel(source.fetchStatus);
 }
 
 export { byId };

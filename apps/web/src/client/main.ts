@@ -16,7 +16,7 @@ import { clearFirstStepDrafts } from './first-step-draft-storage.js';
 import type { FirstStepPanel } from './first-step.js';
 import { createHomeMotion } from './home-motion.js';
 import { createLocalSearch } from './local-search.js';
-import { createResearchLoadingSurface, deriveResearchLoading } from './research-loading.js';
+import { createResearchLoadingSurface, deriveResearchLoading, researchGapText } from './research-loading.js';
 import { createMobileNavigation } from './mobile-navigation.js';
 import type { LocalSearchItem } from './local-search.js';
 import { createReviewWorkbench } from './review.js';
@@ -61,6 +61,7 @@ interface AppState {
   submitBusy: boolean;
   submitAttempt: { ownerId: string; input: string; key: string } | null;
   resumeBusy: boolean;
+  followupAttempt: { ownerId: string; runId: string; epoch: number; question: string; key: string; busy: boolean } | null;
   activeRunId: string | null;
   signOutBusy: boolean;
 }
@@ -89,6 +90,7 @@ const state: AppState = {
   submitBusy: false,
   submitAttempt: null,
   resumeBusy: false,
+  followupAttempt: null,
   activeRunId: null,
   signOutBusy: false
 };
@@ -327,6 +329,7 @@ function clearPrivateState(): void {
   state.pendingSubmit = false;
   state.submitBusy = false;
   state.submitAttempt = null;
+  state.followupAttempt = null;
   state.resumeBusy = false;
   els.submit.disabled = false;
   els.form.removeAttribute('aria-busy');
@@ -522,9 +525,9 @@ function handleAuthSuccess(user: SessionUser): void {
   // Invalidate anything queued for a previous session.
   state.runEpoch += 1;
   renderUserNav(user);
-  void loadRuns();
   if (state.pendingSubmit) state.pendingSubmit = false;
   route();
+  void loadRuns();
 }
 
 async function signOut(): Promise<void> {
@@ -570,11 +573,12 @@ async function loadRuns(): Promise<void> {
   renderHistoryRail();
 }
 
-async function selectRun(runId: string): Promise<void> {
+async function selectRun(runId: string, initialRun?: CanonicalView): Promise<void> {
   byId<HTMLDetailsElement>('more-menu').open = false;
   const epoch = ++state.runEpoch;
   state.activeRunId = runId;
   state.resumeBusy = false;
+  state.followupAttempt = null;
   state.selectedSourceKey = null;
   state.filter = 'all';
   state.messages = [];
@@ -590,7 +594,7 @@ async function selectRun(runId: string): Promise<void> {
   localSearch.refresh();
   let snapshot: { run: CanonicalView; events: RunEventRecord[]; latestSeq: number };
   try {
-    snapshot = await api.getRun(runId);
+    snapshot = initialRun?.runId === runId ? { run: initialRun, events: [], latestSeq: 0 } : await api.getRun(runId);
   } catch (error) {
     if (state.runEpoch !== epoch) return;
     showToast(error instanceof ApiError ? error.message : '读取研究失败。', 'error');
@@ -749,10 +753,13 @@ function handleEvent(type: string, payload: unknown, seq: number, epoch: number)
       // is preserved inside the panel and never overwritten by these pushes.
       syncFirstStep(runId);
       break;
-    case 'stage':
+    case 'stage': {
       state.stages = stagesFromEvents(state.events);
       renderActivityPanel();
+      const status = (payload as { status?: unknown } | null)?.status;
+      if (status === 'unavailable' || status === 'error') scheduleSnapshotRefresh(runId, epoch);
       break;
+    }
     case 'source': {
       const source = payload as CanonicalView['sources'][number] | null;
       if (source && !state.run.sources.some((item) => item.sourceKey === source.sourceKey)) {
@@ -973,16 +980,20 @@ function renderHeader(): void {
   els.downloadHtml.disabled = !ready;
   els.downloadPdf.disabled = !ready;
   const chatEnabled = Boolean(run && isTerminalState(run.state) && ready && chatSupported(run));
-  els.chatInput.disabled = !chatEnabled;
-  els.chatSend.disabled = !chatEnabled;
+  const followupPending = Boolean(state.followupAttempt?.busy && state.followupAttempt.runId === run?.runId && state.followupAttempt.epoch === state.runEpoch);
+  els.chatInput.disabled = !chatEnabled || followupPending;
+  els.chatSend.disabled = !chatEnabled || followupPending || !els.chatInput.value.trim();
+  els.chatForm.setAttribute('aria-busy', String(followupPending));
+  setText(els.chatSend, followupPending ? '提交中…' : '发送');
   setText(els.chatHint, chatHint(run, chatEnabled));
 }
 
 function chatHint(run: CanonicalView | null, chatEnabled: boolean): string {
+  if (state.followupAttempt?.busy && state.followupAttempt.runId === run?.runId && state.followupAttempt.epoch === state.runEpoch) return '正在创建追问，已保留本次问题…';
   if (state.streamState === 'reconnecting') return '实时连接中断，正在重连；报告内容不会丢失。';
   if (!run) return '报告完成后可以继续追问。';
   if (!chatSupported(run)) return '这份旧资料只包含账号与作品记录。可返回首页开始新的完整研究。';
-  if (chatEnabled) return '继续了解感兴趣的细节；新的研究会单独保存。';
+  if (chatEnabled) return '追问会单独保存；本次材料的读取限制仍然适用。';
   return '报告完成后可以继续追问。';
 }
 
@@ -1095,6 +1106,7 @@ function renderRunSummary(): void {
     cancelled: '研究已停止，已有资料仍可查看。'
   };
   const stopReason = research?.stopReason ?? run?.stopReason;
+  const unresolved = [...new Set(run?.research?.unresolved ?? [])].map(researchGapText);
   // While research is active (or waiting for a person decision) the live
   // research surface owns the current action; this line keeps only truthful
   // stop/outcome context for the settled states, with a generic fallback for
@@ -1108,6 +1120,7 @@ function renderRunSummary(): void {
     message = message ? `${message}${note}` : note;
   }
   if (run && (isActiveState(run.state) || run.state === 'needs_input')) message = '';
+  else if (unresolved.length > 0) message = `${message} 有 ${unresolved.length} 项读取限制与核对记录。${unresolved[0]}`.trim();
   setText(els.statusSummary, message);
   show(els.statusSummary, Boolean(message));
   if (research?.coverage) {
@@ -1130,11 +1143,12 @@ function renderRunSummary(): void {
     details.appendChild(make('p', { text: `${estimatedCost}。${budget.unknownCost ? '部分费用尚未确认，实际金额可能更高。' : '以服务商的实际账单为准。'}` }));
     els.researchDetails.appendChild(details);
   }
-  if (run?.limitations.length) {
+  const limitations = [...new Set([...(run?.limitations ?? []).map(researchGapText), ...unresolved])];
+  if (limitations.length) {
     const details = make('details', {});
     details.appendChild(make('summary', { text: '本次读取的范围与限制' }));
     const list = make('ul', {});
-    for (const limit of run.limitations) list.appendChild(make('li', { text: limit }));
+    for (const limit of limitations) list.appendChild(make('li', { text: limit }));
     details.appendChild(list);
     els.researchDetails.appendChild(details);
   }
@@ -1357,12 +1371,19 @@ async function sendFollowup(question: string): Promise<void> {
   const epoch = state.runEpoch;
   const userId = state.user?.id ?? null;
   const trimmed = question.trim();
-  if (trimmed.length === 0) return;
+  if (trimmed.length === 0 || !userId) return;
+  const previous = state.followupAttempt;
+  if (previous?.busy && previous.ownerId === userId && previous.runId === runId && previous.epoch === epoch) return;
+  const attempt = previous && previous.ownerId === userId && previous.runId === runId && previous.epoch === epoch && previous.question === trimmed
+    ? previous : { ownerId: userId, runId, epoch, question: trimmed, key: `followup-${crypto.randomUUID()}`, busy: false };
+  state.followupAttempt = attempt;
+  attempt.busy = true;
+  renderHeader();
   state.messages.push({ role: 'user', label: '你', text: trimmed });
   renderMessages(els.chatLog, state.messages);
   let child: CanonicalView;
   try {
-    child = await api.followup(runId, trimmed);
+    child = await api.followup(runId, trimmed, attempt.key);
   } catch (error) {
     if (!isCurrentRun(runId, epoch)) return;
     state.messages.push({
@@ -1373,6 +1394,9 @@ async function sendFollowup(question: string): Promise<void> {
     renderMessages(els.chatLog, state.messages);
     els.chatInput.value = trimmed;
     return;
+  } finally {
+    attempt.busy = false;
+    if (state.followupAttempt === attempt && isCurrentRun(runId, epoch)) renderHeader();
   }
   if (!isCurrentUser(userId) || !isCurrentRun(runId, epoch)) return;
   state.messages.push({
@@ -1381,9 +1405,12 @@ async function sendFollowup(question: string): Promise<void> {
     text: `已创建子研究「${child.question}」并开始查看。`
   });
   renderMessages(els.chatLog, state.messages);
-  await loadRuns();
-  if (!isCurrentUser(userId)) return;
-  await selectRun(child.runId);
+  state.followupAttempt = null;
+  // The creation response is already an owned canonical snapshot. Open it
+  // directly: a subsequent GET failure must not turn navigation into a second
+  // billable creation attempt. SSE resumes from the beginning for live updates.
+  await selectRun(child.runId, child);
+  if (isCurrentUser(userId)) void loadRuns();
 }
 
 /* ---------------- actions ---------------- */
@@ -1683,8 +1710,10 @@ function wire(): void {
     element.addEventListener('click', () => closeDrawer(els.sourceDrawer, true));
   }
 
+  els.chatInput.addEventListener('input', () => renderHeader());
   els.chatForm.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (els.chatInput.disabled || els.chatSend.disabled) return;
     const value = els.chatInput.value.trim();
     if (value.length === 0) return;
     els.chatInput.value = '';

@@ -461,6 +461,11 @@ body[data-view="app"] .work-actions > .button:hover { background: var(--surface-
 .research-live-heading { margin: 0 0 8px; font-size: clamp(19px, 2.1vw, 24px); line-height: 1.3; letter-spacing: -.015em; }
 .research-live-context p { margin: 0 0 6px; color: var(--fg-2); font-size: 15px; overflow-wrap: anywhere; }
 .research-live-context p:last-child { margin-bottom: 0; }
+.research-live-gaps { padding: 14px 16px; border-inline-start: 3px solid var(--warning); background: var(--surface-2); overflow-wrap: anywhere; }
+.research-live-gaps h3 { margin: 0 0 8px; font-size: 16px; }
+.research-live-gaps ul { margin: 0; padding-inline-start: 20px; }
+.research-live-gaps li { margin-block: 6px; font-size: 15px; }
+.research-live-gaps summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
 .stage-path { list-style: none; margin: 0; padding: 4px 0; }
 .stage-path[hidden] { display: none; }
 .stage-path li { display: flex; align-items: baseline; gap: 12px; padding: 7px 2px; border-top: 1px solid var(--border); font-size: 14px; }
@@ -526,11 +531,18 @@ body[data-view="app"] .work-actions > .button:hover { background: var(--surface-
 .source-code { color: var(--accent); font-family: var(--font-mono); font-size: 12px; }
 .source-row strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
 .source-row span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.source-row-meta { overflow-wrap: anywhere; }
+.source-coverage-line { margin: 0; padding: 8px 12px 2px; color: var(--fg-2); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.source-list .source-coverage-line + .limit-note { margin: 0; padding: 0 12px 8px; border-bottom: 1px solid var(--border); }
 .source-row[data-status="excluded"] .source-code { color: var(--danger); text-decoration: line-through; }
 .source-detail { padding: 16px; overflow-y: auto; min-width: 0; }
 .source-detail h3 { margin: 8px 0 4px; font-size: 18px; overflow-wrap: anywhere; }
-.source-quote { padding: 12px; border-left: 2px solid var(--accent); background: var(--surface-2); color: var(--fg-2); overflow-wrap: anywhere; }
-.source-quote p { margin: 6px 0 0; }
+.source-platform-note { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.source-quote {
+  padding: 14px 16px; border-left: 2px solid var(--accent); background: var(--surface-2);
+  color: var(--fg); overflow-wrap: anywhere; font-size: 15px; line-height: 1.85;
+}
+.source-quote p { margin: 8px 0 0; font-size: 15px; line-height: 1.85; }
 .source-detail dl { margin: 14px 0; }
 .source-detail dl div { padding: 9px 0; border-top: 1px solid var(--border); }
 .source-detail dt { color: var(--muted); font-size: 12px; }

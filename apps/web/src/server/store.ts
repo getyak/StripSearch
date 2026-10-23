@@ -113,6 +113,13 @@ interface EventRow {
   created_at: string;
 }
 
+/** A synchronous summary read only; discarded before another request can mutate data. */
+interface SummaryReadContext {
+  checkpoints: Map<string, ResearchCheckpoint | null>;
+  sources: Map<string, CanonicalSource | null>;
+  scopes: Map<string, boolean>;
+}
+
 export interface RunRecord {
   id: string;
   ownerId: string;
@@ -236,6 +243,7 @@ export interface CreateRunInput {
 }
 
 export class Store {
+  private summaryRead: SummaryReadContext | null = null;
   readonly research: ResearchStore;
   readonly cases: CaseStore;
   /** GET-60 frozen scope / completion policy foundations (same lifetime). */
@@ -247,6 +255,65 @@ export class Store {
     this.cases = new CaseStore(db);
     this.completion = new CompletionStore(db, this.cases);
     this.fetchCoverage = new FetchCoverageStore(db, this.cases, this.completion);
+  }
+
+  private projectionCheckpoint(runId: string): ResearchCheckpoint | null {
+    const context = this.summaryRead;
+    if (!context) return this.research.checkpoint(runId);
+    if (!context.checkpoints.has(runId)) context.checkpoints.set(runId, this.research.checkpoint(runId));
+    return context.checkpoints.get(runId)!;
+  }
+
+  private projectionBinding(runId: string): FirstStepBinding | null {
+    return this.summaryRead ? this.projectionCheckpoint(runId)?.firstStep ?? null : this.research.firstStepBinding(runId);
+  }
+
+  /** Read the evidence needed by the summary, never unrelated retained bodies. */
+  private sourceSubset(runId: string, keys: ReadonlySet<string>): CanonicalSource[] {
+    const result: CanonicalSource[] = [];
+    const values = [...keys];
+    for (let offset = 0; offset < values.length; offset += 400) {
+      const batch = values.slice(offset, offset + 400);
+      const rows = this.db.prepare(`SELECT * FROM sources WHERE run_id = ? AND source_key IN (${batch.map(() => '?').join(',')}) ORDER BY sort_order ASC, created_at ASC`).all(runId, ...batch) as SourceRow[];
+      for (const row of rows) {
+        const source = mapSource(row);
+        result.push(source);
+        this.summaryRead?.sources.set(JSON.stringify([runId, source.sourceKey]), source);
+      }
+    }
+    return result;
+  }
+
+  private summaryObservations(runId: string): CanonicalObservation[] {
+    const rows = this.db.prepare('SELECT id, statement, kind, source_keys_json FROM observations WHERE run_id = ? ORDER BY sort_order ASC, created_at ASC').all(runId) as Array<Pick<ObservationRow, 'id' | 'statement' | 'kind' | 'source_keys_json'>>;
+    return rows.map(row => ({ observationId: row.id, statement: row.statement, kind: row.kind,
+      sourceKeys: parseJson<string[]>(row.source_keys_json, []), limitations: [], validity: 'valid', reviewReason: null }));
+  }
+
+  /** Archived X proposals cannot affect the currently published report's state. */
+  private summaryCheckpoint(checkpoint: ResearchCheckpoint | null): ResearchCheckpoint | null {
+    if (!checkpoint?.xAccountResearch) return checkpoint;
+    const state = checkpoint.xAccountResearch;
+    const ready = state.analysis.completedBatches.filter(key => key.startsWith('report-plan:v1:ready:')).at(-1)?.split(':');
+    const plan = state.analysis.synthesisDone && ready && state.analysis.completedBatches.includes(`report:v4:complete:${ready[3]}:${ready[4]}`) ? ready[4] : null;
+    const findings = state.analysis.findings.filter(finding => plan ? finding.id.startsWith(`report:v4:${plan}:`) : !finding.id.startsWith('report:'));
+    return { ...checkpoint, xAccountResearch: { ...state, analysis: { ...state.analysis, findings } } };
+  }
+
+  private summarySourceKeys(run: RunRecord, checkpoint: ResearchCheckpoint | null, observations: readonly CanonicalObservation[]): Set<string> {
+    const keys = new Set(observations.flatMap(observation => observation.sourceKeys));
+    for (const section of run.answer) for (const bullet of section.bullets) for (const key of bullet.sourceKeys) keys.add(key);
+    for (const claim of checkpoint?.claims ?? []) keys.add(claim.sourceKey);
+    for (const finding of checkpoint?.xAccountResearch?.analysis.findings ?? []) if (finding.verified) for (const evidence of finding.evidence) keys.add(evidence.sourceKey);
+    for (const material of checkpoint?.independentMaterials ?? []) keys.add(material.sourceKey);
+    // The complete projection treats every retained source at the anchor URL
+    // as identity provenance, including older keys no longer in the checkpoint.
+    // Select only keys here; the normal dependency fold validates their bodies.
+    if (checkpoint?.anchorUrl) {
+      const anchors = this.db.prepare('SELECT source_key FROM sources WHERE run_id = ? AND url = ?').all(run.id, checkpoint.anchorUrl) as Array<{source_key:string}>;
+      for (const anchor of anchors) keys.add(anchor.source_key);
+    }
+    return keys;
   }
 
   /**
@@ -532,10 +599,14 @@ export class Store {
   }
 
   getSource(runId: string, sourceKey: string): CanonicalSource | null {
+    const cacheKey = JSON.stringify([runId, sourceKey]);
+    if (this.summaryRead?.sources.has(cacheKey)) return this.summaryRead.sources.get(cacheKey)!;
     const row = this.db
       .prepare('SELECT * FROM sources WHERE run_id = ? AND source_key = ?')
       .get(runId, sourceKey) as SourceRow | undefined;
-    return row ? mapSource(row) : null;
+    const source = row ? mapSource(row) : null;
+    this.summaryRead?.sources.set(cacheKey, source);
+    return source;
   }
 
   setSourceExcluded(runId: string, sourceKey: string, excluded: boolean): boolean {
@@ -624,10 +695,13 @@ export class Store {
   /** Frozen authorization is separate from person identity, including descendant reports. */
   isResearchScopeActive(runId: string, ownerId: string, visited = new Set<string>(), accountIds = new Set<string>()): boolean {
     if (visited.has(runId)) return false;
+    const cacheKey = JSON.stringify([runId, ownerId]);
+    const cacheable = visited.size === 0 && accountIds.size === 0;
+    if (cacheable && this.summaryRead?.scopes.has(cacheKey)) return this.summaryRead.scopes.get(cacheKey)!;
     const run = this.getRunForOwner(runId, ownerId);
     if (!run) return false;
     const seen = new Set(visited); seen.add(runId);
-    const binding = this.research.firstStepBinding(runId);
+    const binding = this.projectionBinding(runId);
     const dependencies = new Set(accountIds);
     if (binding) {
       if (!this.isFirstStepScopeActive(ownerId, binding)) return false;
@@ -638,11 +712,13 @@ export class Store {
     for (const accountId of dependencies) {
       if (this.db.prepare('SELECT id FROM first_step_exclusions WHERE run_id=? AND account_id=? AND revoked_at IS NULL').get(runId, accountId)) return false;
     }
-    return [run.parentRunId, run.retryOf].every(parent => !parent || this.isResearchScopeActive(parent, ownerId, seen, dependencies));
+    const active = [run.parentRunId, run.retryOf].every(parent => !parent || this.isResearchScopeActive(parent, ownerId, seen, dependencies));
+    if (cacheable) this.summaryRead?.scopes.set(cacheKey, active);
+    return active;
   }
 
   private isIndependentResearchPage(runId: string, url: string): boolean {
-    const binding = this.research.checkpoint(runId)?.firstStep;
+    const binding = this.projectionCheckpoint(runId)?.firstStep;
     const ref = classifyFirstStepUrl(url);
     return Boolean(binding && ref.ok && binding.independentAccountIds.includes(binding.accountKeys[ref.ref.accountKey] ?? ''));
   }
@@ -654,12 +730,14 @@ export class Store {
     const run = this.getRunForOwner(runId, ownerId);
     const source = run ? this.getSource(runId, sourceKey) : null;
     if (!run || !source || source.excluded || !this.isResearchScopeActive(runId, ownerId)) return false;
-    const checkpoint = this.research.checkpoint(runId);
+    const checkpoint = this.projectionCheckpoint(runId);
     const page = checkpoint?.pages.find(page => page.sourceKey === sourceKey);
     const anchor = checkpoint?.pages.find(page => page.url === checkpoint.anchorUrl);
     if (anchor && anchor.sourceKey !== sourceKey && !this.isIndependentResearchPage(runId, source.url) && !this.isResearchSourceActive(runId, anchor.sourceKey, ownerId, seen)) return false;
     if (page?.discoveredFrom?.length && !page.discoveredFrom.some(parentKey => this.isResearchSourceActive(runId, parentKey, ownerId, seen))) return false;
-    return !page?.inheritedFrom || this.isResearchSourceActive(page.inheritedFrom.runId, page.inheritedFrom.sourceKey, ownerId, seen);
+    if (!page?.inheritedFrom) return true;
+    const parentSource = this.getSource(page.inheritedFrom.runId, page.inheritedFrom.sourceKey);
+    return parentSource?.url === page.url && parentSource.excerpt === page.text && this.isResearchSourceActive(page.inheritedFrom.runId, page.inheritedFrom.sourceKey, ownerId, seen);
   }
 
   /** Person attribution can depend on an unselected intermediate identity anchor. */
@@ -686,7 +764,7 @@ export class Store {
   activeXAccountSourceKeys(runId:string,ownerId:string):Set<string>{
     const done=new Map<string,Set<string>>(),visiting=new Set<string>();
     const snapshots=new Map<string,{cp:ResearchCheckpoint|null;pages:Map<string,StoredPage>}>();
-    const snapshot=(id:string)=>{let value=snapshots.get(id);if(!value){const cp=this.research.checkpoint(id);value={cp,pages:new Map(cp?.pages.map(p=>[p.sourceKey,p])??[])};snapshots.set(id,value);}return value;};
+    const snapshot=(id:string)=>{let value=snapshots.get(id);if(!value){const cp=this.projectionCheckpoint(id);value={cp,pages:new Map(cp?.pages.map(p=>[p.sourceKey,p])??[])};snapshots.set(id,value);}return value;};
     const project=(id:string):Set<string>=>{
       if(done.has(id))return done.get(id)!;if(visiting.has(id))return new Set();
       const run=this.getRunForOwner(id,ownerId),cp=run?snapshot(id).cp:null;
@@ -700,14 +778,45 @@ export class Store {
     };return project(runId);
   }
 
-  buildCanonicalView(run: RunRecord): CanonicalView {
-    const checkpoint = run.provider === 'research' ? this.research.checkpoint(run.id) : null;
+  /** Same X provenance checks, restricted to the current publication's dependency closure. */
+  private activeXSummarySourceKeys(runId: string, ownerId: string, requested: ReadonlySet<string>): Set<string> {
+    const checked = new Map<string, boolean>(), visiting = new Set<string>();
+    const snapshots = new Map<string, { checkpoint: ResearchCheckpoint | null; pages: Map<string, StoredPage> }>();
+    const snapshot = (id: string) => {
+      let value = snapshots.get(id);
+      if (!value) { const checkpoint = this.projectionCheckpoint(id); value = { checkpoint, pages: new Map(checkpoint?.pages.map(page => [page.sourceKey, page]) ?? []) }; snapshots.set(id, value); }
+      return value;
+    };
+    const active = (id: string, sourceKey: string): boolean => {
+      const key = JSON.stringify([id, sourceKey]);
+      if (checked.has(key)) return checked.get(key)!;
+      if (visiting.has(key)) return false;
+      const run = this.getRunForOwner(id, ownerId), current = snapshot(id);
+      if (!run || !current.checkpoint?.xAccountResearch || !this.isResearchScopeActive(id, ownerId)) return false;
+      const page = current.pages.get(sourceKey), source = this.getSource(id, sourceKey);
+      if (!page || !source || source.excluded || source.url !== page.url || source.excerpt !== page.text) return false;
+      visiting.add(key);
+      const inherited = page.inheritedFrom;
+      const parent = inherited ? snapshot(inherited.runId).pages.get(inherited.sourceKey) : null;
+      const valid = (!inherited || parent?.url === page.url && parent.text === page.text && active(inherited.runId, inherited.sourceKey))
+        && (!page.discoveredFrom?.length || page.discoveredFrom.some(parentKey => active(id, parentKey)));
+      visiting.delete(key); checked.set(key, valid);
+      return valid;
+    };
+    return new Set([...requested].filter(key => active(runId, key)));
+  }
+
+  buildCanonicalView(run: RunRecord, summaryOnly = false): CanonicalView {
+    const storedCheckpoint = run.provider === 'research' ? this.projectionCheckpoint(run.id) : null;
+    const checkpoint = summaryOnly ? this.summaryCheckpoint(storedCheckpoint) : storedCheckpoint;
+    const summaryObservations = summaryOnly ? this.summaryObservations(run.id) : null;
     const scopeChanged = Boolean(checkpoint && !this.isResearchScopeActive(run.id, run.ownerId));
     const scopeReason = '已冻结的账号研究范围已变更或撤回；原资料保留，相关结论需要重新核对。';
     const identityChanged = Boolean(checkpoint?.firstStep && !this.isFirstStepIdentityActive(run.ownerId, checkpoint.firstStep));
     const identityReason = '人物关联的归属依据已失效；原资料保留，人物结论需要重新核对。';
-    const rawSources=this.listSources(run.id);
-    const xActive=checkpoint?.xAccountResearch?this.activeXAccountSourceKeys(run.id,run.ownerId):null;
+    const requestedKeys = summaryOnly ? this.summarySourceKeys(run, checkpoint, summaryObservations!) : null;
+    const rawSources=requestedKeys ? this.sourceSubset(run.id, requestedKeys) : this.listSources(run.id);
+    const xActive=checkpoint?.xAccountResearch ? requestedKeys ? this.activeXSummarySourceKeys(run.id,run.ownerId,requestedKeys) : this.activeXAccountSourceKeys(run.id,run.ownerId) : null;
     const sources = rawSources.map(source => checkpoint && (xActive?!xActive.has(source.sourceKey):!this.isResearchSourceActive(run.id, source.sourceKey, run.ownerId))
       ? { ...source, excluded: true, fetchStatus: 'excluded' as const }
       : identityChanged ? { ...source, identityConfirmed: false, identityLabel: '人物归属待复核；账号自身原资料保留。' } : source);
@@ -742,7 +851,7 @@ export class Store {
     });
     const xProjection=checkpoint?.xAccountResearch?projectXAccountReport({state:checkpoint.xAccountResearch,pages:checkpoint.pages,sources:xSourceDrafts(sources),activeSourceKeys:xActive!}):null;
     const xEvidenceChanged=Boolean(xProjection?.rejectedFindings);
-    const observations = this.listObservations(run.id).filter(observation=>!isPolicyRejected(observation.statement,observation.sourceKeys)).map(observation=>({...observation,sourceKeys:projectedKeys(observation.statement,observation.sourceKeys)})).map(observation => ({ ...observation,
+    const observations = (summaryObservations ?? this.listObservations(run.id)).filter(observation=>!isPolicyRejected(observation.statement,observation.sourceKeys)).map(observation=>({...observation,sourceKeys:projectedKeys(observation.statement,observation.sourceKeys)})).map(observation => ({ ...observation,
       validity: scopeChanged || identityChanged ? 'review' as const : validityFor(observation.sourceKeys, excluded),
       reviewReason: scopeChanged ? scopeReason : identityChanged ? identityReason : reviewReason(observation.sourceKeys, excluded)
     }));
@@ -814,8 +923,12 @@ export class Store {
   }
 
   summarize(run: RunRecord): RunSummary {
-    const view = this.buildCanonicalView(run);
-    return {
+    const previous = this.summaryRead;
+    this.summaryRead = { checkpoints: new Map(), sources: new Map(), scopes: new Map() };
+    try {
+      const view = this.buildCanonicalView(run, true);
+      const count = this.db.prepare('SELECT COUNT(*) AS n FROM sources WHERE run_id = ?').get(run.id) as { n: number };
+      return {
       runId: run.id,
       question: run.question,
       state: view.state,
@@ -823,9 +936,10 @@ export class Store {
       revision: run.revision,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
-      sourceCount: view.sources.length,
+      sourceCount: count.n,
       reviewCount: view.reviewCount
-    };
+      };
+    } finally { this.summaryRead = previous; }
   }
 
   countActiveGlobal(): number {

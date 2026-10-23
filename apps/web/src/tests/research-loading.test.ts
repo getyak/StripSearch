@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSION } from '../shared/types.js';
 import type { CanonicalView, RunEventRecord, SessionUser } from '../shared/types.js';
-import { deriveResearchLoading } from '../client/research-loading.js';
+import { deriveResearchLoading, researchGapText } from '../client/research-loading.js';
 import type { StageView } from '../client/render.js';
 import { installDom, installFetch, jsonResponse, MockEventSource } from './dom-env.js';
 
@@ -512,7 +512,10 @@ test('real signout removes the previous query and source text from the retained 
   await freshUser('private-loading-owner');
   const query = 'SYNTHETIC_PRIVATE_QUERY_A';
   const title = 'SYNTHETIC_PRIVATE_SOURCE_A';
-  applySnapshot(makeView('run-private-loading', { question: query, sources: [source('PRIVATE', { title })], research: researchMeta('reading') }), [], 0);
+  const privateGap = 'SYNTHETIC_PRIVATE_GAP_A';
+  applySnapshot(makeView('run-private-loading', { question: query, sources: [source('PRIVATE', { title })], research: { ...researchMeta('reading'), unresolved: [privateGap, 'second', 'third', 'SYNTHETIC_PRIVATE_OVERFLOW_A'] } }), [], 0);
+  const gapMore = surface().querySelector<HTMLDetailsElement>('.research-live-gaps details')!;
+  gapMore.open = true;
   assert.ok(surface().textContent!.includes(query) && surface().textContent!.includes(title), 'Valid populated precondition');
   route = () => jsonResponse({});
   await main.__test.signOut();
@@ -521,6 +524,10 @@ test('real signout removes the previous query and source text from the retained 
   assert.equal(surface().hidden, true);
   assert.ok(!surface().textContent!.includes(query) && !surface().textContent!.includes(title),
     'Hidden UI must not retain the previous authenticated content after logout');
+  assert.doesNotMatch(surface().textContent!, /SYNTHETIC_PRIVATE_(?:GAP|OVERFLOW)_A/);
+  assert.equal(surface().querySelector<HTMLElement>('.research-live-gaps')!.hidden, true);
+  assert.equal(gapMore.open, false);
+  assert.equal(gapMore.textContent, '');
 });
 
 
@@ -600,4 +607,43 @@ test('a real research error message remains visible separately from transport re
   assert.equal(el('toast').textContent, '合成研究操作已失败。', 'A real server error is not swallowed');
   assert.equal(state.latestSeq, 1);
   stream.close();
+});
+
+test('gap translation preserves target URLs and historical verification qualifiers', () => {
+  const url = 'https://fixture.invalid/provider_billing?q=provider_timeout';
+  const translated = researchGapText(`历史记录尚未复核（provider_billing）：${url}；不代表当前问题。`);
+  assert.ok(translated.includes(url));
+  assert.match(translated, /历史记录尚未复核（服务商计费或额度限制）/);
+  assert.match(translated, /不代表当前问题/);
+  const uppercase = 'HTTPS://fixture.invalid/provider_billing?q=provider_timeout';
+  assert.ok(researchGapText(`provider_billing：${uppercase}`).includes(uppercase));
+});
+
+test('selected-account reading gaps remain visible during research and after completion without leaking across runs', async () => {
+  await freshUser('selected-account-gap');
+  const gap = '所选账号初始材料未读取成功（provider_billing）：https://x.com/fixture-person；不代表无资料。';
+  const meta = { ...researchMeta('reading'), unresolved: [gap, gap] };
+  const run = makeView('run-selected-account-gap', { sources: [source('S1')], research: meta, limitations: [] });
+  applySnapshot(run, [], 0);
+  const warning = surface().querySelector<HTMLElement>('[aria-label="读取与核验缺口"]');
+  assert.ok(warning && !warning.hidden, 'a partial provider failure is visible beside the live status');
+  assert.match(warning.textContent ?? '', /x\.com\/fixture-person/);
+  assert.match(warning.textContent ?? '', /计费或额度限制/);
+  assert.doesNotMatch(warning.textContent ?? '', /provider_billing/);
+  assert.equal(warning.querySelectorAll('li').length, 1, 'duplicate canonical gaps do not duplicate the warning');
+  assert.match(surface().textContent ?? '', /合成来源 S1/, 'successful material remains available');
+  applySnapshot({ ...run, state: 'partial', revision: 2 }, [], 0);
+  assert.match(el('run-status-summary').textContent ?? '', /x\.com\/fixture-person/, 'the settled summary retains the actual failed account');
+  assert.match(el('research-details').textContent ?? '', /计费或额度限制/);
+  applySnapshot(makeView('another-gap-free-run', { research: researchMeta('reading') }), [], 0);
+  assert.doesNotMatch(surface().textContent ?? '', /fixture-person/);
+});
+
+test('historical model questions are not counted as current reading failures', async () => {
+  await freshUser('historical-gap-qualifier');
+  const historical = 'Agent 在步骤 1 提出的核对项（未经独立核验，不代表当前读取状态）：当时尚未读取博客正文。';
+  applySnapshot(makeView('historical-reading', { state: 'partial', research: { ...researchMeta('done'), unresolved: [historical] } }), [], 0);
+  assert.match(el('run-status-summary').textContent ?? '', /读取限制与核对记录/);
+  assert.match(el('run-status-summary').textContent ?? '', /不代表当前读取状态/);
+  assert.doesNotMatch(el('run-status-summary').textContent ?? '', /1 项读取与核验缺口/);
 });

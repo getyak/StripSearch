@@ -107,6 +107,26 @@ function cluster(overrides: Partial<FirstStepPersonClusterView> = {}): FirstStep
   };
 }
 
+test('website host handles remain public entries while dotted social handles stay accounts', () => {
+  const website = accountView({ platform: 'personal_site', platformLabel: '个人网站', handle: 'lantern.dev', profileUrl: 'https://lantern.dev/' });
+  const siteCluster = cluster({ displayName: 'Lantern public archive', anchorLabel: '个人网站', anchorUrl: website.profileUrl });
+  const view = discoveryView({ input: { kind: 'homepage_url', value: website.profileUrl! }, accounts: [website] });
+  const entry = personLabelFor(siteCluster, view);
+  assert.equal(entry.label, 'lantern.dev');
+  assert.equal(entry.kind, 'entry_only');
+  assert.doesNotMatch(entry.kindLabel, /handle/);
+  assert.equal(entry.pageTitle, 'Lantern public archive');
+  const nameQuery = personLabelFor(siteCluster, discoveryView({ accounts: [website] }));
+  assert.equal(nameQuery.label, 'Lin Zhou');
+  assert.doesNotMatch(nameQuery.label, /^@/);
+  const bluesky = accountView({ platform: 'bluesky', handle: 'fixture.bsky.social', profileUrl: 'https://bsky.app/profile/fixture.bsky.social' });
+  assert.equal(personLabelFor(cluster(), discoveryView({ input: { kind: 'homepage_url', value: bluesky.profileUrl! }, accounts: [bluesky] })).label, '@fixture.bsky.social');
+  const named = { ...website, identity: { ...website.identity, ownerAnchor: owner('self_declared', 'Lin Zhou'), ownerValidity: 'valid' as const } };
+  assert.equal(personLabelFor(siteCluster, { ...view, accounts: [named] }).label, 'Lin Zhou');
+  const withdrawn = { ...named, identity: { ...named.identity, ownerValidity: 'review' as const } };
+  assert.equal(personLabelFor(siteCluster, { ...view, accounts: [withdrawn] }).label, 'lantern.dev');
+});
+
 test('a source-backed owner person label is preferred and honestly qualified', () => {
   const anchor = accountView({
     identity: {

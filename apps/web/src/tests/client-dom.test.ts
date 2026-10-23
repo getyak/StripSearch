@@ -250,3 +250,36 @@ test('small source lists keep roving keys and restore selected row focus without
  const onSelect=(key:string)=>{selected=key;renderSourceList(container,view,selected,'all',onSelect);};renderSourceList(container,view,selected,'all',onSelect);assert.equal(container.querySelector('[data-source-page]'),null);
  const row=container.querySelector<HTMLButtonElement>('[data-source-key="S2"]')!;row.focus();row.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S3');(jsdomWindow.document.activeElement as HTMLButtonElement).click();assert.equal(selected,'S3');assert.equal((jsdomWindow.document.activeElement as HTMLElement).dataset.sourceKey,'S3');assert.equal(container.querySelectorAll('button.source-row[tabindex="0"]').length,1);container.remove();
 });
+
+test('source rows and details carry quiet platform/domain/status context with no third-party loads',()=>{
+ const list=domContainer();const detail=domContainer();jsdomWindow.document.body.append(list,detail);const base=viewWith();
+ const view=viewWith({sources:[
+  {...base.sources[0]!,url:'https://www.youtube.com/watch?v=abc',kind:'third_party'},
+  {...base.sources[0]!,sourceKey:'S2',url:'javascript:alert(1)',fetchStatus:'inaccessible',excerpt:null}
+ ]});
+ renderSourceList(list,view,null,'all',()=>undefined);
+ assert.ok(list.textContent?.includes('YouTube · www.youtube.com · 第三方'));
+ assert.ok(list.textContent?.includes('YouTube 1 条'));
+ assert.ok(list.textContent?.includes('不代表被搜索过'));
+ assert.ok(list.textContent?.includes('已读取'));
+ assert.ok(list.textContent?.includes('未能读取'));
+ assert.ok(list.textContent?.includes('来源平台覆盖（按本次实际来源）'));
+ assert.ok(list.textContent?.includes('共 2 条来源，1 条已取得材料'));
+ assert.equal(list.querySelectorAll('img,iframe,script,link,object,embed,video,audio').length,0);
+ renderSourceDetail(detail,view,'S1',{onSelect:()=>undefined,onExclude:()=>undefined,onRestore:()=>undefined,onUndo:()=>undefined});
+ const anchor=detail.querySelector('a');assert.equal(anchor?.getAttribute('href'),'https://www.youtube.com/watch?v=abc');assert.match(anchor?.getAttribute('rel')??'',/noopener/);
+ const okText=detail.textContent??'';assert.ok(okText.includes('视频页面'));assert.ok(okText.includes('不代表已观看'));assert.ok(okText.includes('。已取得材料，'));assert.ok(okText.includes('不代表该来源或该平台的全部历史已读完'));
+ renderSourceDetail(detail,view,'S2',{onSelect:()=>undefined,onExclude:()=>undefined,onRestore:()=>undefined,onUndo:()=>undefined});
+ assert.equal(detail.querySelectorAll('a').length,0);
+ const blocked=detail.textContent??'';assert.ok(blocked.includes('javascript:alert(1)'));assert.ok(blocked.includes('不生成可点击链接'));assert.ok(blocked.includes('未确认已取得材料'));assert.ok(!blocked.includes('。已取得材料，'));
+ list.remove();detail.remove();
+});
+
+test('unknown historical source fields render without claiming platform, material or completeness',()=>{
+ const container=domContainer();const base=viewWith();
+ const weird={...base.sources[0]!,url:'https://fakegithub.com/x',kind:'mystery',fetchStatus:'weird',publishedAt:null} as unknown as typeof base.sources[number];
+ renderSourceDetail(container,viewWith({sources:[weird]}),'S1',{onSelect:()=>undefined,onExclude:()=>undefined,onRestore:()=>undefined,onUndo:()=>undefined});
+ const text=container.textContent??'';
+ assert.ok(text.includes('类型未知'));assert.ok(text.includes('状态未知'));assert.ok(text.includes('fakegithub.com'));assert.ok(text.includes('未匹配已知平台，按网站展示'));
+ assert.ok(!text.includes('GitHub（按链接主机推断）'));assert.ok(!text.includes('。已取得材料，'));assert.ok(!text.includes('全部历史已读完'));
+});

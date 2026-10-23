@@ -22,6 +22,7 @@ import { isTerminalState } from '../shared/types.js';
 import type { AppConfig } from '../server/config.js';
 import type { FirstStepSelectionInput } from '../shared/first-step-discovery.js';
 import { waitFor } from './harness.js';
+import { ProviderError } from '../server/adapters/types.js';
 
 const OWNER = 'user-owner';
 const HOME_URL = 'https://fixture-linzhou.org/';
@@ -114,6 +115,67 @@ async function runToTerminal(f: SeededFirstStep, runner: Runner) {
 function sourceKeyFor(input: PlannerInput, url: string): string {
   return input.checkpoint.pages.find((page) => page.url === url)?.sourceKey ?? 'S1';
 }
+
+test('cancelled multi-account seed refuses late material while retaining actual usage', async (t) => {
+  const f = fixture(); t.after(() => f.close()); select(f);
+  const before = f.store.listSources(f.run.id).map(source => source.sourceKey);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let dispatched = false;
+  let planCalls = 0;
+  const tools: ResearchTools = { async execute(action) {
+    dispatched = true;
+    await gate; // A provider that deliberately ignores AbortSignal.
+    const url = 'url' in action ? action.url : HOME_URL;
+    return { pages: [{url, title: 'Late selected account', text: LATE_TEXT, kind: 'profile', publishedAt: null, links: [], limitations: []}], requests: 1, bytes: 256, estimatedUsd: 0.002, credits: null, limitations: [] };
+  } };
+  const runner = runnerFor(f, tools, { async decide() { planCalls++; return { action: 'finish', claims: [] }; } });
+  t.after(() => runner.stopAll());
+  runner.enqueue(f.run.id);
+  await waitFor(() => dispatched);
+  runner.cancel(f.run.id);
+  release();
+  await waitFor(() => runner.activeCount() === 0);
+  assert.equal(f.store.getRun(f.run.id)!.state, 'cancelled');
+  assert.deepEqual(f.store.listSources(f.run.id).map(source => source.sourceKey), before, 'late material must never be published');
+  assert.equal(f.store.research.checkpoint(f.run.id)!.pages.some(page => page.text === LATE_TEXT), false);
+  assert.equal(planCalls, 0);
+  const receipt = f.store.research.receipts(f.run.id).find(row => row.key.startsWith('firststep:fetch:'));
+  assert.equal(receipt?.state, 'completed', 'dispatched usage is still settled after cancellation');
+  assert.equal(receipt?.usage?.estimatedUsd, 0.002);
+});
+
+test('a failed selected account is persisted and announced before the next account is read', async (t) => {
+  const f = fixture();
+  t.after(() => f.close());
+  select(f);
+  let homeCalls = 0;
+  let sourceAnnouncedBeforePlanning = false;
+  const tools: ResearchTools = { async execute(action) {
+    assert.notEqual(action.type, 'search');
+    const url = 'url' in action ? action.url : '';
+    if (url === HOME_URL) { homeCalls++; throw new ProviderError('provider_billing', 'Synthetic provider billing refusal'); }
+    const canonical = f.store.buildCanonicalView(f.store.getRun(f.run.id)!);
+    assert.ok(canonical.research?.unresolved.some(line => line.includes(HOME_URL)), 'failure is persisted before the next request');
+    assert.ok(f.store.listEvents(f.run.id).some(event => event.type === 'stage' && (event.payload as {status?:string}).status === 'unavailable'), 'UI receives a durable failure event immediately');
+    return resultForGithub();
+  } };
+  function resultForGithub(): ResearchToolResult {
+    return { pages: [{ url: GITHUB_URL, title: 'Synthetic GitHub profile', text: GITHUB_TEXT, kind: 'profile', publishedAt: null, links: [], limitations: [] }], requests: 1, bytes: 80, estimatedUsd: 0, credits: null, limitations: [] };
+  }
+  const planner: ResearchPlanner = { async decide(input) {
+    if (input.mode === 'verify') return { supported: [0], rejected: [] };
+    sourceAnnouncedBeforePlanning = f.store.listEvents(f.run.id).some(event => event.type === 'source' && (event.payload as {url?:string})?.url === GITHUB_URL);
+    return { action: 'finish', claims: [{ sourceKey: sourceKeyFor(input, GITHUB_URL), quote: GITHUB_TEXT, statement: CLAIM, kind: 'page_statement' }] };
+  } };
+  const runner = runnerFor(f, tools, planner);
+  t.after(() => runner.stopAll());
+  const run = await runToTerminal(f, runner);
+  assert.equal(sourceAnnouncedBeforePlanning, true, 'successful selected-account sources are announced before planning');
+  assert.equal(homeCalls, 1, 'a billing refusal is not blindly retried');
+  assert.equal(run.state, 'partial');
+  assert.ok(f.store.buildCanonicalView(run).sources.some(item => item.url === GITHUB_URL), 'other selected accounts keep their successful material');
+});
 
 test('a model proposal onto an inert out-of-scope link is an honest gap and research keeps planning', async (t) => {
   const f = fixture();

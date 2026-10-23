@@ -2,6 +2,32 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyFirstStepUrl } from '../shared/first-step-discovery.js';
 function ref(url: string) { const result = classifyFirstStepUrl(url); assert.ok(result.ok); return result.ref; }
+
+test('Zhihu and Douban profile aliases produce one stable canonical URL and account key', () => {
+  for (const site of ['zhihu.com', 'douban.com']) {
+    const canonical = `https://www.${site}/people/fixture-person`;
+    const expected = ref(canonical);
+    assert.equal(expected.profileUrl, canonical);
+    for (const prefix of ['', 'www.', 'm.', 'mobile.', 'amp.']) {
+      const actual = ref(`https://${prefix}${site}/people/fixture-person/`);
+      assert.equal(actual.profileUrl, canonical);
+      assert.equal(actual.accountKey, expected.accountKey);
+      const repeated = ref(actual.profileUrl!);
+      assert.equal(repeated.platform, actual.platform);
+      assert.equal(repeated.profileUrl, actual.profileUrl);
+      assert.equal(repeated.accountKey, actual.accountKey);
+    }
+    assert.notEqual(ref(`https://www.${site}/people/another-person`).accountKey, expected.accountKey);
+    for (const host of [`www.www.${site}`, `${site}.invalid`, `fake-${site}`]) {
+      const unrelated = classifyFirstStepUrl(`https://${host}/people/fixture-person`);
+      if (!unrelated.ok) continue; // Reserved/unsafe hosts may be rejected outright.
+      assert.notEqual(unrelated.ref.platform, expected.platform);
+      assert.notEqual(unrelated.ref.accountKey, expected.accountKey);
+    }
+  }
+  assert.equal(ref('https://www.zhihu.com/question/123456').entry, 'page');
+  assert.equal(ref('https://www.douban.com/group/topic/123456').entry, 'page');
+});
 test('Instagram and Threads retain their different real profile path conventions', () => {
   const instagram = ref('https://www.instagram.com/fixture_lin/');
   assert.equal(instagram.accountUrl, 'https://www.instagram.com/fixture_lin');
