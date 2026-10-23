@@ -76,6 +76,12 @@ export function createAuthController(api: ApiClient): AuthController {
     submit.textContent = signup ? '注册并继续' : '登录并继续';
     nameField.hidden = !signup;
     nameInput.required = signup;
+    // New signups keep the 6–128 rule; existing accounts may hold older
+    // shorter passwords, so signin only requires a non-empty value and defers
+    // authenticity to the server hash check.
+    passwordInput.required = true;
+    passwordInput.minLength = signup ? LIMITS.passwordMin : 1;
+    passwordInput.maxLength = LIMITS.passwordMax;
     passwordInput.autocomplete = signup ? 'new-password' : 'current-password';
     tabSignin.setAttribute('aria-selected', String(!signup));
     tabSignup.setAttribute('aria-selected', String(signup));
@@ -125,8 +131,16 @@ export function createAuthController(api: ApiClient): AuthController {
       fail(emailInput, emailError, '请输入有效的邮箱地址。');
       return;
     }
-    if (password.length < LIMITS.passwordMin || password.length > LIMITS.passwordMax) {
-      fail(passwordInput, passwordError, `密码需为 ${LIMITS.passwordMin}–${LIMITS.passwordMax} 个字符。`);
+    if (mode === 'signup') {
+      if (password.length < LIMITS.passwordMin || password.length > LIMITS.passwordMax) {
+        fail(passwordInput, passwordError, `密码需为 ${LIMITS.passwordMin}–${LIMITS.passwordMax} 个字符。`);
+        return;
+      }
+    } else if (password.length === 0) {
+      fail(passwordInput, passwordError, '请输入密码。');
+      return;
+    } else if (password.length > LIMITS.passwordMax) {
+      fail(passwordInput, passwordError, `密码需不超过 ${LIMITS.passwordMax} 个字符。`);
       return;
     }
     const epoch = openEpoch;
