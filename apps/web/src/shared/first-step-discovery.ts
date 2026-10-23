@@ -864,9 +864,10 @@ export function classifyFirstStepUrl(raw: unknown): FirstStepUrlClassification {
     case 'douban': {
       const id = segments[0] === 'people' ? segments[1] ?? '' : '';
       if (id) {
+        const canonicalHost = known === 'zhihu' ? 'www.zhihu.com' : 'www.douban.com';
         return {
           ok: true,
-          ref: refOf(known, `https://www.${host}/people/${id}`, {
+          ref: refOf(known, `https://${canonicalHost}/people/${id}`, {
             handle: id,
             materialUse: 'expression',
             accountKind: 'person',

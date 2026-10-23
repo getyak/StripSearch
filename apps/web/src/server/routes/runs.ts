@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { fromNodeHeaders } from 'better-auth/node';
 import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState } from '../../shared/types.js';
-import type { ProviderName } from '../../shared/types.js';
+import type { ProviderName, RunSummary } from '../../shared/types.js';
 import { renderJson, renderMarkdown } from '../../shared/canonical.js';
 import { renderReportHtml } from '../../shared/report-html.js';
 import { renderReportPdf } from '../services/pdf.js';
@@ -164,10 +164,16 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     res.status(201).json({ run: store.buildCanonicalView(run), idempotent: false });
   });
 
-  router.get('/runs', (_req: Request, res: Response) => {
+  router.get('/runs', async (_req: Request, res: Response) => {
     const user = requireUser(res);
-    const runs = store.listRunsForOwner(user.id).map((run) => store.summarize(run));
-    res.json({ runs });
+    const runs: RunSummary[] = [];
+    for (const [index, listed] of store.listRunsForOwner(user.id).entries()) {
+      if (index > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+      if (res.destroyed) return;
+      const run = store.getRunForOwner(listed.id, user.id);
+      if (run) runs.push(store.summarize(run));
+    }
+    if (!res.destroyed) res.json({ runs });
   });
 
   router.get('/runs/:id', (req: Request, res: Response) => {

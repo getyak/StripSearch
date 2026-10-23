@@ -3,6 +3,8 @@ import { allocateSourceKey, rememberSourceKeys } from '../research/source-keys.j
 import { buildResearchReport, failedUsage, runResearch, scopeRefusalRecord, tagScopeRefusal, type ScopedResearchTools } from '../research/controller.js';
 import { createDshPlanner, type ResearchPlanner } from '../research/planner.js';
 import type { ResearchTools } from '../research/tool-contracts.js';
+import {runXAccountResearch} from '../research/x-account-research.js';
+import type {XAccountProvider,XAccountModel} from '../research/x-account-contracts.js';
 import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState, NeedsInputError } from '../../shared/types.js';
 import type { ProviderName, RunState, ProviderResult } from '../../shared/types.js';
@@ -40,6 +42,8 @@ export interface RunnerDeps {
   now?: () => number;
   researchTools?: ResearchTools;
   researchPlanner?: ResearchPlanner;
+  xAccountProvider?: XAccountProvider;
+  xAccountModel?: XAccountModel;
   /** First-step persistence; runs with a link use the new first-step flow. */
   firstStep?: FirstStepStore;
   /** GET-213 staged person confirmation; its presence enables the staged name flow. */
@@ -422,6 +426,11 @@ export class Runner {
     // Scope-limited fetch: every dispatch AND ingestion re-checks the live
     // scope; excluded/unselected/later-discovered accounts are refused.
     const guard = firstStep.scopeGuard(initial.ownerId, runId);
+    const single=binding.accounts.length===1?classifyFirstStepUrl(binding.accounts[0]!.profileUrl):null;
+    if(this.deps.xAccountProvider&&single?.ok&&single.ref.platform==='x'&&binding.accounts[0]!.allowedScope==='public_history'){
+      const result=await runXAccountResearch({store:this.deps.store,run:initial,binding,provider:this.deps.xAccountProvider,signal:controller.signal,limits:this.deps.config.researchLimits,assertScope:()=>guard.assertCurrent(),model:this.deps.xAccountModel,transport:this.deps.transport,apiKey:this.deps.config.deepseekApiKey,modelName:this.deps.config.deepseekModel});
+      this.finishWithResult(runId,initial,result,startedAt);return;
+    }
     const independentAccountKeys = new Set(
       Object.entries(binding.accountKeys)
         .filter(([, accountId]) => binding.independentAccountIds.includes(accountId))
@@ -514,6 +523,15 @@ export class Runner {
           return { type: 'read', url: account.profileUrl };
         })();
         const requestKey = `firststep:fetch:${seedAttempt}:${account.accountId}`;
+        const recordSeedGap = (message: string): void => {
+          checkpoint.unknowns.push(message);
+          this.deps.store.research.save(runId, checkpoint);
+          this.deps.store.addEvent(runId, 'stage', {
+            index: binding.accounts.indexOf(account) + 1, total: binding.accounts.length,
+            key: `selected-${account.accountId}`, label: `所选账号资料未取得：${account.profileUrl}`,
+            status: 'unavailable', detail: '已保存读取缺口；其他允许读取的账号继续，未取得资料不代表没有资料。'
+          });
+        };
         let result: Awaited<ReturnType<ResearchTools['execute']>> | null = null;
         try {
           // Predispatch refusal stops BEFORE any reservation: never billed.
@@ -523,7 +541,7 @@ export class Runner {
           if (old) {
             if (old.state !== 'completed') {
               // Known settled failure: kept inspectable, never re-executed.
-              checkpoint.unknowns.push(`所选账号初始读取曾失败，保留失败回执不重放：${account.profileUrl}`);
+              recordSeedGap(`所选账号初始读取曾失败，保留失败回执不重放：${account.profileUrl}`);
               continue;
             }
             // Same-attempt recovery: reuse the exact saved output, no re-read.
@@ -545,23 +563,24 @@ export class Runner {
             }
           }
         } catch (error) {
+          if (controller.signal.aborted) throw error;
           if (error instanceof ResearchStop && error.code === 'unknown_inflight') {
-            checkpoint.unknowns.push(`所选账号初始读取结果未知（不重放）：${account.profileUrl}`);
+            recordSeedGap(`所选账号初始读取结果未知（不重放）：${account.profileUrl}`);
             continue;
           }
           if (error instanceof ResearchStop && error.code === 'budget_exhausted') {
-            checkpoint.unknowns.push('操作员总预算上限已到，剩余所选账号初始材料未读取；缺口保留，不自动重试。');
+            recordSeedGap('操作员总预算上限已到，剩余所选账号初始材料未读取；缺口保留，不自动重试。');
             break;
           }
           if (error instanceof ProviderError) {
             // A failed initial read is a real gap for this account, not absence.
-            checkpoint.unknowns.push(`所选账号初始材料未读取成功（${error.code}）：${account.profileUrl}；不代表无资料。`);
+            recordSeedGap(`所选账号初始材料未读取成功（${error.code}）：${account.profileUrl}；不代表无资料。`);
             continue;
           }
           if (error instanceof FirstStepSelectionError && error.code === 'out_of_scope') {
             // Fail-closed per-account refusal: an honest gap, never a fetch;
             // the remaining selected accounts keep their initial material.
-            checkpoint.unknowns.push(`所选账号初始材料被范围守卫拒绝（${error.detail}）；${scopeRefusalRecord(error)?.dispatched?'请求已发生，实际用量保留，返回材料未入库':'未发送请求'}，缺口保留，已读材料不变。`);
+            recordSeedGap(`所选账号初始材料被范围守卫拒绝（${error.detail}）；${scopeRefusalRecord(error)?.dispatched?'请求已发生，实际用量保留，返回材料未入库':'未发送请求'}，缺口保留，已读材料不变。`);
             continue;
           }
           if (error instanceof FirstStepSelectionError && error.code === 'scope_changed') {
@@ -574,6 +593,10 @@ export class Runner {
           }
           throw error;
         }
+        // A provider may ignore abort. Settle actual usage above, then refuse
+        // every publishing write from a cancelled or no longer writable run.
+        controller.signal.throwIfAborted();
+        this.assertWritable(runId);
         for (const page of result.pages) {
             const url = page.url;
             if (checkpoint.pages.some((existing) => existing.url === url)) continue;
@@ -613,6 +636,7 @@ export class Runner {
               },
               checkpoint.pages.length - 1
             );
+            this.deps.store.addEvent(runId, 'source', this.deps.store.getSource(runId, sourceKey));
           }
       }
       this.deps.store.research.save(runId, checkpoint);

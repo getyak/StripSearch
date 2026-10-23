@@ -8,6 +8,54 @@ import { FIRST_STEP_DEFAULT_BUDGET } from '../shared/first-step-discovery.js';
 import { startTestServer, waitFor } from './harness.js';
 import type { FirstStepDiscoveryView } from '../shared/first-step-discovery.js';
 
+function recoveryStore(t: { after: (fn: () => void) => void }) {
+  const db = openDatabase(':memory:'); applyCoreSchema(db); t.after(() => db.close());
+  const store = new Store(db); const firstStep = new FirstStepStore(db, store);
+  const make = (linked: boolean, state: 'queued' | 'researching' = 'researching') => {
+    const run = store.insertRun({ ownerId: 'synthetic-startup', question: 'Synthetic recovery', seedUrl: null, provider: 'research', parentRunId: null, retryOf: null, followup: false, idempotencyKey: null, bodyFingerprint: 'startup-metadata' });
+    if (linked) firstStep.attachRun(run);
+    store.updateRun(run.id, { state }); return run;
+  };
+  const action = (runId: string, key: string, state: 'completed' | 'failed' | 'inflight') => {
+    store.research.reserve(runId, key, 'tool', { type: 'search', query: 'Synthetic public material', numResults: 1 }, { inputTokens: 11, outputTokens: 7 });
+    if (state !== 'inflight') store.research.settle(runId, key, { retained: true }, { inputTokens: 11, outputTokens: 7, estimatedUsd: state === 'failed' ? null : 0.01, bytes: 123, unknownCost: state === 'failed' }, state);
+  };
+  const snapshot = () => db.prepare('SELECT * FROM research_actions ORDER BY run_id,action_key').all();
+  return { db, store, make, action, snapshot };
+}
+
+test('startup recovery requeues settled first-step actions without decoding large unrelated receipt JSON', t => {
+  const f = recoveryStore(t); const runs = ['queued', 'researching'].map(state => f.make(true, state as 'queued' | 'researching'));
+  const columns = ['request_json', 'result_json', 'usage_json'] as const;
+  for (const run of runs) for (const state of ['completed', 'failed'] as const) for (const column of columns) f.action(run.id, `${state}-${column}`, state);
+  const unrelated = '{"unused":"' + 'x'.repeat(256 * 1024);
+  for (const run of runs) for (const state of ['completed', 'failed']) for (const column of columns) f.db.prepare(`UPDATE research_actions SET ${column}=? WHERE run_id=? AND action_key=?`).run(unrelated, run.id, `${state}-${column}`);
+  const before = f.snapshot(); assert.equal(f.store.recoverInterruptedRuns(), 0);
+  for (const run of runs) { const restored = f.store.getRun(run.id)!; assert.equal(restored.state, 'queued'); assert.equal(restored.interrupted, true); assert.notEqual(restored.stopReason, 'unknown_inflight'); assert.equal(f.store.listEvents(run.id).filter(event => event.type === 'interrupted').length, 0); }
+  assert.deepEqual(f.snapshot(), before, 'receipt state, raw payload bytes, usage, reservations and settlement metadata stay unchanged');
+});
+
+test('startup recovery blocks first-step inflight requests without decoding or changing their receipts', t => {
+  const f = recoveryStore(t); const run = f.make(true); f.action(run.id, 'settled', 'completed'); f.action(run.id, 'unresolved', 'inflight');
+  const unrelated = '{"unused":"' + 'x'.repeat(256 * 1024);
+  f.db.prepare('UPDATE research_actions SET request_json=?,result_json=?,usage_json=? WHERE run_id=?').run(unrelated, unrelated, unrelated, run.id);
+  const before = f.snapshot(); assert.equal(f.store.recoverInterruptedRuns(), 1); const restored = f.store.getRun(run.id)!;
+  assert.equal(restored.state, 'partial'); assert.equal(restored.stopReason, 'unknown_inflight'); assert.equal(restored.errorCode, 'interrupted'); assert.equal(restored.interrupted, true); assert.equal(restored.errorMessage, '上次调用的计费结果不明，已保留材料；不会自动重复调用。');
+  assert.equal(f.store.listEvents(run.id).filter(event => event.type === 'interrupted').length, 1); assert.equal(f.store.recoverInterruptedRuns(), 0); assert.deepEqual(f.snapshot(), before);
+});
+
+test('startup legacy recovery blocks every non-completed state and requeues completed-only runs with or without the first-step table', t => {
+  for (const table of ['present', 'absent']) {
+    const f = recoveryStore(t); if (table === 'absent') f.db.exec('DROP TABLE first_step_links');
+    const runs = ['completed', 'failed', 'inflight', 'unrecognized_state'].map(state => { const run = f.make(false); f.action(run.id, 'action', state === 'unrecognized_state' ? 'failed' : state as 'completed' | 'failed' | 'inflight'); if (state === 'unrecognized_state') f.db.prepare('UPDATE research_actions SET state=? WHERE run_id=?').run(state, run.id); return { run, state }; });
+    const empty = f.make(false, 'queued'); const unrelated = '{"unused":"' + 'x'.repeat(256 * 1024);
+    f.db.prepare('UPDATE research_actions SET request_json=?,result_json=?,usage_json=?').run(unrelated, unrelated, unrelated); const before = f.snapshot();
+    assert.equal(f.store.recoverInterruptedRuns(), 3, table);
+    for (const { run, state } of runs) { const restored = f.store.getRun(run.id)!; assert.equal(restored.state, state === 'completed' ? 'queued' : 'partial', `${table}: ${state}`); assert.equal(restored.interrupted, true); assert.equal(restored.stopReason, state === 'completed' ? null : 'unknown_inflight'); assert.equal(f.store.listEvents(run.id).filter(event => event.type === 'interrupted').length, state === 'completed' ? 0 : 1); }
+    assert.equal(f.store.getRun(empty.id)!.state, 'queued'); assert.deepEqual(f.snapshot(), before, 'legacy recovery never rewrites receipts or unknown cost metadata');
+  }
+});
+
 test('first-step recovery distinguishes a settled failure from an unresolved inflight request', async (t) => {
   const db = openDatabase(':memory:'); applyCoreSchema(db); t.after(() => db.close());
   const store = new Store(db); const firstStep = new FirstStepStore(db, store);

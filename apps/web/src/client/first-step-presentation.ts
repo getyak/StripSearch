@@ -97,6 +97,9 @@ export function personLabelFor(cluster: FirstStepPersonClusterView, view: FirstS
           (account) => account.profileUrl && shortUrl(account.profileUrl) === shortUrl(cluster.anchorUrl)
         )) ?? null;
   const title = cluster.displayName.trim();
+  // Generic websites use their host as an internal handle. It is a public
+  // entry label, never a social account handle or a person's name.
+  const nativeHandle = Boolean(anchor?.handle) && anchor?.platform !== 'personal_site' && anchor?.platform !== 'web_page';
   const owner = anchor?.identity.ownerAnchor;
   const backed = anchor ? sourceBackedPersonLabel(anchor) : null;
   if (owner && backed) {
@@ -119,7 +122,7 @@ export function personLabelFor(cluster: FirstStepPersonClusterView, view: FirstS
       // query match, never an identity confirmation.
       return { label: title, kind: 'query_match', kindLabel: '与输入姓名一致 · 尚未确认', pageTitle: null };
     }
-    if (anchor?.handle) {
+    if (anchor?.handle && nativeHandle) {
       // A title like `Lin Zhou | Synthetic University` is a page title, not a
       // name: distinguish the candidate by its literal handle and keep the
       // title verbatim instead of stripping it into a person.
@@ -138,9 +141,9 @@ export function personLabelFor(cluster: FirstStepPersonClusterView, view: FirstS
     };
   }
   return {
-    label: anchor?.handle ? `@${anchor.handle}` : cluster.anchorLabel || shortUrl(cluster.anchorUrl) || view.input.value.trim(),
-    kind: anchor?.handle ? 'handle_only' : 'entry_only',
-    kindLabel: anchor?.handle ? '按账号 handle 称呼 · 未确认姓名' : '按公开入口称呼 · 未确认姓名',
+    label: nativeHandle ? `@${anchor!.handle}` : (anchor?.handle ? shortUrl(anchor.profileUrl) || anchor.handle : cluster.anchorLabel || shortUrl(cluster.anchorUrl) || view.input.value.trim()),
+    kind: nativeHandle ? 'handle_only' : 'entry_only',
+    kindLabel: nativeHandle ? '按账号 handle 称呼 · 未确认姓名' : '按公开入口称呼 · 未确认姓名',
     pageTitle: title || null
   };
 }
@@ -225,7 +228,11 @@ export function contentClueFor(account: FirstStepAccountView): { text: string; k
   if (account.identity.counterevidence.length > 0) {
     return { text: `存在反证：${account.identity.counterevidence[0]!.label}`, kind: 'counterevidence' };
   }
-  if (account.attribution) {
+  // These shared guardrails explain identity policy, not this account's
+  // content. Their complete originals remain in the provenance disclosure.
+  const sharedBoundary = account.attribution?.reason === '本人账号关联有目标绑定的原文依据；人物身份与作品作者仍分别核对。'
+    || account.attribution?.reason === '归属未定；同名、资料提及或链接本身不能证明本人拥有。';
+  if (account.attribution && !sharedBoundary) {
     return { text: account.attribution.reason, kind: 'linkage' };
   }
   return { text: account.researchSummary, kind: 'summary' };
@@ -269,7 +276,7 @@ export function accountRowFor(
     badgeTone: account.identity.state === 'supported' && account.identity.validity !== 'review' ? 'settled' : 'uncertain',
     basisLabel: account.identity.basisLabel,
     ownerNote: ownerNoteFor(account),
-    statusLabel: account.accessLabel,
+    statusLabel: account.accessLabel === '原文可读' ? '主页资料可读' : account.accessLabel,
     // The row carries a concise chip; the complete boundary sentence stays in
     // the row's evidence disclosure and in the one shared scope note.
     boundaryChip: options.requiresIndependentScope ? (options.submitted ? '范围已提交 · 单独研究，不并入人物结论。' : '独立账号范围') : null,

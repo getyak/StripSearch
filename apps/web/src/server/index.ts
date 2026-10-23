@@ -28,6 +28,8 @@ import { Store } from './store.js';
 import { FetchGithubRunner } from './research/fetch-github-runner.js';
 import type { ResearchTools } from './research/tool-contracts.js';
 import { createResearchTools } from './research/toolkit.js';
+import {createXAccountProvider} from './research/x-account-provider.js';
+import type {XAccountProvider,XAccountModel} from './research/x-account-contracts.js';
 import { LIMITS } from '../shared/limits.js';
 import type { ResearchPlanner } from './research/planner.js';
 import type { DB } from './db/index.js';
@@ -45,6 +47,9 @@ export interface BootstrapOverrides {
   discoveryCatalog?: PlatformCatalogSnapshot | null;
   researchTools?: ResearchTools;
   researchPlanner?: ResearchPlanner;
+  /** Embedders overriding the legacy toolkit also supply their account port. */
+  xAccountProvider?: XAccountProvider|null;
+  xAccountModel?: XAccountModel;
 }
 
 export interface BootstrappedApp {
@@ -95,6 +100,8 @@ export async function bootstrap(
     firstStep,
     personConfirmation,
     discoveryCatalog,
+    xAccountProvider:overrides.xAccountProvider===null?undefined:overrides.xAccountProvider??(!overrides.researchTools&&config.tikhubApiKey?createXAccountProvider({transport,apiKey:config.tikhubApiKey,timeoutMs:LIMITS.providerTimeoutMs,maxBytes:LIMITS.providerMaxBytes}):undefined),
+    xAccountModel:overrides.xAccountModel,
     researchTools: overrides.researchTools ?? createResearchTools({
       transport, exaApiKey: config.exaApiKey,
       firecrawlApiKey: config.firecrawlApiKey ?? null, tikhubApiKey: config.tikhubApiKey ?? null,

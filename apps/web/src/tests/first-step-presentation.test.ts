@@ -107,6 +107,26 @@ function cluster(overrides: Partial<FirstStepPersonClusterView> = {}): FirstStep
   };
 }
 
+test('website host handles remain public entries while dotted social handles stay accounts', () => {
+  const website = accountView({ platform: 'personal_site', platformLabel: '个人网站', handle: 'lantern.dev', profileUrl: 'https://lantern.dev/' });
+  const siteCluster = cluster({ displayName: 'Lantern public archive', anchorLabel: '个人网站', anchorUrl: website.profileUrl });
+  const view = discoveryView({ input: { kind: 'homepage_url', value: website.profileUrl! }, accounts: [website] });
+  const entry = personLabelFor(siteCluster, view);
+  assert.equal(entry.label, 'lantern.dev');
+  assert.equal(entry.kind, 'entry_only');
+  assert.doesNotMatch(entry.kindLabel, /handle/);
+  assert.equal(entry.pageTitle, 'Lantern public archive');
+  const nameQuery = personLabelFor(siteCluster, discoveryView({ accounts: [website] }));
+  assert.equal(nameQuery.label, 'Lin Zhou');
+  assert.doesNotMatch(nameQuery.label, /^@/);
+  const bluesky = accountView({ platform: 'bluesky', handle: 'fixture.bsky.social', profileUrl: 'https://bsky.app/profile/fixture.bsky.social' });
+  assert.equal(personLabelFor(cluster(), discoveryView({ input: { kind: 'homepage_url', value: bluesky.profileUrl! }, accounts: [bluesky] })).label, '@fixture.bsky.social');
+  const named = { ...website, identity: { ...website.identity, ownerAnchor: owner('self_declared', 'Lin Zhou'), ownerValidity: 'valid' as const } };
+  assert.equal(personLabelFor(siteCluster, { ...view, accounts: [named] }).label, 'Lin Zhou');
+  const withdrawn = { ...named, identity: { ...named.identity, ownerValidity: 'review' as const } };
+  assert.equal(personLabelFor(siteCluster, { ...view, accounts: [withdrawn] }).label, 'lantern.dev');
+});
+
 test('a source-backed owner person label is preferred and honestly qualified', () => {
   const anchor = accountView({
     identity: {
@@ -285,6 +305,11 @@ test('account-specific clues outrank the repetitive generic research summary', (
     identity: { state: 'supported', nativeIdConflict: true, basis: 'explicit_self_link', basisLabel: '公开原文明确链接', evidence: [], counterevidence: [], conflicts: [] }
   });
   assert.equal(contentClueFor(nativeConflict).kind, 'conflict');
+});
+
+test('shared attribution boilerplate is not repeated as public-content information', () => {
+  const account = accountView({researchSummary:'公开视频与讲解',attribution:{relation:'person_owned',reason:'本人账号关联有目标绑定的原文依据；人物身份与作品作者仍分别核对。',sources:[],sourceGroups:1}});
+  assert.deepEqual(contentClueFor(account),{text:'公开视频与讲解',kind:'summary'});
 });
 
 test('filter and search predicates match only what the row displays', () => {

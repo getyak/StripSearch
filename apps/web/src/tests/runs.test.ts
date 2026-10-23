@@ -2,13 +2,39 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createFakeProvider, createFakeFactory } from './fakes.js';
 import type { ProviderName } from '../shared/types.js';
-import { startTestServer, waitFor } from './harness.js';
+import { startTestServer, waitFor,type TestServer } from './harness.js';
 
 const githubBody = {
   question: 'example 的公开作品有哪些？',
   seedUrl: 'https://github.com/example',
   provider: 'github'
 };
+
+function seedHistoryRun(server:TestServer,ownerId:string,index:number){
+ const run=server.store.insertRun({ownerId,question:`合成历史研究 ${index}`,seedUrl:null,provider:'github',parentRunId:null,retryOf:null,followup:false,idempotencyKey:null,bodyFingerprint:`synthetic-history-${index}`});
+ server.store.addSource(run.id,{key:'S1',url:`https://synthetic.invalid/${index}`,title:'Synthetic source',kind:'work',publishedAt:null,excerpt:'Synthetic retained original.',excerptLocator:null,identityLabel:'Synthetic',identityConfirmed:false,fetchStatus:'ok',limits:[]},0);
+ server.store.addObservation(run.id,{statement:'合成原文提供了一项可检查记录。',kind:'factual',sourceKeys:['S1'],limitations:[]},0);
+ server.store.updateRun(run.id,{state:'completed',answer_json:JSON.stringify([{id:'synthetic',heading:'合成正文',body:'',bullets:[{text:'合成原文提供了一项可检查记录。',kind:'factual',sourceKeys:['S1']}]}])});return server.store.getRun(run.id)!;
+}
+
+test('history yields to another request while preserving live canonical summaries owner isolation and order',async t=>{
+ const server=await startTestServer({providerFactory:createFakeFactory()});t.after(()=>server.close());const registered=await server.client.signUp('history-yield@example.test');const{user}=await registered.json() as {user:{id:string}};
+ for(let index=0;index<30;index++)seedHistoryRun(server,user.id,index);const foreign=seedHistoryRun(server,'another-synthetic-owner',100);
+ const initial=server.store.listRunsForOwner(user.id);const removed=initial.at(-1)!,withdrawn=initial.at(-2)!;const summarize=server.store.summarize.bind(server.store);let count=0,servedAt=-1;let health:Promise<void>|undefined;
+ server.store.summarize=run=>{count++;if(count===1){setImmediate(()=>{server.store.setSourceExcluded(withdrawn.id,'S1',true);server.store.deleteRun(removed.id);});health=server.client.json('/api/health').then(response=>{assert.equal(response.status,200);servedAt=count;});}return summarize(run);};
+ const result=await server.client.json<{runs:ReturnType<typeof summarize>[]}>('/api/runs');await health;
+ assert.equal(result.status,200);assert.ok(servedAt>0&&servedAt<initial.length,`health was served after ${servedAt} summaries`);
+ const expected=server.store.listRunsForOwner(user.id).map(summarize);assert.deepEqual(result.body.runs,expected);assert.ok(!result.body.runs.some(run=>run.runId===foreign.id||run.runId===removed.id));assert.ok(result.body.runs.find(run=>run.runId===withdrawn.id)!.reviewCount>0,'withdrawal is evaluated from live canonical data');
+ assert.ok(result.body.runs.every(run=>!('sources'in run)&&!('answer'in run)),'history still returns metadata only');
+});
+
+test('history stops remaining summaries when its response connection is destroyed',async t=>{
+ const server=await startTestServer({providerFactory:createFakeFactory()});const controller=new AbortController();t.after(()=>{controller.abort();return server.close();});const registered=await server.client.signUp('history-abort@example.test');const{user}=await registered.json() as {user:{id:string}};
+ for(let index=0;index<30;index++)seedHistoryRun(server,user.id,index);let count=0;const summarize=server.store.summarize.bind(server.store);
+ server.store.summarize=run=>{count++;if(count===1)setImmediate(()=>controller.abort());return summarize(run);};
+ await assert.rejects(fetch(server.baseUrl+'/api/runs',{headers:{cookie:server.client.jar.header()},signal:controller.signal}),error=>error instanceof Error&&error.name==='AbortError');
+ for(let index=0;index<6;index++)await new Promise<void>(resolve=>setImmediate(resolve));const stopped=count;assert.ok(stopped>0&&stopped<30,`disconnected request summarized ${stopped} runs`);await new Promise<void>(resolve=>setImmediate(resolve));assert.equal(count,stopped);
+});
 
 test('request validation, scope rejection and provider availability', async (t) => {
   const server = await startTestServer({ providerFactory: createFakeFactory() });

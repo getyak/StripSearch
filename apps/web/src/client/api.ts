@@ -299,10 +299,10 @@ export class ApiClient {
     return data.run;
   }
 
-  async followup(id: string, question: string): Promise<CanonicalView> {
+  async followup(id: string, question: string, idempotencyKey?: string): Promise<CanonicalView> {
     const data = await this.request<ApiEnvelope>(`/api/runs/${encodeURIComponent(id)}/followup`, {
       method: 'POST',
-      headers: { 'idempotency-key': this.nextIdempotencyKey('followup') },
+      headers: { 'idempotency-key': idempotencyKey ?? this.nextIdempotencyKey('followup') },
       body: JSON.stringify({ question })
     });
     if (!data.run) throw new ApiError(500, 'invalid_response', '服务器响应缺少研究数据。');

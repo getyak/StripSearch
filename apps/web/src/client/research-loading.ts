@@ -52,6 +52,7 @@ export interface ResearchLoadingModel {
   query: string;
   heading: string;
   context: string[];
+  gaps?: string[];
   steps: LoadingStep[];
   materials: LoadingMaterial[];
   materialNote: string | null;
@@ -62,6 +63,14 @@ export interface ResearchLoadingInput {
   run: CanonicalView | null;
   stages: StageView[];
   streamState: ResearchStreamState;
+}
+
+/** Translate known public error codes without dropping the gap's qualifiers. */
+export function researchGapText(gap: string): string {
+  return gap.split(/(https?:\/\/[^\s；，。<>"']+)/gi).map(part => /^https?:\/\//i.test(part) ? part : part.replace(/provider_billing/g, '服务商计费或额度限制')
+    .replace(/provider_rate_limited/g, '服务商暂时限流')
+    .replace(/provider_forbidden/g, '服务商拒绝访问')
+    .replace(/provider_timeout/g, '服务商读取超时')).join('');
 }
 
 /**
@@ -149,6 +158,7 @@ export function deriveResearchLoading(input: ResearchLoadingInput): ResearchLoad
     query: run?.question ?? '',
     heading: '',
     context: [],
+    gaps: [...new Set(run?.research?.unresolved ?? [])].map(researchGapText),
     steps: [],
     materials: [],
     materialNote: null,
@@ -255,6 +265,7 @@ export function deriveResearchLoading(input: ResearchLoadingInput): ResearchLoad
     query: run.question,
     heading,
     context,
+    gaps: base.gaps,
     steps,
     materials,
     materialNote,
@@ -295,6 +306,15 @@ export function createResearchLoadingSurface(handlers: ResearchLoadingHandlers):
   const context = make('div', { className: 'research-live-context' });
   status.append(heading, context);
 
+  const gaps = make('aside', { className: 'research-live-gaps', attrs: { 'aria-label': '读取与核验缺口' } });
+  const gapHeading = make('h3', { text: '读取限制与核对记录' });
+  const gapList = make('ul', {});
+  const gapMore = make('details', {});
+  const gapMoreSummary = make('summary', {});
+  const gapMoreList = make('ul', {});
+  gapMore.append(gapMoreSummary, gapMoreList);
+  gaps.append(gapHeading, gapList, gapMore);
+
   const path = make('ol', { className: 'stage-path', attrs: { 'aria-label': '研究步骤' } });
   const materials = make('div', {
     className: 'live-materials',
@@ -305,7 +325,7 @@ export function createResearchLoadingSurface(handlers: ResearchLoadingHandlers):
   const processList = make('ul', {});
   process.append(processSummary, processList);
 
-  element.append(query, status, path, materials, process);
+  element.append(query, status, gaps, path, materials, process);
 
   function update(model: ResearchLoadingModel): void {
     const active = document.activeElement as HTMLElement | null;
@@ -326,6 +346,12 @@ export function createResearchLoadingSurface(handlers: ResearchLoadingHandlers):
       clear(context);
       clear(path);
       clear(materials);
+      gaps.hidden = true;
+      clear(gapList);
+      clear(gapMoreList);
+      setText(gapMoreSummary, '');
+      gapMore.open = false;
+      gapMore.hidden = true;
       clear(processList);
       setText(processSummary, '查看研究过程');
       process.open = false;
@@ -338,6 +364,16 @@ export function createResearchLoadingSurface(handlers: ResearchLoadingHandlers):
 
     clear(context);
     for (const line of model.context) context.appendChild(make('p', { text: line }));
+
+    const gapLines = model.gaps ?? [];
+    gaps.hidden = gapLines.length === 0;
+    clear(gapList);
+    clear(gapMoreList);
+    for (const line of gapLines.slice(0, 3)) gapList.appendChild(make('li', { text: line }));
+    for (const line of gapLines.slice(3)) gapMoreList.appendChild(make('li', { text: line }));
+    gapMore.hidden = gapLines.length <= 3;
+    setText(gapMoreSummary, `查看其余 ${Math.max(0, gapLines.length - 3)} 项缺口`);
+    if (!sameRun) gapMore.open = false;
 
     clear(path);
     for (const step of model.steps) {
