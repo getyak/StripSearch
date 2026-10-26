@@ -588,6 +588,20 @@ test('observation disclosure stays open across refresh and explicit return revea
   assert.equal(env.document.activeElement?.getAttribute('data-citation-anchor'), 'o0c0');
 });
 
+test('reading disclosures preserve keyboard focus on refresh and reset for another report', async () => {
+  await freshUser('reading-disclosure', [summary('runA')]);
+  state.run = makeView('runA'); state.activeRunId = 'runA'; renderAll();
+  const record = env.document.querySelector<HTMLDetailsElement>('.report-record')!;
+  record.open = true;
+  record.querySelector<HTMLElement>('summary')!.focus();
+  renderAll();
+  assert.equal(env.document.querySelector<HTMLDetailsElement>('.report-record')!.open, true);
+  assert.equal(env.document.activeElement, env.document.querySelector('.report-record > summary'));
+  state.run = makeView('runB'); state.activeRunId = 'runB'; renderAll();
+  assert.equal(env.document.querySelector<HTMLDetailsElement>('.report-record')!.open, false);
+  assert.notEqual(env.document.activeElement, env.document.querySelector('.report-record > summary'));
+});
+
 test('mobile toolbar reopening records its own opener and ignores stale queued drawer closes', async () => {
   await freshUser('drawer-generation', [summary('runA')]);
   state.run = makeView('runA'); state.activeRunId = 'runA'; renderAll();

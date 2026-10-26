@@ -888,6 +888,15 @@ function captureFocusAnchor(): FocusAnchor | null {
       mode: 'dom-run'
     };
   }
+  const reportControl = active.closest<HTMLElement>('[data-report-control]');
+  if (reportControl && els.report.contains(reportControl) && els.report.dataset.runId) {
+    return {
+      containerId: els.report.id,
+      selector: `[data-report-control="${attr(reportControl.dataset.reportControl ?? '')}"]`,
+      runId: els.report.dataset.runId,
+      mode: 'dom-run'
+    };
+  }
   const row = active.closest('button.source-row[data-source-key]') as HTMLElement | null;
   if (row) {
     const list = row.closest('.source-list') as HTMLElement | null;
@@ -1094,6 +1103,10 @@ type ResearchProgress = {
 function renderRunSummary(): void {
   const run = state.run;
   const research = (run as (CanonicalView & { research?: ResearchProgress }) | null)?.research;
+  const gapsOpen = els.statusSummary.dataset.runId === run?.runId
+    && Boolean(els.statusSummary.querySelector<HTMLDetailsElement>('details')?.open);
+  clear(els.statusSummary);
+  els.statusSummary.dataset.runId = run?.runId ?? '';
   clear(els.researchDetails);
   const messages: Record<string, string> = {
     budget_exhausted: '本次研究已达到预算，已保留目前找到的资料。',
@@ -1120,9 +1133,30 @@ function renderRunSummary(): void {
     message = message ? `${message}${note}` : note;
   }
   if (run && (isActiveState(run.state) || run.state === 'needs_input')) message = '';
-  else if (unresolved.length > 0) message = `${message} 有 ${unresolved.length} 项读取限制与核对记录。${unresolved[0]}`.trim();
-  setText(els.statusSummary, message);
-  show(els.statusSummary, Boolean(message));
+  if (message) els.statusSummary.appendChild(make('p', { className: 'boundary-message', text: message }));
+  if (unresolved.length > 0) {
+    const gaps = make('details', { className: 'reading-boundary-details' });
+    gaps.open = gapsOpen;
+    gaps.appendChild(make('summary', {
+      text: `${unresolved.length} 项读取限制与核对记录`, attrs: { 'data-report-control': 'gaps' }
+    }));
+    const list = make('ul', {});
+    for (const gap of unresolved) list.appendChild(make('li', { text: gap }));
+    gaps.appendChild(list);
+    els.statusSummary.appendChild(gaps);
+  }
+  if (message || run?.limitations.length || unresolved.length) {
+    els.statusSummary.appendChild(make('button', {
+      className: 'reading-context-link', text: '查看范围与费用',
+      attrs: { type: 'button', 'aria-controls': 'activity-panel', 'data-report-control': 'scope' },
+      on: { click: () => {
+        els.activityPanel.open = true;
+        els.activityPanel.scrollIntoView({ block: 'nearest' });
+        els.activityPanel.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true });
+      } }
+    }));
+  }
+  show(els.statusSummary, Boolean(run && isTerminalState(run.state) && els.statusSummary.childElementCount));
   if (research?.coverage) {
     const coverage = make('div', { className: 'research-coverage' });
     coverage.appendChild(make('p', { text: '研究问题与证据' }));
@@ -1151,6 +1185,12 @@ function renderRunSummary(): void {
     for (const limit of limitations) list.appendChild(make('li', { text: limit }));
     details.appendChild(list);
     els.researchDetails.appendChild(details);
+  }
+  if (run && isTerminalState(run.state) && (stopReason || (message && !els.researchDetails.childElementCount))) {
+    const record = make('details', {});
+    record.appendChild(make('summary', { text: '停止记录' }));
+    record.appendChild(make('p', { text: stopReason ? researchGapText(stopReason) : '没有收到更具体的停止原因。可从更多菜单手动重试。' }));
+    els.researchDetails.appendChild(record);
   }
   syncResearchPresentation();
 }
@@ -1190,7 +1230,7 @@ function syncResearchPresentation(): void {
   els.workBody.classList.toggle('awaiting-decision', deciding);
   // While the live surface owns the composition, the old request/status/
   // activity shells and any empty report stay hidden.
-  show(els.requestMessage, !live && !firstStep);
+  show(els.requestMessage, Boolean(run) && !live && !firstStep);
   const processShell = state.stages.length > 0
     || els.researchDetails.childElementCount > 0
     || Boolean(run && isActiveState(run.state));
@@ -1206,6 +1246,9 @@ function syncResearchPresentation(): void {
 }
 
 function renderReportView(): void {
+  // Keep the live status element outside the renderer while it replaces the
+  // report. Settled context belongs below the name, before the cited material.
+  els.report.before(els.statusSummary);
   if (!state.run && state.runs.length === 0) {
     clear(els.report);
     els.report.removeAttribute('data-run-id');
@@ -1228,6 +1271,7 @@ function renderReportView(): void {
   renderReport(els.report, state.run, {
     onCitation: (sourceKey, button) => focusSource(sourceKey, 'citation', button)
   });
+  els.report.querySelector('.report-header')?.appendChild(els.statusSummary);
   syncResearchPresentation();
 }
 

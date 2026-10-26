@@ -1,5 +1,6 @@
 import {
   KIND_LABELS,
+  providerLabel,
   stateLabel
 } from '../shared/canonical.js';
 import {
@@ -116,6 +117,8 @@ export function renderReport(
 ): void {
   const observationsOpen = container.dataset.runId === view?.runId
     && Boolean(container.querySelector<HTMLDetailsElement>('.report-observations')?.open);
+  const recordOpen = container.dataset.runId === view?.runId
+    && Boolean(container.querySelector<HTMLDetailsElement>('.report-record')?.open);
   clear(container);
   if (!view) {
     container.removeAttribute('data-run-id');
@@ -139,12 +142,10 @@ export function renderReport(
     header.appendChild(
       make('h2', { text: view.identity.displayName || (view.identity.handle ? `@${view.identity.handle}` : view.question) })
     );
-    header.appendChild(
-      make('p', {
-        className: 'report-meta',
-        text: `${stateLabel(view.state)} · 更新于 ${formatDateTime(view.updatedAt)} · v${view.revision}`
-      })
-    );
+    if (view.identity.displayName && view.identity.handle && view.identity.displayName !== view.identity.handle) {
+      const handle = view.identity.handle.startsWith('@') ? view.identity.handle : `@${view.identity.handle}`;
+      header.appendChild(make('p', { className: 'identity-handle', text: handle }));
+    }
     if (view.interrupted) {
       header.appendChild(
         make('p', { className: 'review-flag', text: '服务重启，这份报告被标记为中断，可以手动重试。' })
@@ -235,6 +236,17 @@ export function renderReport(
     }
     details.appendChild(list);
     container.appendChild(details);
+  }
+  if (isTerminalState(view.state)) {
+    const record = make('details', { className: 'report-record' });
+    record.open = recordOpen;
+    record.appendChild(make('summary', { text: '资料与版本', attrs: { 'data-report-control': 'record' } }));
+    record.appendChild(make('p', {
+      className: 'report-meta',
+      text: `${stateLabel(view.state)} · 更新于 ${formatDateTime(view.updatedAt)} · v${view.revision}`
+    }));
+    record.appendChild(make('p', { text: `资料入口：${providerLabel(view.provider)}` }));
+    container.appendChild(record);
   }
 }
 
