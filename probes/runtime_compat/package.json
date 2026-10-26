@@ -9,7 +9,7 @@
     "@modelcontextprotocol/server": "2.3.0",
     "better-sqlite3": "13.0.3",
     "mcp-v1": "npm:@modelcontextprotocol/sdk@1.31.0",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "allowScripts": { "better-sqlite3@13.0.3": true }
 }
