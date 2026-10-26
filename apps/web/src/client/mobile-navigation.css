@@ -68,3 +68,12 @@
   .site-nav .brand { font-size: 16px; }
   .site-nav .brand-mark { width: 28px; height: 28px; }
 }
+
+/* Let enlarged text take another row instead of overlapping the brand. */
+@media (max-width: 640px) {
+  body[data-view="home"] .nav-inner { display: flex; flex-wrap: wrap; padding-block: 4px; }
+  body[data-view="home"] .brand { min-width: 0; max-width: 100%; margin-right: auto; }
+  body[data-view="home"] .brand > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+  body[data-view="home"] .nav-actions { max-width: 100%; margin-left: auto; }
+  body[data-view="home"] .user-menu { flex-wrap: wrap; justify-content: flex-end; }
+}

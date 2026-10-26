@@ -410,15 +410,17 @@ body[data-view="app"] .work-actions > .button:hover { background: var(--surface-
 
 /* ---------- 8. Report & citations ---------- */
 .report { max-width: 880px; margin: 0 auto; }
-.report-header { padding: 18px 0 14px; border-top: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); }
-.report-header h2 { margin: 0 0 6px; font-size: clamp(22px, 2.4vw, 30px); line-height: 1.3; letter-spacing: -.02em; }
+.report-header { padding: 8px 0 18px; border-bottom: 1px solid var(--border); }
+.report-header h2 { margin: 0 0 6px; font-size: clamp(30px, 3vw, 40px); line-height: 1.25; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.identity-handle { margin: 0 0 8px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
 .report-header .report-meta, .identity-note { margin: 0; color: var(--muted); font-size: 13px; }
 .report-question { margin: 10px 0 0; padding: 12px 14px; border-left: 2px solid var(--accent); background: var(--bg); color: var(--fg); overflow-wrap: anywhere; }
-.request-message { width: 100%; max-width: 880px; margin: 0 auto 20px; }
-.request-message > span { display: block; margin-bottom: 6px; color: var(--muted); font: 12px var(--font-mono); text-align: right; }
-.request-message .report-question { margin: 0; border: 1px solid var(--border); border-left: 2px solid var(--accent); background: var(--surface-2); }
-.report-section { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 22px; padding: 20px 0; border-bottom: 1px solid var(--border); }
-.report-section h3 { margin: 0; color: var(--fg); font-size: 15px; }
+.request-message, .report-record { width: 100%; max-width: 880px; margin: 0 auto; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.request-message > summary, .report-record > summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
+.request-message .report-question { margin: 0; padding: 0 0 16px; border: 0; background: transparent; color: var(--fg-2); font-size: 14px; }
+.report-record p { margin: 0 0 12px; line-height: 1.8; }
+.report-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 24px 0; border-bottom: 1px solid var(--border); }
+.report-section h3 { margin: 0; color: var(--fg-2); font-size: 14px; font-weight: 600; }
 .report-copy { min-width: 0; }
 .report-copy > p { margin: 0 0 12px; color: var(--fg-2); overflow-wrap: anywhere; }
 .finding { padding: 12px 0; border-top: 1px solid var(--border); }
@@ -498,7 +500,17 @@ body[data-view="app"] .work-actions > .button:hover { background: var(--surface-
   .live-material-status { grid-column: 2; }
   .research-live-query > span { text-align: left; }
 }
-.run-status-summary { max-width: 880px; margin: 0 auto 24px; border-left: 3px solid var(--warning); padding: 12px 16px; background: var(--surface-2); font-size: 15px; overflow-wrap: anywhere; }
+.run-status-summary { max-width: 880px; margin: 0 auto 16px; padding: 8px 0; font-size: 13px; color: var(--fg-2); overflow-wrap: anywhere; }
+.report-header .run-status-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; margin: 12px 0 0; padding: 8px 0 0; border-top: 1px solid var(--border); }
+.boundary-message { flex-basis: 100%; margin: 0; }
+.reading-boundary-details { flex: 1 1 210px; min-width: 0; }
+.reading-boundary-details > summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--warning); }
+.reading-boundary-details ul { margin: 0 0 10px; padding-left: 18px; }
+.reading-boundary-details li + li { margin-top: 6px; }
+.reading-context-link { min-height: 44px; padding: 8px 0; border: 0; background: transparent; color: var(--accent); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.reading-process { margin: 0 auto 16px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+.reading-process > summary { display: list-item; min-height: 44px; padding: 10px 0; border: 0; list-style-position: inside; color: var(--muted); font-size: 13px; cursor: pointer; }
+.reading-process > summary .panel-state { float: right; }
 .report-incomplete-gaps { margin-block: 18px; color: var(--muted); }
 .report-incomplete-gaps li { margin-block: 10px; overflow-wrap: anywhere; }
 .report-account-materials h3 { margin-bottom: 10px; }
@@ -1123,9 +1135,9 @@ body[data-view="home"] #open-auth:hover { background: var(--accent-hover); borde
 }
 #view-home[data-ambient-paused="true"] .hero-object::after { animation-play-state: paused; }
 .paper-sheet { position: relative; padding: clamp(22px, 2.3vw, 32px); border: 1px solid var(--border); border-radius: var(--radius-paper); background: var(--surface); box-shadow: var(--shadow-paper); }
-.paper-meta { display: flex; justify-content: space-between; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-.paper-person { display: flex; gap: var(--space-2); align-items: center; margin-top: var(--space-3); }
+.paper-person { display: flex; gap: var(--space-2); align-items: center; margin-top: 0; }
 .paper-person > div { min-width: 0; }
+.paper-example { margin-left: auto; color: var(--muted); font-size: 12px; align-self: flex-start; }
 .paper-monogram { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-inline: 1px solid var(--border-strong); color: var(--fg); font-size: 23px; font-weight: 550; }
 .paper-person strong { display: block; font-size: 20px; font-weight: 620; overflow-wrap: anywhere; }
 .paper-person small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
@@ -1236,7 +1248,7 @@ body[data-view="home"] #open-auth:hover { background: var(--accent-hover); borde
 /* One short arrival establishes the action before the document. Reading stays still. */
 @keyframes input-arrive { from { opacity: .65; } to { opacity: 1; } }
 @keyframes paper-arrive { from { opacity: .45; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
-.paper-meta, .paper-claim .claim-source { animation: cite-arrive 240ms 320ms ease-out both; }
+.paper-example, .paper-claim .claim-source { animation: cite-arrive 240ms 320ms ease-out both; }
 @keyframes cite-arrive { from { opacity: .35; } to { opacity: 1; } }
 @keyframes cite-reveal { from { opacity: .6; } to { opacity: 1; } }
 @keyframes paper-light { 0%, 100% { opacity: .15; } 40% { opacity: .65; } 70% { opacity: .3; } }
@@ -1397,9 +1409,8 @@ body[data-view="home"] .footer-return { font-size: 13px; }
   .composer-wrap { margin-top: 24px; }
   #view-home .entry-help { margin-top: 6px; }
   .paper-sheet { padding: 16px; }
-  .paper-meta { padding-bottom: 12px; }
-  .paper-person { margin-top: 16px; gap: 12px; }
-  .paper-person strong { font-size: 18px; }
+  .paper-person { gap: 12px; }
+  .paper-person strong { font-size: 22px; }
   .paper-question { margin: 16px 0; font-size: 18px; }
   .paper-claim { margin-top: 16px; padding: 0 0 0 12px; }
   .paper-claim .claim-text { font-size: 19px; line-height: 1.7; }
@@ -1409,10 +1420,11 @@ body[data-view="home"] .footer-return { font-size: 13px; }
   .paper-unknown .claim-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.7; }
   .object-caption { gap: 8px; }
   #view-home .composer { padding: 16px; }
-  #view-home .composer-actions { gap: 8px; margin-top: 8px; }
+  #view-home .composer-actions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  #view-home .composer-actions .button { width: auto; min-width: 116px; padding-inline: 16px; }
   #view-home .composer-actions .example-entry { min-height: 44px; }
   #view-home textarea { min-height: 72px; font-size: 17px; }
-  .composer-wrap { margin-top: 24px; }
+  .composer-wrap { margin-top: 18px; }
   .compare-grid { gap: 24px; }
   .plan-current { grid-template-columns: 1fr; }
   .plan ul { border-left: 0; border-top: 1px solid var(--border); padding: 20px 0 0; }
@@ -1436,7 +1448,7 @@ body[data-view="home"] .footer-return { font-size: 13px; }
 /* ---------- 16. Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .hero-entry, .hero-object, .hero-object::after, .paper-meta, .paper-claim .claim-source { animation: none !important; }
+  .hero-entry, .hero-object, .hero-object::after, .paper-example, .paper-claim .claim-source { animation: none !important; }
   *, *::before, *::after {
     animation-duration: .01ms !important; animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;

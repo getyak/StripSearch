@@ -44,9 +44,8 @@
           <!-- One synthetic material, read from finding to passage to limits. -->
           <section class="home-hero home-band" id="example" aria-labelledby="hero-title" data-reading-step="1">
             <div class="hero-entry">
-              <p class="hero-kicker">公开资料，有据可查。</p>
               <h1 id="hero-title">看见名字之外。<br /><span>沿着证据理解。</span></h1>
-              <p class="hero-lead">输入姓名或公开主页，先确认身份，再读一份有出处、也保留未知的报告。</p>
+              <p class="hero-lead">读公开材料，让每项判断有来处。</p>
               <div class="composer-wrap">
                 <form class="composer" id="research-form" novalidate>
                   <div class="composer-body">
@@ -67,8 +66,7 @@
             </div>
             <aside class="hero-object" aria-label="证据材料 · 原创合成示例" data-evidence-scope>
               <article class="paper-sheet">
-                <header class="paper-meta"><span>作品与行动摘录</span><span>原创合成示例</span></header>
-                <div class="paper-person"><span class="paper-monogram" aria-hidden="true">林</span><div><strong>林舟</strong><small>公开项目 Lantern</small></div></div>
+                <header class="paper-person"><span class="paper-monogram" aria-hidden="true">林</span><div><strong>林舟</strong><small>公开项目 Lantern</small></div><span class="paper-example">原创合成示例</span></header>
                 <h2 class="paper-question">Lantern 更新记录</h2>
                 <div class="paper-claim" data-evidence-key="lantern-update" data-evidence-role="claim">
                   <p class="claim-label">有材料支持</p>
@@ -196,7 +194,6 @@
                 <div class="work-title">
                   <strong id="work-title-text">未命名研究</strong>
                   <span class="work-state" id="desk-state">等待确认</span>
-                  <span class="work-revision mono" id="work-revision"></span>
                 </div>
                 <div class="work-actions" role="toolbar" aria-label="阅读操作">
                   <button class="button" id="new-research" type="button"><span class="wide-label">新建研究</span><span class="narrow-label">新建</span></button>
@@ -206,6 +203,7 @@
                   <button class="button narrow-only" id="open-mobile-sources" type="button">出处</button>
                   <button class="button narrow-only" id="open-mobile-history" type="button"><span class="wide-label">已保存研究</span><span class="narrow-label">历史</span></button>
                   <details class="export-menu" id="more-menu"><summary>更多</summary><div>
+                    <p class="menu-label">研究版本 <span id="work-revision"></span></p>
                     <p class="menu-label">导出资料</p>
                     <button class="button" id="download-html" type="button" disabled>下载 HTML</button>
                     <button class="button" id="download-pdf" type="button" disabled>下载 PDF</button>
@@ -220,12 +218,7 @@
               </header>
 
               <div class="work-body" id="work-body">
-                <div class="request-message">
-                  <span>你想了解</span>
-                  <p class="report-question" id="report-question">从一个线索开始</p>
-                </div>
-
-                <p id="run-status-summary" class="run-status-summary" role="status" hidden></p>
+                <div id="run-status-summary" class="run-status-summary" role="status" hidden></div>
 
                 <section class="stage-panel" id="needs-input-panel" hidden aria-labelledby="needs-input-title">
                   <div class="panel-bar mono"><span>需要补充</span><span>不会自动猜测</span></div>
@@ -245,9 +238,16 @@
                 <section class="stage-panel first-step-panel" id="first-step-panel" hidden aria-label="人物与账号确认">
                 </section>
 
-                <details class="stage-panel" id="activity-panel" hidden>
+                <div id="report" class="report"></div>
+
+                <details class="request-message">
+                  <summary>研究问题</summary>
+                  <p class="report-question" id="report-question">从一个线索开始</p>
+                </details>
+
+                <details class="stage-panel reading-process" id="activity-panel" hidden>
                   <summary class="panel-bar">
-                    <span>研究过程</span>
+                    <span>阅读范围与研究过程</span>
                     <span class="panel-state"><span class="run-indicator" id="run-indicator" hidden aria-hidden="true"></span><span id="activity-state">等待</span></span>
                   </summary>
                   <div class="progress-row">
@@ -259,8 +259,6 @@
                   <div id="stage-list"></div>
                   <div id="research-details" class="research-details"></div>
                 </details>
-
-                <div id="report" class="report"></div>
 
                 <div id="chat-log" class="chat-log" aria-live="polite"></div>
               </div>

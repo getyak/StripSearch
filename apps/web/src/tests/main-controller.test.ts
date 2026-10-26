@@ -96,6 +96,33 @@ async function freshUser(id: string): Promise<void> {
   renderAll();
 }
 
+test('settled report puts identity before a compact recoverable boundary and process disclosure', async () => {
+  await freshUser('reading-hierarchy');
+  const view = makeView('reading-hierarchy', {
+    state: 'partial', stopReason: 'budget_exhausted', limitations: ['合成平台尚未读取'],
+    research: { phase: 'done', steps: 2, stopReason: 'budget_exhausted', unresolved: ['provider_billing: 合成计费失败'],
+      budget: { toolCalls: 2, modelCalls: 0, inputTokens: 0, outputTokens: 0, estimatedUsd: 0, firecrawlCredits: 0,
+        unknownCost: true, limits: { toolCalls: 0, modelCalls: 0, inputTokens: 0, outputTokens: 0, elapsedMs: 0 } } }
+  });
+  state.run = view; state.activeRunId = view.runId; renderAll();
+  const header = el('report').querySelector('.report-header')!;
+  assert.equal(el('run-status-summary').parentElement, header);
+  assert.match(el('run-status-summary').textContent ?? '', /达到预算/);
+  const gaps = el('run-status-summary').querySelector<HTMLDetailsElement>('details')!;
+  assert.ok(gaps, 'specific failures remain available in the boundary strip');
+  assert.equal(gaps.open, false);
+  assert.match(gaps.textContent ?? '', /计费/);
+  assert.ok(el('report').compareDocumentPosition(el('activity-panel')) & 4);
+  assert.ok(el('report').compareDocumentPosition(el('report-question')) & 4);
+  assert.equal(el('work-revision').closest('.work-title'), null);
+  assert.ok(el('work-revision').closest('#more-menu'));
+  assert.equal(el<HTMLButtonElement>('retry-run').hidden, false);
+  gaps.open = true;
+  renderAll();
+  assert.equal(el('run-status-summary').querySelector<HTMLDetailsElement>('details')!.open, true);
+  assert.equal(el('run-status-summary').parentElement, el('report').querySelector('.report-header'));
+});
+
 function stubRun(runId: string): void {
   route = (url) => {
     if (url.includes(`/api/runs/${runId}?`)) {

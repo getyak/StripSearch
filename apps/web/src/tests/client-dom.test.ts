@@ -99,6 +99,33 @@ test('report rendering treats upstream text as text, never as markup', () => {
   assert.equal(container.querySelectorAll('.citation').length, 1);
 });
 
+test('person and cited findings precede disclosed report metadata without changing claims', () => {
+  const container = domContainer();
+  const view = viewWith({ revision: 37 });
+  const before = JSON.stringify(view);
+  renderReport(container, view, { onCitation: () => undefined });
+  const header = container.querySelector('.report-header')!;
+  assert.equal(header.querySelector('h2')?.textContent, 'Example');
+  assert.doesNotMatch(header.textContent ?? '', /v37|更新于|GitHub 公开账号/);
+  const record = container.querySelector<HTMLDetailsElement>('.report-record')!;
+  assert.ok(record, 'native disclosure keeps the revision and provenance available');
+  assert.equal(record.open, false);
+  assert.match(record.textContent ?? '', /v37/);
+  assert.match(record.textContent ?? '', /GitHub 公开账号/);
+  assert.ok(container.querySelector('.finding')!.compareDocumentPosition(record) & 4);
+  assert.equal(JSON.stringify(view), before, 'presentation does not mutate the canonical report');
+});
+
+test('report record disclosure survives refresh only within the same report', () => {
+  const container = domContainer();
+  renderReport(container, viewWith(), { onCitation: () => undefined });
+  container.querySelector<HTMLDetailsElement>('.report-record')!.open = true;
+  renderReport(container, viewWith({ revision: 2 }), { onCitation: () => undefined });
+  assert.equal(container.querySelector<HTMLDetailsElement>('.report-record')!.open, true);
+  renderReport(container, viewWith({ runId: 'different-report' }), { onCitation: () => undefined });
+  assert.equal(container.querySelector<HTMLDetailsElement>('.report-record')!.open, false);
+});
+
 test('source detail links are safe and carry noopener', () => {
   const container = domContainer();
   renderSourceDetail(container, viewWith(), 'S1', {
