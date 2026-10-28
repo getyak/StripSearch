@@ -333,7 +333,7 @@
 
             <section class="fetch-runs" aria-labelledby="fetch-runs-title">
               <div class="fetch-runs-head">
-                <h2 id="fetch-runs-title">抓取运行</h2>
+                <h2 id="fetch-runs-title">已保存的阅读</h2>
                 <button class="button ghost" type="button" id="fetch-refresh">刷新</button>
               </div>
               <ul class="fetch-run-list" id="fetch-run-list"></ul>
@@ -341,8 +341,8 @@
 
             <section class="fetch-detail" id="fetch-detail" aria-labelledby="fetch-detail-title" hidden>
               <h2 id="fetch-detail-title"></h2>
-              <p id="fetch-detail-state"></p>
-              <p id="fetch-detail-progress"></p>
+              <p class="fetch-question" id="fetch-detail-question"></p>
+              <p class="fetch-state" id="fetch-detail-state" role="status"></p>
               <div class="fetch-controls">
                 <button class="button" type="button" id="fetch-pause">暂停</button>
                 <button class="button" type="button" id="fetch-resume">恢复</button>
@@ -356,14 +356,24 @@
                 <button class="button ghost" type="button" id="fetch-stop">停止</button>
               </div>
               <p class="form-status" id="fetch-detail-status" role="status"></p>
-              <h3>限制</h3>
-              <ul class="fetch-list" id="fetch-limitations"></ul>
-              <h3>缺口</h3>
-              <ul class="fetch-list" id="fetch-gaps"></ul>
-              <h3>待核证据</h3>
-              <ul class="fetch-evidence-list" id="fetch-evidence"></ul>
-              <h3>快照处理</h3>
-              <p id="fetch-processing"></p>
+              <section class="fetch-reading" aria-labelledby="fetch-evidence-title">
+                <h3 id="fetch-evidence-title">待核原文</h3>
+                <p class="helper">这些片段尚未独立核实。先读原文，再回到来源核对。</p>
+                <ul class="fetch-evidence-list" id="fetch-evidence"></ul>
+              </section>
+              <section class="fetch-reading" aria-labelledby="fetch-gaps-title">
+                <h3 id="fetch-gaps-title">阅读缺口</h3>
+                <ul class="fetch-list" id="fetch-gaps"></ul>
+              </section>
+              <section class="fetch-reading" aria-labelledby="fetch-limitations-title">
+                <h3 id="fetch-limitations-title">本次访问限制</h3>
+                <ul class="fetch-list" id="fetch-limitations"></ul>
+              </section>
+              <details class="fetch-record">
+                <summary>运行记录</summary>
+                <p id="fetch-detail-progress"></p>
+                <p id="fetch-processing"></p>
+              </details>
             </section>
           </section>
         </div>

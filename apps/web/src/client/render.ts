@@ -94,19 +94,21 @@ function bulletNode(
   }
   const paragraph = make('p', {});
   paragraph.appendChild(document.createTextNode(text));
+  const context = make('div', { className: 'finding-context' });
   if (kind === 'attributed_statement') {
-    paragraph.appendChild(make('span', { className: 'limit-note', text: '（本人自述）' }));
+    context.appendChild(make('span', { className: 'finding-kind', text: '本人自述' }));
   }
   if (kind === 'page_statement') {
-    paragraph.appendChild(make('span', { className: 'limit-note', text: '（来源页面表述）' }));
+    context.appendChild(make('span', { className: 'finding-kind', text: '来源页面表述' }));
   }
   if (kind === 'inference') {
-    paragraph.appendChild(make('span', { className: 'limit-note', text: '（推断，非已核实事实）' }));
+    context.appendChild(make('span', { className: 'finding-kind', text: '推断，非已核实事实' }));
   }
   for (const [index, key] of sourceKeys.entries()) {
-    paragraph.appendChild(citationButton(key, `${anchorBase}c${index}`, text, handlers));
+    context.appendChild(citationButton(key, `${anchorBase}c${index}`, text, handlers));
   }
-  wrapper.appendChild(paragraph);
+  if (sourceKeys.length === 0) context.appendChild(make('span', { className: 'limit-note', text: '尚无可核对出处' }));
+  wrapper.append(paragraph, context);
   return wrapper;
 }
 
@@ -405,6 +407,9 @@ export function renderSourceDetail(
   selectedKey: string | null,
   handlers: SourceHandlers
 ): void {
+  const recordOpen = container.dataset.runId === view?.runId
+    && container.dataset.sourceKey === selectedKey
+    && Boolean(container.querySelector<HTMLDetailsElement>('.source-record')?.open);
   clear(container);
   container.dataset.runId = view?.runId ?? '';
   container.dataset.sourceKey = selectedKey ?? '';
@@ -454,13 +459,28 @@ export function renderSourceDetail(
   }
   container.appendChild(make('p', { className: 'limit-note', text: presentation.materialNote }));
 
+  if (presentation.safeHref) {
+    container.appendChild(make('a', {
+      className: 'source-original-link', text: '打开原始来源',
+      attrs: { href: presentation.safeHref, target: '_blank', rel: 'noopener noreferrer', 'data-source-focus': 'url' }
+    }));
+  }
+  const context = make('div', { className: 'source-reading-context' });
+  context.appendChild(make('p', { text: `身份归属：${source.identityConfirmed ? '已确认（种子账号）' : source.identityLabel || '未确认，不合并同名'}` }));
+  context.appendChild(make('p', { text: `材料状态：${sourceStatusLabel(source)}` }));
+  const limits = [...source.limits, ...presentation.limits];
+  if (limits.length > 0) context.appendChild(make('p', { text: `已知限制：${limits.join('；')}` }));
+  container.appendChild(context);
+  const record = make('details', { className: 'source-record' });
+  record.open = recordOpen;
+  record.appendChild(make('summary', { text: '来源记录', attrs: { 'data-source-focus': 'record' } }));
   const list = make('dl', {});
   const linkRow = make('div', {});
   linkRow.appendChild(make('dt', { text: '链接' }));
   const linkDd = make('dd', {});
   if (presentation.safeHref) {
     linkDd.appendChild(
-      make('a', { text: source.url, attrs: { href: presentation.safeHref, target: '_blank', rel: 'noopener noreferrer', 'data-source-focus': 'url' } })
+      make('span', { text: source.url })
     );
   } else {
     linkDd.appendChild(make('span', { text: source.url }));
@@ -477,20 +497,8 @@ export function renderSourceDetail(
   }
   list.appendChild(detailRow('发表时间', formatDate(source.publishedAt)));
   list.appendChild(detailRow('获取时间', formatDateTime(source.retrievedAt)));
-  list.appendChild(
-    detailRow('身份归属', source.identityConfirmed ? '已确认（种子账号）' : source.identityLabel || '未确认，不合并同名')
-  );
-  list.appendChild(
-    detailRow(
-      '状态',
-      `${sourceStatusLabel(source)}${presentation.obtainedMaterial ? ' · 已取得材料' : ''}`
-    )
-  );
-  const limits = [...source.limits, ...presentation.limits];
-  list.appendChild(
-    detailRow('已知限制', limits.length > 0 ? limits.join('；') : '没有额外限制记录。')
-  );
-  container.appendChild(list);
+  record.appendChild(list);
+  container.appendChild(record);
 
   if (source.excluded) {
     const box = make('div', { className: 'exclusion-status' });
@@ -521,12 +529,7 @@ export function renderSourceDetail(
     })
   );
   container.appendChild(actions);
-  container.appendChild(
-    make('p', {
-      className: 'limit-note',
-      text: presentation.limits.length > 0 ? presentation.limits.join('') : `URL 主机：${presentation.hostLabel}`
-    })
-  );
+
 }
 
 export function stagesFromEvents(events: RunEventRecord[]): StageView[] {

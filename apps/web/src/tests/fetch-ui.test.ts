@@ -122,7 +122,7 @@ test('current-owner positive control: list, selection and plain-text evidence re
   assert.equal(list.children.length, 1, 'persisted runs restore after refresh');
   await fetchPanel.select('run-a');
   await settle();
-  assert.equal(statusText('fetch-detail-title'), 'https://github.com/fixture/repo');
+  assert.equal(statusText('fetch-detail-title'), 'fixture/repo');
   // Untrusted captured prose stays plain text, never raw HTML.
   const quote = env.document.querySelector('#fetch-evidence blockquote');
   assert.ok(quote, 'evidence quote rendered');
@@ -157,12 +157,12 @@ test('newer selections are never overwritten by older detail responses', async (
   const older = fetchPanel.select('run-old');
   await fetchPanel.select('run-new');
   await settle();
-  assert.ok(statusText('fetch-detail-state').includes('Synthetic NEW question'), 'newest selection rendered');
+  assert.ok(statusText('fetch-detail-question').includes('Synthetic NEW question'), 'newest selection rendered');
   gate.resolve(jsonResponse({ run: makeRunView('run-old', { question: 'Synthetic OLD question' }) }));
   await older;
   await settle();
-  assert.ok(statusText('fetch-detail-state').includes('Synthetic NEW question'), 'late older response cannot overwrite');
-  assert.ok(!statusText('fetch-detail-state').includes('Synthetic OLD question'));
+  assert.ok(statusText('fetch-detail-question').includes('Synthetic NEW question'), 'late older response cannot overwrite');
+  assert.ok(!statusText('fetch-detail-question').includes('Synthetic OLD question'));
 });
 
 test('late start success after reset renders nothing for the previous identity', async () => {
@@ -358,5 +358,53 @@ test('unknown request consent is explicit and bound to one run and control revis
   await settle();
   assert.equal(resumes.length, 1);
   assert.equal(resumes[0]?.reconcileUnknown, undefined);
+  fetchPanel.reset();
+});
+
+
+test('evidence reading keeps the question and pending prose ahead of collapsible request records', async () => {
+  fetchPanel.reset();
+  const run = makeRunView('reading-order');
+  route = () => jsonResponse({ run });
+  await fetchPanel.select(run.runId);
+  const detail = env.document.getElementById('fetch-detail')!;
+  const evidence = env.document.getElementById('fetch-evidence')!;
+  const record = detail.querySelector<HTMLDetailsElement>('.fetch-record');
+  assert.ok(record, 'request details must remain available on demand');
+  assert.equal(record.open, false);
+  assert.ok(evidence.compareDocumentPosition(record) & env.window.Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.equal(env.document.getElementById('fetch-detail-question')?.textContent, run.question);
+  assert.ok(!env.document.getElementById('fetch-detail-state')?.textContent?.includes('阶段'));
+  assert.match(evidence.textContent ?? '', /待核验/);
+  assert.equal(evidence.querySelectorAll('img,script').length, 0);
+  fetchPanel.reset();
+});
+
+test('pending evidence refuses unsafe or missing source links without losing quoted text or revocation', async () => {
+  for (const url of ['javascript:alert(1)', 'data:text/html,unsafe', 'https://user:pass@github.com/fixture', null]) {
+    fetchPanel.reset();
+    const run = makeRunView('unsafe-source');
+    run.pendingEvidence[0]!.sourceUrl = url;
+    run.pendingEvidence[0]!.revokedAt = '2026-04-02T00:00:00.000Z';
+    route = () => jsonResponse({ run });
+    await fetchPanel.select(run.runId);
+    const evidence = env.document.getElementById('fetch-evidence')!;
+    assert.equal(evidence.querySelectorAll('a[href]').length, 0, String(url));
+    assert.match(evidence.textContent ?? '', /已撤回/);
+    assert.match(evidence.textContent ?? '', /plain quote/);
+    assert.match(evidence.textContent ?? '', /无法安全打开|来源链接缺失/);
+  }
+  fetchPanel.reset();
+});
+
+test('empty evidence and no declared gaps do not claim a complete history', async () => {
+  fetchPanel.reset();
+  const run = makeRunView('empty-reading', { state: 'finished' });
+  run.pendingEvidence = [];
+  run.gaps = [];
+  route = () => jsonResponse({ run });
+  await fetchPanel.select(run.runId);
+  assert.match(statusText('fetch-evidence'), /尚无待核原文/);
+  assert.match(statusText('fetch-gaps'), /不代表全部历史已读完/);
   fetchPanel.reset();
 });
