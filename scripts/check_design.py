@@ -86,7 +86,7 @@ def authored_markdown():
     # Installed packages and local research archives are not design artifacts.
     # Prune before descent, so installing a probe cannot invalidate this check.
     ignored = {".git", "node_modules", ".venv", "__pycache__", "dist", "coverage",
-               "data", "workspace", "runs", "archives", "_private"}
+               "data", "workspace", "runs", "archives", "_private", ".symphony", ".cursor", ".impeccable"}
     for directory, subdirs, filenames in os.walk(ROOT):
         subdirs[:] = [name for name in subdirs if name not in ignored]
         for filename in filenames:

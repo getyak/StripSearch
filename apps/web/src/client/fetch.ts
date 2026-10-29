@@ -23,6 +23,7 @@ import {
   type FetchGithubTarget
 } from '../shared/research-fetch-github.js';
 import type { ApiClient } from './api.js';
+import { sourcePlatformFromUrl } from '../shared/source-presentation.js';
 
 type ById = <T extends HTMLElement>(id: string) => T;
 
@@ -124,12 +125,12 @@ export function createFetchPanel(deps: FetchPanelDeps): FetchPanel {
         const li = document.createElement('li');
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'link-button';
+        button.className = 'link-button fetch-run-link';
         button.dataset.fetchRunId = summary.runId;
-        button.textContent = `${summary.targetUrl} · ${STATE_LABELS[summary.state] ?? summary.state}`;
+        button.textContent = `${summary.targetUrl.replace('https://github.com/', '')} · ${STATE_LABELS[summary.state] ?? summary.state}`;
         button.addEventListener('click', () => void panel.select(summary.runId));
         const detail = document.createElement('small');
-        detail.textContent = `条目 ${String(summary.progress.items)} · 评论 ${String(summary.progress.comments)} · 请求 ${String(summary.progress.requests)} · 缺口 ${String(summary.progress.gaps)}`;
+        detail.textContent = `${summary.question} · ${String(summary.progress.items)} 条内容 · ${String(summary.progress.comments)} 条首页评论 · ${String(summary.progress.gaps)} 项缺口`;
         li.append(button, detail);
         return li;
       })
@@ -138,15 +139,16 @@ export function createFetchPanel(deps: FetchPanelDeps): FetchPanel {
 
   const renderDetail = (run: FetchGithubRunView): void => {
     byId<HTMLDivElement>('fetch-detail').hidden = false;
-    setText('fetch-detail-title', `${run.target.canonicalUrl}`);
+    setText('fetch-detail-title', run.target.kind === 'repository' ? `${run.target.owner}/${run.target.name}` : run.target.login);
+    setText('fetch-detail-question', run.question);
     setText(
       'fetch-detail-state',
-      `状态：${STATE_LABELS[run.state] ?? run.state} · 阶段：${run.phase === 'acquire' ? '真实抓取' : '冻结快照处理'} · 问题：${run.question}`
+      STATE_LABELS[run.state] ?? run.state
     );
     const p = run.progress.requests;
     setText(
       'fetch-detail-progress',
-      `请求 ${String(p.total)}（成功 ${String(p.succeeded)} · 失败 ${String(p.failed)} · 结果未知 ${String(p.unknown)} · 已拒绝 ${String(p.rejected)}） · 条目 ${String(run.progress.items)} · 首页评论 ${String(run.progress.comments)} · 快照${run.snapshot.frozen ? '已冻结' : '未冻结'}`
+      `阶段：${run.phase === 'acquire' ? '公开资料读取' : '冻结快照处理'} · 请求 ${String(p.total)}（成功 ${String(p.succeeded)} · 失败 ${String(p.failed)} · 结果未知 ${String(p.unknown)} · 已拒绝 ${String(p.rejected)}） · 条目 ${String(run.progress.items)} · 首页评论 ${String(run.progress.comments)} · 快照${run.snapshot.frozen ? '已冻结' : '未冻结'}`
     );
     fillList(
       'fetch-limitations',
@@ -155,29 +157,43 @@ export function createFetchPanel(deps: FetchPanelDeps): FetchPanel {
     fillList(
       'fetch-gaps',
       run.gaps.length === 0
-        ? [{ primary: '暂无显式缺口。' }]
-        : run.gaps.map((gap) => ({ primary: gap.code, secondary: gap.detail }))
+        ? [{ primary: '暂无显式缺口；不代表全部历史已读完。' }]
+        : run.gaps.map((gap) => ({ primary: gap.detail, secondary: `记录代码：${gap.code}` }))
     );
     const evidence = byId<HTMLUListElement>('fetch-evidence');
     evidence.replaceChildren(
       ...run.pendingEvidence.map((entry) => {
         const li = document.createElement('li');
-        const link = document.createElement('a');
-        link.textContent = entry.sourceTitle ?? entry.sourceUrl ?? entry.evidenceId;
-        if (entry.sourceUrl) {
-          link.href = entry.sourceUrl;
-          link.target = '_blank';
-          link.rel = 'noreferrer noopener';
+        const presentation = sourcePlatformFromUrl(entry.sourceUrl ?? '');
+        const link = document.createElement(presentation.safeHref ? 'a' : 'span');
+        link.textContent = entry.sourceTitle ?? entry.sourceUrl ?? '未命名来源';
+        link.className = 'fetch-evidence-source';
+        if (presentation.safeHref) {
+          link.setAttribute('href', presentation.safeHref);
+          link.setAttribute('target', '_blank');
+          link.setAttribute('rel', 'noreferrer noopener');
         }
         const quote = document.createElement('blockquote');
         // Plain text only: untrusted captured prose is never rendered as HTML.
-        quote.textContent = entry.revokedAt === null ? entry.quote : `（已撤回）${entry.quote}`;
+        quote.textContent = entry.quote;
+        li.dataset.revoked = String(entry.revokedAt !== null);
         const meta = document.createElement('small');
         meta.textContent = `${EVIDENCE_LABELS[entry.role] ?? '证据角色待确认'} · ${entry.author ?? '作者未知'} · ${entry.publishedAt ?? '时间未标注'}${entry.revokedAt !== null ? ' · 已撤回' : ''}`;
         li.append(link, quote, meta);
+        const provenance = document.createElement('p');
+        provenance.className = 'fetch-evidence-provenance';
+        provenance.textContent = presentation.safeHref ? `原始来源 · ${presentation.hostLabel}`
+          : entry.sourceUrl ? `无法安全打开来源链接：${entry.sourceUrl}` : '来源链接缺失，暂时无法回到原始来源。';
+        li.appendChild(provenance);
         return li;
       })
     );
+    if (run.pendingEvidence.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'fetch-evidence-empty';
+      empty.textContent = '尚无待核原文。可以查看阅读缺口；若已暂停，可按当前状态恢复。';
+      evidence.appendChild(empty);
+    }
     const processing = run.processing;
     setText(
       'fetch-processing',
@@ -243,12 +259,14 @@ export function createFetchPanel(deps: FetchPanelDeps): FetchPanel {
     async select(runId: string): Promise<void> {
       state.reconciliationFor = null;
       byId<HTMLSelectElement>('fetch-resume-choice').value = '';
+      if (state.selectedRunId !== runId) byId('fetch-detail').querySelectorAll<HTMLDetailsElement>('details').forEach(item => { item.open = false; });
       state.selectedRunId = runId;
       state.selected = null;
       byId<HTMLDivElement>('fetch-detail').hidden = true;
       await refreshDetail(runId);
     },
     reset(): void {
+      byId('fetch-detail').querySelectorAll<HTMLDetailsElement>('details').forEach(item => { item.open = false; });
       state.identityEpoch++;
       state.listRequest++;
       state.detailRequest++;
@@ -262,7 +280,7 @@ export function createFetchPanel(deps: FetchPanelDeps): FetchPanel {
       state.actionBusy = false;
       renderRunList();
       byId<HTMLDivElement>('fetch-detail').hidden = true;
-      for (const id of ['fetch-detail-title', 'fetch-detail-state', 'fetch-detail-progress', 'fetch-detail-status', 'fetch-processing', 'fetch-target-echo']) setText(id, '');
+      for (const id of ['fetch-detail-title', 'fetch-detail-question', 'fetch-detail-state', 'fetch-detail-progress', 'fetch-detail-status', 'fetch-processing', 'fetch-target-echo']) setText(id, '');
       for (const id of ['fetch-limitations', 'fetch-gaps', 'fetch-evidence']) byId(id).replaceChildren();
       byId<HTMLInputElement>('fetch-target').value = '';
       byId<HTMLTextAreaElement>('fetch-question').value = '';
@@ -315,6 +333,7 @@ export function createFetchPanel(deps: FetchPanelDeps): FetchPanel {
       if (identityEpoch !== state.identityEpoch) return;
       state.startAttempt = null;
       state.detailRequest++;
+      if (state.selectedRunId !== run.runId) byId('fetch-detail').querySelectorAll<HTMLDetailsElement>('details').forEach(item => { item.open = false; });
       state.selectedRunId = run.runId;
       state.selected = run;
       renderDetail(run);

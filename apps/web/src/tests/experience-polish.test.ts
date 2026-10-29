@@ -631,3 +631,23 @@ test('mobile toolbar reopening records its own opener and ignores stale queued d
     assert.equal(env.document.activeElement, opener);
   } finally { proto.close = originalClose; env.window.matchMedia = originalMedia; }
 });
+
+
+test('source record keeps keyboard focus on polling and rejects restoration across reports', async () => {
+  await freshUser('record-reader');
+  state.run = makeView('record-a');
+  state.activeRunId = 'record-a';
+  state.selectedSourceKey = 'S1';
+  renderAll();
+  const record = env.document.querySelector<HTMLDetailsElement>('#inspector-detail .source-record')!;
+  record.open = true;
+  record.querySelector<HTMLElement>('summary')!.focus();
+  renderAll();
+  assert.equal(env.document.activeElement, env.document.querySelector('#inspector-detail .source-record summary'));
+  assert.equal(env.document.querySelector<HTMLDetailsElement>('#inspector-detail .source-record')!.open, true);
+  state.run = makeView('record-b');
+  state.activeRunId = 'record-b';
+  renderAll();
+  assert.notEqual(env.document.activeElement, env.document.querySelector('#inspector-detail .source-record summary'));
+  assert.equal(env.document.querySelector<HTMLDetailsElement>('#inspector-detail .source-record')!.open, false);
+});

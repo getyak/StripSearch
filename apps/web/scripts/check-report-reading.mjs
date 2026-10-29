@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const [originArg, output, client = 'live', mode = 'verify'] = process.argv.slice(2);
 const origin = new URL(originArg);
@@ -149,7 +151,7 @@ async function doubleTextSize(target) {
   return result;
 }
 try {
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE_PATH, headless: true });
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE_PATH, headless: true, args: process.env.IMPECCABLE_CDP_PORT ? [`--remote-debugging-port=${process.env.IMPECCABLE_CDP_PORT}`] : [] });
   receipt.driverPid = process.pid;
   for (const width of [1280, 390]) for (const theme of ['light', 'dark']) await check(`report and homepage ${width} ${theme}`, async () => {
     const context = await open(width, theme, {}, { height: width === 1280 ? 900 : 844, touch: width === 390 });
@@ -274,6 +276,87 @@ try {
       finally { await context.close(); }
     });
   }
+    if (mode === 'verify') for (const width of [1440, 850, 390]) for (const theme of ['light', 'dark']) await check(`evidence reading ${width} ${theme}`, async () => {
+      const context = await open(width, theme);
+      try {
+        const citation = page.locator('#report [data-citation-anchor="s0b0c0"]');
+        await citation.click();
+        const detail = page.locator(width <= 1220 ? '#drawer-source-detail' : '#inspector-detail');
+        assert.equal(await detail.locator('.source-record').evaluate(el => el.open), false);
+        assert.equal(await detail.getByRole('link', { name: '打开原始来源' }).isVisible(), true);
+        assert.equal(await detail.locator('[data-source-focus="exclude"]').isVisible(), true);
+        assert.equal(await detail.locator('.source-reading-context').isVisible(), true);
+        assert.equal(await detail.locator('a[data-source-focus="url"]').getAttribute('href'), base.sources[1].url);
+        await capture(`source-${width}-${theme}.png`);
+        if (width === 1440 && theme === 'light' && process.env.IMPECCABLE_CDP_PORT) {
+          try {
+            const { stdout } = await promisify(execFile)('.cursor/skills/impeccable/scripts/impeccable', ['detect', '--cdp', process.env.IMPECCABLE_CDP_PORT, '--target', 'synthetic-get-253', '--json'], { maxBuffer: 4e6 });
+            await writeFile(path.join(output, 'detect-rendered-search.json'), stdout);
+          } catch (error) {
+            await writeFile(path.join(output, 'detect-rendered-search.json'), error.stdout || JSON.stringify({ error: error.message }));
+          }
+        }
+        await detail.locator('.return-citation').click();
+        await page.waitForFunction(() => document.activeElement?.dataset.citationAnchor === 's0b0c0');
+
+        let run = { runId: 'synthetic-fetch-reading', revision: 3, state: 'paused', phase: 'acquire',
+          target: { kind: 'repository', owner: 'synthetic', name: 'lantern', canonicalUrl: 'https://github.com/synthetic/lantern' },
+          question: '这些更新能说明哪些实际贡献？',
+          progress: { requests: { total: 3, succeeded: 1, failed: 1, unknown: 1, rejected: 0, inFlight: 0 }, items: 2, comments: 1 },
+          snapshot: { frozen: false }, needsReconciliation: true,
+          limitations: ['原创合成材料；只覆盖所选公开仓库的正文与首页评论。'],
+          gaps: [{ code: 'synthetic_page_unavailable', detail: '还有一页评论未能读取，不能据此判断讨论已读完。' }],
+          pendingEvidence: [{ evidenceId: 'synthetic-evidence', sourceTitle: 'Lantern · 合成更新记录', sourceUrl: 'https://github.com/synthetic/lantern/issues/1', quote: '新增离线阅读与本地索引。个人贡献与实际使用效果仍需核实。', role: 'factual_support', author: '合成作者', publishedAt: '2025-06-01', revokedAt: null }], processing: null };
+        const resumes = [];
+        await context.route('**/api/fetch/**', async route => {
+          const request = route.request();
+          if (request.method() === 'POST' && request.url().endsWith('/resume')) {
+            resumes.push(request.postDataJSON()); run = { ...run, state: 'acquiring', needsReconciliation: false, revision: 4 };
+          } else assert.equal(request.method(), 'GET', 'no unexpected Fetch mutation');
+          const value = request.url().endsWith('/runs') ? { runs: [{ ...run, targetUrl: run.target.canonicalUrl, progress: { ...run.progress, requests: 3, gaps: 1 } }] } : { run };
+          await route.fulfill({ status: 200, json: value });
+        });
+        await page.goto(`${origin.origin}/#/fetch`, { waitUntil: 'networkidle' });
+        await page.locator('[data-fetch-run-id="synthetic-fetch-reading"]').click();
+        await page.locator('#fetch-evidence blockquote').waitFor();
+        await page.locator('#fetch-detail-title').scrollIntoViewIfNeeded();
+        assert.equal(await page.locator('.fetch-record').evaluate(el => el.open), false);
+        assert.equal(await page.locator('#fetch-detail-question').innerText(), run.question);
+        assert.equal(await page.locator('#fetch-evidence a').getAttribute('href'), run.pendingEvidence[0].sourceUrl);
+        assert.equal(await page.locator('#fetch-resume-choice').isVisible(), true);
+        assert.match(await page.locator('#fetch-gaps').innerText(), /未能读取/);
+        const layout = await page.evaluate(() => ({ viewport: innerWidth, scroll: document.documentElement.scrollWidth, question: document.getElementById('fetch-detail-question').getBoundingClientRect().y, evidence: document.getElementById('fetch-evidence').getBoundingClientRect().y }));
+        assert.ok(layout.question < layout.evidence);
+        assert.ok(layout.scroll <= width + 1, JSON.stringify(layout));
+        await capture(`fetch-${width}-${theme}.png`);
+        if (width === 390 && theme === 'light' && process.env.IMPECCABLE_CDP_PORT) {
+          try {
+            const { stdout } = await promisify(execFile)('.cursor/skills/impeccable/scripts/impeccable', ['detect', '--cdp', process.env.IMPECCABLE_CDP_PORT, '--target', '#/fetch', '--json'], { maxBuffer: 4e6 });
+            await writeFile(path.join(output, 'detect-rendered-fetch.json'), stdout);
+          } catch (error) {
+            await writeFile(path.join(output, 'detect-rendered-fetch.json'), error.stdout || JSON.stringify({ error: error.message }));
+          }
+        }
+        await page.locator('#fetch-resume').click();
+        assert.equal(resumes.length, 0, 'unknown request cannot replay without consent');
+        assert.match(await page.locator('#fetch-detail-status').innerText(), /请先选择/);
+        await page.locator('#fetch-resume-choice').selectOption('skip');
+        await page.locator('#fetch-resume').click();
+        await page.waitForFunction(() => document.getElementById('fetch-detail-state')?.textContent === '抓取中');
+        assert.equal(resumes[0].reconcileUnknown, 'skip');
+        await page.locator('.fetch-record > summary').press('Enter');
+        assert.equal(await page.locator('#fetch-detail-progress').isVisible(), true);
+        if (width === 390) {
+          const doubled = await doubleTextSize('#fetch-evidence blockquote');
+          assert.ok(await page.locator('#fetch-evidence blockquote').evaluate(el => parseFloat(getComputedStyle(el).fontSize)) >= doubled.expected);
+          await capture(`fetch-200pct-${theme}.png`);
+          const overflow = await page.evaluate(() => ({ viewport: innerWidth, width: document.documentElement.scrollWidth, elements: [...document.querySelectorAll('body *')].filter(el => el.getBoundingClientRect().right > innerWidth + 1).map(el => ({ tag: el.tagName, id: el.id, class: el.className, right: el.getBoundingClientRect().right })).slice(-12) }));
+          receipt.layouts.push(overflow);
+          assert.ok(overflow.width <= overflow.viewport + 1, JSON.stringify(overflow));
+        }
+      } finally { await context.close(); }
+    });
+
 } finally {
   if (browser) await browser.close();
   receipt.browserClosed = true;

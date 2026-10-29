@@ -21,3 +21,9 @@ _private/
 *.sqlite-*
 *.db
 *.db-*
+
+# Impeccable runtime output is private/rebuildable; project context is versioned.
+.impeccable/*
+!.impeccable/config.json
+!.impeccable/design.json
+!.impeccable/surfaces/

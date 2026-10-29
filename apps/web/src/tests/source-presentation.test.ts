@@ -370,3 +370,33 @@ test('private and URL-normalized local addresses never become clickable sources'
     assert.equal(sourcePlatformFromUrl(`https://${host}/`).safeHref, null, host);
   }
 });
+
+
+test('reading keeps source actions and identity uncertainty visible outside the optional record', () => {
+  const container = env.document.createElement('div');
+  const view = viewWith({ sources: [sourceWith({ identityConfirmed: false, identityLabel: '归属待确认', limits: ['合成限制'] })] });
+  let excluded = '';
+  renderSourceDetail(container, view, 'S1', { ...detailHandlers(), onExclude: key => { excluded = key; } });
+  const record = container.querySelector<HTMLDetailsElement>('.source-record');
+  assert.ok(record);
+  assert.equal(record.open, false);
+  assert.equal(container.querySelector('a[data-source-focus="url"]')?.closest('.source-record'), null);
+  assert.match(container.querySelector('.source-reading-context')?.textContent ?? '', /归属待确认/);
+  assert.match(container.querySelector('.source-reading-context')?.textContent ?? '', /合成限制/);
+  container.querySelector<HTMLButtonElement>('[data-source-focus="exclude"]')!.click();
+  assert.equal(excluded, 'S1');
+  record.open = true;
+  renderSourceDetail(container, view, 'S1', detailHandlers());
+  assert.equal(container.querySelector<HTMLDetailsElement>('.source-record')?.open, true);
+  renderSourceDetail(container, { ...view, runId: 'another-report' }, 'S1', detailHandlers());
+  assert.equal(container.querySelector<HTMLDetailsElement>('.source-record')?.open, false);
+});
+
+test('a finding with no citation explicitly states that no source can be checked', () => {
+  const container = env.document.createElement('div');
+  const view = viewWith();
+  view.answer[0]!.bullets[0]!.sourceKeys = [];
+  renderReport(container, view, { onCitation: () => assert.fail('no invented source') });
+  assert.match(container.querySelector('.finding')?.textContent ?? '', /尚无可核对出处/);
+  assert.equal(container.querySelectorAll('.finding button.citation').length, 0);
+});
