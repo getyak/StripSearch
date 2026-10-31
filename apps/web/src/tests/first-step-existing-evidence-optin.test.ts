@@ -5,7 +5,7 @@
  * fetch is used. New production types/exports are intentionally not imported.
  */
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { createHash } from 'node:crypto';
 import type { Request, Response, Router } from 'express';
 import { seedFirstStep, type SeededFirstStep } from './first-step-fixtures.js';
@@ -24,10 +24,11 @@ import type { AppConfig } from '../server/config.js';
 import type { RunRecord } from '../server/store.js';
 
 // A hard network backstop, in addition to the injected transport/tools below.
-// Node's mock tracker restores it after each test; no test changes credentials.
-test.beforeEach((t) => {
-  t.mock.method(globalThis, 'fetch', async () => { throw new Error('real_network_forbidden'); });
+// Restore the file-local mock tracker after every test; credentials stay untouched.
+test.beforeEach(() => {
+  mock.method(globalThis, 'fetch', async () => { throw new Error('real_network_forbidden'); });
 });
+test.afterEach(() => { mock.restoreAll(); });
 
 const OWNER = 'user-owner';
 const HOME = 'https://fixture-followup-home.org/';
