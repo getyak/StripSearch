@@ -22,6 +22,9 @@ import type { XAccountProvider } from '../server/research/x-account-contracts.js
 import type { HttpResponseLike } from '../server/adapters/types.js';
 import type { AppConfig } from '../server/config.js';
 import type { RunRecord } from '../server/store.js';
+import { asScopeVersion } from '../shared/research-case.js';
+import { buildResearchReport } from '../server/research/controller.js';
+import { RESEARCH_LIMITS } from '../server/research/research-store.js';
 
 // A hard network backstop, in addition to the injected transport/tools below.
 // Restore the file-local mock tracker after every test; credentials stay untouched.
@@ -412,4 +415,112 @@ test('explicit ordinary single-X evidence does not start the dedicated X engine'
   await runToTerminal(f, runner, child.id);
   assert.equal(x.calls.length, 0); assert.equal(tools.calls.length, 0);
   assert.equal(f.store.research.checkpoint(child.id)!.xAccountResearch, undefined);
+});
+
+
+// Two supplemental real-memory boundaries. The 32 admitted cases above remain unchanged.
+test('historical profile-only corpus uses the actual parent URL guard, not account-key membership', (t) => {
+  const ordinary = followupFixture(); t.after(() => ordinary.close());
+  assert.doesNotThrow(() => ordinary.firstStep.scopeGuard(OWNER, ordinary.run.id).resolveUrl(ABOUT),
+    'the original 32-case About positive is legitimately public_history');
+
+  const f = seedFirstStep({ accounts: [{ url: HOME }] }); t.after(() => f.close());
+  const view = f.firstStep.getFirstStepView(OWNER, f.run.id)!;
+  if (view.mode !== 'first_step') throw new Error('unexpected synthetic mode');
+  f.firstStep.applyFirstStepSelection(OWNER, f.run.id, {
+    expectedRunRevision: f.store.getRun(f.run.id)!.revision,
+    expectedScopeVersion: view.view.selection.scopeVersion, discoveryRevision: view.view.discoveryRevision,
+    clusterId: null,
+    accounts: [{ accountId: f.accountIdFor(0), selection: 'only_this_account', excluded: false }]
+  }, 'synthetic-profile-selection');
+  const cp = f.store.research.checkpoint(f.run.id)!;
+  // The real domain API supports profile_only. A historical checkpoint/link is
+  // rebound to its returned version; no fabricated scope mismatch is used.
+  const narrowed = f.store.cases.applyScopeChange({ ownerId: OWNER, caseId: f.caseId,
+    expectedScopeVersion: asScopeVersion(cp.firstStep!.scopeVersion), reason: 'synthetic historical profile-only policy',
+    accounts: [{ accountId: f.accountIdFor(0), allowedScope: { state: 'profile_only', note: 'synthetic profile only' } }] });
+  cp.firstStep = { ...cp.firstStep!, scopeVersion: narrowed.case.scopeVersion,
+    accounts: cp.firstStep!.accounts.map(account => ({ ...account, allowedScope: 'profile_only' as const })) };
+  cp.anchorUrl = HOME;
+  cp.pages = [page('S2', HOME, HOME_QUOTE, { retrieval: 'profile' }),
+    page('S5', ABOUT, 'Synthetic historical About original.', { retrieval: 'read' }),
+    page('S7', HOME + 'withdrawn', 'Synthetic explicitly withdrawn historical original.', { retrieval: 'read' })];
+  cp.claims = []; cp.unknowns = []; cp.coverageGaps = [];
+  f.store.research.save(f.run.id, cp);
+  f.db.prepare('UPDATE first_step_links SET selection_scope_version=? WHERE run_id=?').run(narrowed.case.scopeVersion, f.run.id);
+  cp.pages.forEach(p => addSource(f, f.run.id, p));
+  f.store.setSourceExcluded(f.run.id, 'S7', true);
+  f.store.updateRun(f.run.id, { state: 'completed', finished_at: new Date().toISOString() });
+
+  const guard = f.firstStep.scopeGuard(OWNER, f.run.id);
+  assert.equal(f.firstStep.link(f.run.id)!.selectionScopeVersion, narrowed.case.scopeVersion);
+  assert.equal(f.store.isResearchScopeActive(f.run.id, OWNER), true);
+  assert.equal(guard.resolveUrl(HOME).allowedScope, 'profile_only');
+  assert.throws(() => guard.resolveUrl(ABOUT), (error: unknown) => error instanceof Error &&
+    (error as Error & { code?: string }).code === 'out_of_scope');
+  assert.throws(() => guard.resolveUrl(HOME + 'withdrawn'), (error: unknown) => error instanceof Error &&
+    (error as Error & { code?: string }).code === 'out_of_scope');
+  const before = f.store.buildCanonicalView(f.store.getRun(f.run.id)!);
+  assert.equal(before.sources.find(s => s.sourceKey === 'S2')!.excluded, false);
+  assert.equal(before.sources.find(s => s.sourceKey === 'S5')!.excluded, false,
+    'canonical source activity alone does not enforce profile-only URL depth');
+  assert.equal(before.sources.find(s => s.sourceKey === 'S7')!.excluded, true);
+
+  const child = explicitChild(f), inherited = f.store.research.checkpoint(child.id)!;
+  assert.equal(inherited.pages.some(p => p.url === HOME), true, 'allowed homepage remains a positive');
+  assert.equal(inherited.pages.some(p => p.url === ABOUT), false, 'current parent URL refusal survives inheritance');
+  assert.equal(inherited.pages.some(p => p.url === HOME + 'withdrawn'), false);
+});
+
+test('search-only snippet cannot erase an actual failed original-read billing gap during inheritance', (t) => {
+  const f = seedFirstStep({ accounts: [{ url: HOME }] }); t.after(() => f.close());
+  const view = f.firstStep.getFirstStepView(OWNER, f.run.id)!;
+  if (view.mode !== 'first_step') throw new Error('unexpected synthetic mode');
+  f.firstStep.applyFirstStepSelection(OWNER, f.run.id, {
+    expectedRunRevision: f.store.getRun(f.run.id)!.revision,
+    expectedScopeVersion: view.view.selection.scopeVersion, discoveryRevision: view.view.discoveryRevision,
+    clusterId: null,
+    accounts: [{ accountId: f.accountIdFor(0), selection: 'only_this_account', excluded: false }]
+  }, 'synthetic-search-only-parent');
+  const cp = f.store.research.checkpoint(f.run.id)!;
+  cp.anchorUrl = HOME;
+  cp.pages = [page('S2', ABOUT, 'Synthetic discovery snippet, not an original read.', { retrieval: 'search' })];
+  cp.claims = []; cp.unknowns = []; cp.coverageGaps = [];
+  cp.actionFailures = [{ step: 1, action: { type: 'read', url: ABOUT }, code: 'provider_billing' }];
+  f.store.research.save(f.run.id, cp);
+  const snippet = cp.pages[0]!;
+  f.store.addSource(f.run.id, { key: snippet.sourceKey, url: snippet.url, title: snippet.title,
+    kind: snippet.kind, publishedAt: null, excerpt: snippet.text, excerptLocator: '搜索发现材料，尚未回读原文',
+    identityLabel: 'Synthetic discovery only', identityConfirmed: false, fetchStatus: 'ok', limits: [] }, 0);
+  const search = { type: 'search' as const, query: 'synthetic discovery for the selected fixture account' };
+  f.store.research.reserve(f.run.id, 'synthetic-search-completed', 'tool', search,
+    { inputTokens: 0, outputTokens: 0 }, undefined, true);
+  f.store.research.settle(f.run.id, 'synthetic-search-completed',
+    { pages: [{ url: ABOUT, title: snippet.title, text: snippet.text, kind: snippet.kind,
+      publishedAt: null, links: [], limitations: [] }], requests: 1, bytes: 64, estimatedUsd: 0, credits: 0, limitations: [] },
+    { inputTokens: 0, outputTokens: 0, estimatedUsd: 0, credits: 0, bytes: 64, unknownCost: false });
+  f.store.research.reserve(f.run.id, 'synthetic-original-read-failed', 'tool', { type: 'read', url: ABOUT },
+    { inputTokens: 0, outputTokens: 0 }, undefined, true);
+  f.store.research.settle(f.run.id, 'synthetic-original-read-failed', null,
+    { inputTokens: 0, outputTokens: 0, estimatedUsd: null, credits: null, unknownCost: true }, 'failed');
+  assert.deepEqual(cp.unknowns, []); assert.deepEqual(cp.coverageGaps, []);
+  assert.equal(f.firstStep.scopeGuard(OWNER, f.run.id).resolveUrl(ABOUT).allowedScope, 'public_history');
+  const report = buildResearchReport({ store: f.store, run: f.store.getRun(f.run.id)!, checkpoint: cp, limits: RESEARCH_LIMITS },
+    'no_new_evidence', 'partial');
+  assert.deepEqual(cp.unknowns, []); assert.deepEqual(cp.coverageGaps, [], 'no hand-inserted BILLING_GAP');
+  f.store.research.save(f.run.id, cp);
+  f.store.updateRun(f.run.id, { state: 'partial', limitations_json: JSON.stringify(report.limitations), finished_at: new Date().toISOString() });
+  const parentView = f.store.buildCanonicalView(f.store.getRun(f.run.id)!);
+  assert.ok(parentView.limitations.some(value => value.includes('provider_billing') && value.includes(ABOUT)),
+    'actual current report/canonical pipeline derives the unresolved original-read failure');
+  assert.equal(f.store.research.checkpoint(f.run.id)!.pages[0]!.retrieval, 'search');
+  const parentReceipts = f.store.research.receipts(f.run.id);
+  assert.equal(parentReceipts.length, 2); assert.ok(parentReceipts.some(r => r.state === 'failed'));
+
+  const child = explicitChild(f), inherited = f.store.research.checkpoint(child.id)!;
+  assert.ok([...(inherited.coverageGaps ?? []), ...inherited.unknowns].some(value =>
+    value.includes('provider_billing') && value.includes(ABOUT)), 'discovery text is not successful original-read provenance');
+  assert.equal(f.store.research.receipts(child.id).length, 0);
+  assert.equal(f.store.research.budget(child.id).estimatedUsd, 0);
+  assert.deepEqual(f.store.research.receipts(f.run.id), parentReceipts, 'parent receipts/cost provenance is unchanged');
 });
