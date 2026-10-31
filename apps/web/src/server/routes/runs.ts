@@ -38,6 +38,24 @@ export interface RunRouteDeps {
 
 type IdempotencyLookup = { run: RunRecord } | { conflict: true } | null;
 
+type EvidenceMode = 'existing_evidence';
+
+function readEvidenceMode(body: Record<string, unknown>): EvidenceMode | undefined {
+  if (!Object.prototype.hasOwnProperty.call(body, 'evidenceMode')) return undefined;
+  if (body.evidenceMode !== 'existing_evidence') {
+    throw new HttpError(400, 'invalid_evidence_mode', 'evidenceMode 仅支持 existing_evidence。');
+  }
+  return body.evidenceMode;
+}
+
+function assertExistingEvidenceParent(deps: RunRouteDeps, parent: RunRecord): void {
+  const firstStep = deps.firstStep;
+  if (parent.provider !== 'research' || !firstStep || !firstStep.link(parent.id)
+    || !firstStep.selectionBinding(parent.id) || deps.store.research.checkpoint(parent.id)?.xAccountResearch) {
+    throw new HttpError(409, 'followup_unsupported', '现有材料追问只支持已冻结范围的第一步研究；专用账号深读材料不转换为人物结论。');
+  }
+}
+
 /**
  * Only the SAME idempotency key with the SAME normalized request returns an
  * existing run. A missing key always creates a new run, and a reused key with a
@@ -63,6 +81,7 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
   router.post('/runs', (req: Request, res: Response) => {
     const user = requireUser(res);
     const body = readBody(req);
+    const evidenceMode = readEvidenceMode(body);
     const question = normalizeQuestion(body.input ?? body.question);
     const questionCheck = validateQuestion(question);
     if (!questionCheck.ok) {
@@ -115,11 +134,18 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     if (parentRunId && followup && deps.firstStep?.link(parentRunId) && !deps.firstStep?.selectionBinding(parentRunId)) {
       throw new HttpError(409, 'parent_scope_not_frozen', '父研究尚未确认研究范围，无法追问。');
     }
+    if (evidenceMode) {
+      if (!followup || !parentRunId || retryOf) {
+        throw new HttpError(400, 'invalid_evidence_mode', '现有材料模式只适用于追问。');
+      }
+      assertExistingEvidenceParent(deps, store.getRunForOwner(parentRunId, user.id)!);
+    }
     if (retryOf && !store.getRunForOwner(retryOf, user.id)) {
       throw new HttpError(404, 'retry_source_not_found', '未找到要重试的研究。');
     }
 
-    const fingerprint = fingerprintInput({ question, seedUrl, provider, parentRunId, retryOf, followup });
+    const fingerprint = fingerprintInput({ question, seedUrl, provider, parentRunId, retryOf, followup,
+      ...(evidenceMode ? { evidenceMode } : {}) });
     const idempotencyKey = readIdempotencyKey(req);
     const idempotent = lookupIdempotent(store, user.id, idempotencyKey, fingerprint);
     if (idempotent && 'conflict' in idempotent) {
@@ -135,28 +161,33 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
       throw new HttpError(429, gate.code ?? 'rate_limited', gate.message ?? '请求过于频繁。');
     }
 
-    const run = store.insertRun({
-      ownerId: user.id,
-      question,
-      seedUrl,
-      provider,
-      parentRunId,
-      retryOf,
-      followup,
-      idempotencyKey,
-      bodyFingerprint: fingerprint
-    });
-    // Fresh production research runs default to the new first-step flow. A
-    // follow-up of a first-step parent INHERITS its frozen scope (no repeat
-    // confirmation, no widening); a legacy parent keeps the frozen controller
-    // semantics, and historical runs simply have no link.
-    if (provider === 'research' && deps.firstStep) {
-      if (followup && parentRunId && deps.firstStep.link(parentRunId)) {
-        deps.firstStep.inheritFirstStepScope(user.id, run, parentRunId);
-      } else if (!followup) {
-        deps.firstStep.attachRun({ id: run.id, ownerId: user.id, question }, question);
+    const createChild = () => {
+      const run = store.insertRun({
+        ownerId: user.id,
+        question,
+        seedUrl,
+        provider,
+        parentRunId,
+        retryOf,
+        followup,
+        idempotencyKey,
+        bodyFingerprint: fingerprint
+      });
+      // Fresh production research runs default to the new first-step flow. A
+      // follow-up of a first-step parent INHERITS its frozen scope (no repeat
+      // confirmation, no widening); a legacy parent keeps the frozen controller
+      // semantics, and historical runs simply have no link.
+      if (provider === 'research' && deps.firstStep) {
+        if (followup && parentRunId && deps.firstStep.link(parentRunId)) {
+          if (evidenceMode) deps.firstStep.inheritFirstStepScope(user.id, run, parentRunId, { evidenceMode });
+          else deps.firstStep.inheritFirstStepScope(user.id, run, parentRunId);
+        } else if (!followup) {
+          deps.firstStep.attachRun({ id: run.id, ownerId: user.id, question }, question);
+        }
       }
-    }
+      return run;
+    };
+    const run = evidenceMode ? store.inTransaction(createChild) : createChild();
     if (idempotencyKey) store.recordIdempotencyKey(user.id, idempotencyKey, fingerprint, run.id);
     store.addEvent(run.id, 'state', { state: 'queued' });
     runner.recordStart(user.id);
@@ -397,6 +428,7 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
       throw new HttpError(409, 'provider_unavailable', '研究服务未配置，无法发起追问。');
     }
     const body = readBody(req);
+    const evidenceMode = readEvidenceMode(body);
     const question = normalizeQuestion(body.question);
     const questionCheck = validateQuestion(question);
     if (!questionCheck.ok) {
@@ -408,6 +440,7 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     if (parentFirstStep && !deps.firstStep?.selectionBinding(parent.id)) {
       throw new HttpError(409, 'parent_scope_not_frozen', '父研究尚未确认研究范围，无法追问。');
     }
+    if (evidenceMode) assertExistingEvidenceParent(deps, parent);
     const screen = screenQuestion(question);
     if (screen.disallowed) {
       throw new HttpError(422, 'scope_disallowed', screen.reason ?? '该请求不在可处理范围内。');
@@ -418,7 +451,8 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
       provider: parent.provider,
       parentRunId: parent.id,
       retryOf: null,
-      followup: true
+      followup: true,
+      ...(evidenceMode ? { evidenceMode } : {})
     });
     const idempotencyKey = readIdempotencyKey(req);
     const idempotent = lookupIdempotent(store, user.id, idempotencyKey, fingerprint);
@@ -431,20 +465,25 @@ export function registerRunRoutes(router: Router, deps: RunRouteDeps): void {
     }
     const gate = runner.checkStartAllowed(user.id);
     if (!gate.allowed) throw new HttpError(429, gate.code ?? 'rate_limited', gate.message ?? '请求过于频繁。');
-    const run = store.insertRun({
-      ownerId: user.id,
-      question,
-      seedUrl: parent.seedUrl,
-      provider: parent.provider,
-      parentRunId: parent.id,
-      retryOf: null,
-      followup: true,
-      idempotencyKey,
-      bodyFingerprint: fingerprint
-    });
-    if (parent.provider === 'research' && deps.firstStep && parentFirstStep) {
-      deps.firstStep.inheritFirstStepScope(user.id, run, parent.id);
-    }
+    const createChild = () => {
+      const run = store.insertRun({
+        ownerId: user.id,
+        question,
+        seedUrl: parent.seedUrl,
+        provider: parent.provider,
+        parentRunId: parent.id,
+        retryOf: null,
+        followup: true,
+        idempotencyKey,
+        bodyFingerprint: fingerprint
+      });
+      if (parent.provider === 'research' && deps.firstStep && parentFirstStep) {
+        if (evidenceMode) deps.firstStep.inheritFirstStepScope(user.id, run, parent.id, { evidenceMode });
+        else deps.firstStep.inheritFirstStepScope(user.id, run, parent.id);
+      }
+      return run;
+    };
+    const run = evidenceMode ? store.inTransaction(createChild) : createChild();
     if (idempotencyKey) store.recordIdempotencyKey(user.id, idempotencyKey, fingerprint, run.id);
     store.addEvent(run.id, 'state', { state: 'queued', parentRunId: parent.id });
     runner.recordStart(user.id);

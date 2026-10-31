@@ -8,6 +8,7 @@ export interface FingerprintInput {
   parentRunId: string | null;
   retryOf: string | null;
   followup: boolean;
+  evidenceMode?: 'existing_evidence';
 }
 
 export function canonicalFingerprintSource(input: FingerprintInput): string {
@@ -17,7 +18,8 @@ export function canonicalFingerprintSource(input: FingerprintInput): string {
     provider: input.provider,
     parentRunId: input.parentRunId,
     retryOf: input.retryOf,
-    followup: input.followup
+    followup: input.followup,
+    ...(input.evidenceMode === undefined ? {} : { evidenceMode: input.evidenceMode })
   });
 }
 

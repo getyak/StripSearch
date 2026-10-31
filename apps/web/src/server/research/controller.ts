@@ -7,7 +7,7 @@ import { extractGitHubHandle, normalizeResearchUrl, sanitizeText } from '../../s
 import { ProviderError, type HttpTransport } from '../adapters/types.js';
 import type { Store, RunRecord } from '../store.js';
 import { type ResearchPlanner, invokeDeepSeek, parseMessagesUsage, estimateModelUsd } from './planner.js';
-import { RESEARCH_LIMITS, ResearchStop, remainingOf, type ActionUsage, type ResearchCheckpoint, type StoredPage, type ResearchClaim } from './research-store.js';
+import { RESEARCH_LIMITS, ResearchStop, remainingOf, EXISTING_EVIDENCE_FOLLOWUP_NAME, type ActionUsage, type ResearchCheckpoint, type StoredPage, type ResearchClaim } from './research-store.js';
 import { genreReviewIssue, bindGenreReview, parseGenreDecisions } from './quote-genre.js';
 import { meteredInvoke } from './metered.js';
 import { FirstStepSelectionError } from './first-step-store.js';
@@ -182,6 +182,10 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
  };
  const perform=async(action:ResearchToolAction):Promise<ResearchToolResult>=>{
   active();
+  // An existing-material follow-up refuses EVERY external action BEFORE any
+  // metered reservation or paid dispatch; local inspect/catalog and finish
+  // never reach this surface. Model reasoning stays metered and allowed.
+  if(checkpoint.inheritedFollowup?.readMode==='existing_evidence')throw new ResearchStop('existing_evidence_only');
   if(action.type!=='search'){
    const url=researchUrl(action.url);
    if(!url||!allowedUrls().has(url))throw new ResearchStop('url_not_discovered');
@@ -452,6 +456,9 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
      continue;
     }
     if(step.kind!=='tool')continue;
+    // Existing-material follow-up: refuse the whole external batch before any
+    // request, receipt or cost; corrective planning stays a bounded model call.
+    if(checkpoint.inheritedFollowup?.readMode==='existing_evidence')throw new ResearchStop('existing_evidence_only');
     const action=step.action;
     if(action.type==='search'){if(!action.query.trim()||action.query.length>600)throw new ResearchStop('invalid_decision');}
     else {const url=researchUrl(action.url);if(!url||(!options.firstStepScope&&!allowedUrls().has(url)))throw new ResearchStop('url_not_discovered');}
@@ -523,10 +530,12 @@ export async function runResearch(options:ResearchOptions):Promise<ProviderResul
    checkpoint.steps++;save();
    if(!madeProgress&&(options.firstStepScope?checkpoint.noProgressBatches>=2:limits.modelCalls===0))return finish(limits.toolCalls>0&&store.research.budget(run.id,limits).toolCalls>=limits.toolCalls?'budget_exhausted':'no_new_evidence','partial');
    } catch(error) {
-    if(!options.firstStepScope||!(error instanceof ResearchStop)||!['invalid_decision','invalid_evidence','url_not_discovered'].includes(error.code))throw error;
+    if(!options.firstStepScope||!(error instanceof ResearchStop)||!['invalid_decision','invalid_evidence','url_not_discovered','existing_evidence_only'].includes(error.code))throw error;
     // Validate the whole proposal before dispatch. Corrective planning is a
     // new, metered model call under the original cap, never a hidden retry.
-    checkpoint.planFeedback=`上个方案未被接受（${error.code}）。只允许一个平铺的 batch，actions 为 1–4 个 read/search/social/social_posts/firecrawl/inspect/catalog，禁止嵌套 batch；inspect 仅使用已存 sourceKey 与非负整数 offset。finish 的 quote 必须是已读 sourceKey 原文中精确、连续的 3–600 字符片段，不能把 HTML 改写后的展示文本当原文。请改正方案；仅使用所选范围，不猜测地址。`;
+    checkpoint.planFeedback=checkpoint.inheritedFollowup?.readMode==='existing_evidence'
+     ?`上个方案未被接受（${error.code}）。本次为${EXISTING_EVIDENCE_FOLLOWUP_NAME}：只使用已继承的现有材料；可用动作只有 inspect、catalog 与 finish，read/search/social/social_posts/firecrawl 等外部读取会被拒绝，不派发也不计费。父研究未取得的材料（含计费失败）保持缺口、不重试。finish 的 quote 必须是已存已读 sourceKey 原文中精确片段；证据不足请写入 unknowns。`
+     :`上个方案未被接受（${error.code}）。只允许一个平铺的 batch，actions 为 1–4 个 read/search/social/social_posts/firecrawl/inspect/catalog，禁止嵌套 batch；inspect 仅使用已存 sourceKey 与非负整数 offset。finish 的 quote 必须是已读 sourceKey 原文中精确、连续的 3–600 字符片段，不能把 HTML 改写后的展示文本当原文。请改正方案；仅使用所选范围，不猜测地址。`;
     checkpoint.unknowns.push(`模型方案未通过校验（${error.code}）；该方案未成为结论，保留缺口并在原预算内重新规划。`);
     checkpoint.steps++;checkpoint.planValidationFailures=(checkpoint.planValidationFailures??0)+1;save();
     if(checkpoint.planValidationFailures>=3)return finish('invalid_decision','partial');
