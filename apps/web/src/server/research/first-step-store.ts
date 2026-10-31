@@ -49,7 +49,16 @@ import {
   type FirstStepSelectionStateView
 } from '../../shared/first-step-discovery.js';
 import type { IdentityCandidate } from '../../shared/types.js';
-import type { FirstStepBinding, ResearchCheckpoint } from './research-store.js';
+import { sanitizeText } from '../../shared/validation.js';
+import type { IndependentAccountMaterial } from '../../shared/types.js';
+import {
+  EXISTING_EVIDENCE_FOLLOWUP_NAME,
+  existingEvidenceFollowupNote,
+  type InheritedFollowup,
+  type FirstStepBinding,
+  type ResearchCheckpoint,
+  type StoredPage
+} from './research-store.js';
 import type { Store } from '../store.js';
 import { activePersonConfirmation, revokePersonConfirmations } from './person-confirmation.js';
 import {namedOwnerQuote,normalizedPersonName} from './named-owner.js';
@@ -71,7 +80,8 @@ export type FirstStepErrorCode =
   | 'invalid_decision'
   | 'idempotency_conflict'
   | 'scope_changed'
-  | 'out_of_scope';
+  | 'out_of_scope'
+  | 'followup_unsupported';
 
 export class FirstStepSelectionError extends Error {
   constructor(readonly code: FirstStepErrorCode, readonly detail: string) {
@@ -971,15 +981,22 @@ export class FirstStepStore {
   }
 
   /**
-   * Inherit a parent's FROZEN scope into a follow-up child run, atomically:
+   * Inherit a parent's FROZEN scope into a child run, atomically:
    * the child repeats no confirmation and can never read accounts outside the
    * inherited binding. A first-step parent without a frozen selection cannot
    * be followed up at all.
+   *
+   * With `options.evidenceMode` (the two follow-up route entries
+   * ONLY; retry never passes it) the same transaction also inherits the
+   * parent's CURRENT active evidence and gaps into a fresh child corpus and
+   * persists the versioned `inheritedFollowup` marker. Idempotent: a child
+   * that already inherited from this parent is never re-initialized.
    */
   inheritFirstStepScope(
     ownerId: string,
     childRun: { id: string; ownerId: string; question: string },
-    parentRunId: string
+    parentRunId: string,
+    options?: { evidenceMode?: 'existing_evidence' }
   ): FirstStepLinkRecord {
     return this.db.transaction(() => {
       const parentLink = this.link(parentRunId);
@@ -990,6 +1007,26 @@ export class FirstStepStore {
       const parent = this.store.getRunForOwner(parentRunId, ownerId);
       if (!parent) throw new FirstStepSelectionError('run_not_found', '未找到父研究。');
       if (childRun.ownerId !== ownerId) throw new FirstStepSelectionError('run_not_found', '未找到子研究。');
+      const followup = options?.evidenceMode === 'existing_evidence';
+      // Idempotent restart: an already-inherited follow-up child keeps its
+      // evidence verbatim; nothing is duplicated or re-initialized.
+      if (followup) {
+        const child = this.store.getRunForOwner(childRun.id, ownerId);
+        if (!child || child.provider !== 'research' || !child.followup || child.retryOf || child.parentRunId !== parentRunId) {
+          throw new FirstStepSelectionError('followup_unsupported', '现有材料模式只适用于同一用户的第一步研究追问。');
+        }
+      }
+      const prior = this.store.research.checkpoint(childRun.id);
+      if (followup && prior?.inheritedFollowup?.parentRunId === parentRunId) return this.link(childRun.id)!;
+      // A dedicated single-account X deep-research parent stays account-scoped
+      // material. Inheriting it into a person follow-up would broaden identity,
+      // so this batch fails closed with an explicit limitation instead.
+      if (followup && this.store.research.checkpoint(parentRunId)?.xAccountResearch) {
+        throw new FirstStepSelectionError(
+          'followup_unsupported',
+          `专用账号深读研究暂不支持${EXISTING_EVIDENCE_FOLLOWUP_NAME}：该材料属于该账号自身记录，不能转为人物结论。请使用现有独立流程新建该账号研究。`
+        );
+      }
       const timestamp = nowIso();
       // The follow-up shares the existing case and its live facets. Creating
       // a second empty case would disagree with the inherited scope binding.
@@ -1026,6 +1063,89 @@ export class FirstStepStore {
           )
           .run(binding.scopeVersion, binding.discoveryRevision, JSON.stringify(binding.selectedAccountIds), timestamp, timestamp, childRun.id);
       }
+      // --- Existing-material follow-up inheritance (follow-ups only) --------
+      // Read the same-owner parent's CURRENT canonical view and checkpoint in
+      // this transaction; copy only active, non-excluded, current-scope-allowed
+      // evidence. Keys are remapped deterministically (parent key ordinal),
+      // `inheritedFrom` points DIRECTLY at the parent original key (so later
+      // parent revocations keep child evidence inactive through the existing
+      // lineage checks) and `discoveredFrom` is remapped inside the copied set.
+      // Claims, pending claims, planner state, receipts and costs are never
+      // copied; parent unresolved/coverage gaps (including billing refusals)
+      // stay visible.
+      let inheritedPages: StoredPage[] = [];
+      let inheritedUnknowns: string[] = [];
+      let inheritedCoverageGaps: string[] = [];
+      let inheritedMaterials: IndependentAccountMaterial[] = [];
+      if (followup) {
+        const parentCheckpoint = this.store.research.checkpoint(parentRunId);
+        const parentView = this.store.buildCanonicalView(parent);
+        if (parentCheckpoint) {
+          const activeKeys = new Set(parentView.sources.filter(source => !source.excluded).map(source => source.sourceKey));
+          const parentGuard = this.scopeGuard(ownerId, parentRunId);
+          const inFrozenScope = (url: string): boolean => {
+            try {
+              parentGuard.resolveUrl(url);
+              return true;
+            } catch (error) {
+              if (error instanceof FirstStepSelectionError && error.code === 'out_of_scope') return false;
+              // Live scope/identity withdrawal or unexpected failures abort the
+              // outer opt-in transaction; they never create a fallback read job.
+              throw error;
+            }
+          };
+          const ordinalOf = (key: string): number => {
+            const match = /^S([0-9]+)$/.exec(key);
+            return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+          };
+          const originals = parentCheckpoint.pages
+            .filter(page => activeKeys.has(page.sourceKey) && inFrozenScope(page.url))
+            .sort((a, b) => ordinalOf(a.sourceKey) - ordinalOf(b.sourceKey) || a.sourceKey.localeCompare(b.sourceKey));
+          const remap = new Map(originals.map((page, index) => [page.sourceKey, `S${index + 1}`]));
+          inheritedPages = originals.map(page => ({
+            ...page,
+            sourceKey: remap.get(page.sourceKey)!,
+            // Dependencies outside the copied set stay in the parent record the
+            // inheritedFrom lineage already references; never point at a missing key.
+            discoveredFrom: page.discoveredFrom?.map(key => remap.get(key)).filter((key): key is string => !!key),
+            inheritedFrom: { runId: parentRunId, sourceKey: page.sourceKey }
+          }));
+          const unique = (values: readonly string[]): string[] => [...new Set(values)];
+          inheritedUnknowns = unique(parentCheckpoint.unknowns);
+          // Use the current controller's completed-tool/original provenance
+          // criteria. A search snippet at the same URL is not a successful read.
+          const completed = this.store.research.receipts(parentRunId)
+            .filter(receipt => receipt.kind === 'tool' && receipt.state === 'completed');
+          const object = (value: unknown): value is Record<string, unknown> =>
+            !!value && typeof value === 'object' && !Array.isArray(value);
+          const satisfied = (failure: NonNullable<ResearchCheckpoint['actionFailures']>[number]): boolean => {
+            const action = failure.action;
+            if (action.type === 'search') return false;
+            return completed.some(receipt => {
+              if (!object(receipt.request) || !object(receipt.result) || !Array.isArray(receipt.result.pages)) return false;
+              const native = action.type === 'social_posts' || action.type === 'social_profile' || action.type === 'github_profile';
+              if (native && (receipt.request.type !== action.type || receipt.request.url !== action.url)) return false;
+              if (!native && !['read', 'firecrawl', 'social_posts'].includes(String(receipt.request.type))) return false;
+              return receipt.result.pages.some((page: unknown) => object(page) && typeof page.text === 'string' &&
+                page.text.trim().length > 0 && (action.type === 'social_posts' ? page.kind === 'work' : page.url === action.url) &&
+                inheritedPages.some(active => active.url === page.url && active.kind === page.kind &&
+                  active.text === sanitizeText(page.text, Number.MAX_SAFE_INTEGER) &&
+                  (action.type === 'social_posts' || active.retrieval === 'read' || native)));
+            });
+          };
+          inheritedCoverageGaps = unique([
+            ...(parentCheckpoint.coverageGaps ?? []),
+            ...(parentCheckpoint.actionFailures ?? []).filter(failure => !satisfied(failure)).map(failure =>
+              `父研究未取得的原文（${failure.code}）：${failure.action.type === 'search' ? '检索' : failure.action.url}（${failure.action.type}）；尝试与费用保留在父研究实际回执，不代表资料不存在，${EXISTING_EVIDENCE_FOLLOWUP_NAME}不重试。`)
+          ]);
+          inheritedMaterials = (parentCheckpoint.independentMaterials ?? [])
+            .filter(material => remap.has(material.sourceKey))
+            .map(material => ({ ...material, sourceKey: remap.get(material.sourceKey)! }));
+        }
+      }
+      const inheritedFollowup: InheritedFollowup | undefined = followup
+        ? { version: 'v1', parentRunId, readMode: 'existing_evidence' }
+        : undefined;
       const checkpoint: ResearchCheckpoint = {
         phase: 'fetching',
         steps: 0,
@@ -1037,16 +1157,56 @@ export class FirstStepStore {
           handle: null,
           profileUrl: binding.anchorUrl,
           status: 'resolved',
-          note: '追问继承父研究已冻结的研究范围；不重新确认、不扩大范围。',
+          note: followup
+            ? `${EXISTING_EVIDENCE_FOLLOWUP_NAME}：沿用父研究已冻结的研究范围与现有材料；不重新确认、不扩大范围，也不新增身份证明。`
+            : '追问继承父研究已冻结的研究范围；不重新确认、不扩大范围。',
           candidates: []
         },
-        pages: [],
+        pages: inheritedPages,
         claims: [],
         candidates: [],
-        unknowns: [],
+        unknowns: inheritedUnknowns,
         stopReason: null,
-        firstStep: binding
+        firstStep: binding,
+        ...(followup
+          ? {
+              coverageGaps: inheritedCoverageGaps,
+              ...(inheritedMaterials.length ? { independentMaterials: inheritedMaterials } : {}),
+              ...(inheritedFollowup ? { inheritedFollowup } : {}),
+              notes: [existingEvidenceFollowupNote(parentRunId)]
+            }
+          : {})
       };
+      if (followup) {
+        const independentKeys = new Set(
+          Object.entries(binding.accountKeys)
+            .filter(([, accountId]) => binding.independentAccountIds.includes(accountId))
+            .map(([accountKey]) => accountKey)
+        );
+        inheritedPages.forEach((page, index) => {
+          const classified = classifyFirstStepUrl(page.url);
+          const accountKey = classified.ok ? classified.ref.accountKey : null;
+          const independent = !!accountKey && independentKeys.has(accountKey);
+          this.store.addSource(childRun.id, {
+            key: page.sourceKey,
+            url: page.url,
+            title: page.title || page.url,
+            kind: page.kind,
+            publishedAt: page.publishedAt ?? null,
+            excerpt: page.text,
+            excerptLocator: page.retrieval === 'search' ? '搜索发现材料，尚未回读原文' : '公开页面文本',
+            // Scope authorization is never identity proof: identityConfirmed stays false.
+            identityLabel: independent
+              ? '独立账号范围：尚未证明与其他账号同人'
+              : page.url === binding.anchorUrl
+                ? '所选公开主页；归属依据见第一步'
+                : '已选人物账号范围；归属依据见第一步',
+            identityConfirmed: false,
+            fetchStatus: page.text ? 'ok' : 'inaccessible',
+            limits: page.limitations
+          }, index);
+        });
+      }
       this.db
         .prepare(
           `INSERT INTO research_checkpoints (run_id, data_json, updated_at) VALUES (?, ?, ?)
@@ -1056,7 +1216,8 @@ export class FirstStepStore {
       this.store.addEvent(childRun.id, 'first_step_selection', {
         inheritedFrom: parentRunId,
         scopeVersion: binding.scopeVersion,
-        selectedAccountIds: binding.selectedAccountIds
+        selectedAccountIds: binding.selectedAccountIds,
+        ...(followup ? { readMode: 'existing_evidence' as const } : {})
       });
       return this.link(childRun.id)!;
     })();

@@ -41,6 +41,18 @@ export interface FirstStepBinding {
  accounts: Array<{ accountId: string; accountKey: string; profileUrl: string; allowedScope: 'profile_only' | 'public_history'; independent: boolean; accessCoverage: string }>;
 }
 export interface StoredPage extends ResearchPage { sourceKey: string; discoveredFrom?: string[]; inheritedFrom?: {runId: string; sourceKey: string} }
+/**
+ * Persisted ONLY on explicit existing-evidence children of a first-step parent. The follow-up
+ * reuses the parent's current active evidence and nothing else: no new external
+ * read/search/social dispatch (model reasoning stays metered and allowed).
+ * Retry children never carry this marker and keep their original behavior.
+ */
+export interface InheritedFollowup { version: 'v1'; parentRunId: string; readMode: 'existing_evidence' }
+/** User-facing name of the follow-up mode; visible in report identity/limitations. */
+export const EXISTING_EVIDENCE_FOLLOWUP_NAME = '现有材料追问';
+export function existingEvidenceFollowupNote(parentRunId: string): string {
+ return `${EXISTING_EVIDENCE_FOLLOWUP_NAME}（existing-material follow-up）：只使用父研究 ${parentRunId} 留下的现有材料作答，不发起新的外部读取或检索；模型推理仍计量。`;
+}
 export interface ClaimGenreReview {
  policy:'genre_context/v1';decision:'literal_relevant';sourceUrl:string;sourceContentHash:string;
  quoteOffset:number;contextOffset:number;contextLength:number;
@@ -88,6 +100,8 @@ export interface ResearchCheckpoint {
  independentMaterials?: IndependentAccountMaterial[];
  /** Model-authored historical questions, never authoritative current read status. */
  modelGapHistory?: Array<{step:number;text:string}>;
+ /** Follow-up children only; see InheritedFollowup. */
+ inheritedFollowup?: InheritedFollowup;
  coverageGaps?:string[];
  pages: StoredPage[]; claims: ResearchClaim[]; pendingClaims?: ResearchClaim[]; unknowns: string[]; stopReason: string | null;
 }

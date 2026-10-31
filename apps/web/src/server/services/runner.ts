@@ -9,7 +9,7 @@ import { LIMITS } from '../../shared/limits.js';
 import { isTerminalState, NeedsInputError } from '../../shared/types.js';
 import type { ProviderName, RunState, ProviderResult } from '../../shared/types.js';
 import { ProviderError } from '../adapters/types.js';
-import { ResearchStop, RESEARCH_LIMITS } from '../research/research-store.js';
+import { ResearchStop, RESEARCH_LIMITS, EXISTING_EVIDENCE_FOLLOWUP_NAME } from '../research/research-store.js';
 import type { HttpTransport, ProviderFactory, ProviderReporter, ResearchProvider } from '../adapters/types.js';
 import type { AppConfig } from '../config.js';
 import { RunTerminalError, Store, nowIso } from '../store.js';
@@ -426,8 +426,9 @@ export class Runner {
     // Scope-limited fetch: every dispatch AND ingestion re-checks the live
     // scope; excluded/unselected/later-discovered accounts are refused.
     const guard = firstStep.scopeGuard(initial.ownerId, runId);
+    const inheritedFollowup = this.deps.store.research.checkpoint(runId)?.inheritedFollowup?.readMode === 'existing_evidence';
     const single=binding.accounts.length===1?classifyFirstStepUrl(binding.accounts[0]!.profileUrl):null;
-    if(this.deps.xAccountProvider&&single?.ok&&single.ref.platform==='x'&&binding.accounts[0]!.allowedScope==='public_history'){
+    if(!inheritedFollowup&&this.deps.xAccountProvider&&single?.ok&&single.ref.platform==='x'&&binding.accounts[0]!.allowedScope==='public_history'){
       const result=await runXAccountResearch({store:this.deps.store,run:initial,binding,provider:this.deps.xAccountProvider,signal:controller.signal,limits:this.deps.config.researchLimits,assertScope:()=>guard.assertCurrent(),model:this.deps.xAccountModel,transport:this.deps.transport,apiKey:this.deps.config.deepseekApiKey,modelName:this.deps.config.deepseekModel});
       this.finishWithResult(runId,initial,result,startedAt);return;
     }
@@ -500,7 +501,9 @@ export class Runner {
         handle: null,
         profileUrl: binding.anchorUrl,
         status: 'resolved',
-        note: '已按用户确认的人物范围绑定；跨平台身份仍按证据逐条判断。',
+        note: inheritedFollowup
+          ? `${EXISTING_EVIDENCE_FOLLOWUP_NAME}：沿用父研究已冻结的范围与现有材料，不新增读取或身份证明。`
+          : '已按用户确认的人物范围绑定；跨平台身份仍按证据逐条判断。',
         candidates: []
       };
       this.deps.store.research.save(runId, checkpoint);
@@ -511,6 +514,8 @@ export class Runner {
       // total budget: a same-attempt completed receipt replays its exact saved
       // output without re-executing, unknown inflight is never replayed, and a
       // failed read stays an honest gap instead of a silent retry.
+      // Explicit existing-evidence children never schedule selected-account reads.
+      if (!inheritedFollowup) {
       const fetchLimits = checkpoint.limits ?? this.deps.config.researchLimits;
       const seedAttempt = `seed-${String(binding.discoveryRevision)}-${String(binding.scopeVersion)}`;
       for (const account of binding.accounts) {
@@ -638,6 +643,7 @@ export class Runner {
             );
             this.deps.store.addEvent(runId, 'source', this.deps.store.getSource(runId, sourceKey));
           }
+      }
       }
       this.deps.store.research.save(runId, checkpoint);
     }
